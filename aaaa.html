@@ -474,7 +474,7 @@
       color: var(--muted);
     }
 
-    /* [신규] 상하좌우 D-Pad 컨트롤러 스타일 */
+    /* 상하좌우 D-Pad 컨트롤러 */
     .dpad-container {
       padding: 10px;
       display: flex;
@@ -579,21 +579,21 @@
         <button class="btn">📁 새 이미지 파일</button>
         <input type="file" id="imageInput" accept="image/*">
       </div>
-      <button class="btn primary" id="copyJsonBtn">현재 뷰 좌표 복사 (JSON)</button>
+      <button class="btn primary" id="copyJsonBtn">현재 뷰(켜진 레이어) 좌표 복사 (JSON)</button>
     </div>
   </header>
 
   <div class="layout">
-    <!-- 1. 좌측 좌표 트리 패널 (독립 스크롤) -->
+    <!-- 1. 좌측 켜져 있는 레이어 실시간 합성 좌표 패널 -->
     <div class="panel">
       <div class="panel-header">
-        <span>선택 레이어 좌표 (<span id="pixelCount">0</span>개)</span>
+        <span>현재 켜진 레이어 합성 좌표 (<span id="pixelCount">0</span>개)</span>
         <span style="font-size:10px;color:var(--muted)">[X, Y, PaletteIndex]</span>
       </div>
       <div class="tree-scroll" id="jsonTree">
         <div class="empty-placeholder">
-          등록된 픽셀 좌표가 없습니다.<br>
-          <b>Ctrl+V</b>로 이미지를 붙여넣거나 파일을 불러오세요.
+          켜져 있는 레이어의 픽셀이 없습니다.<br>
+          <b>Ctrl+V</b>로 이미지를 붙여넣거나 에셋을 켜세요.
         </div>
       </div>
     </div>
@@ -661,10 +661,10 @@
           </div>
         </div>
 
-        <!-- [신규] 활성 에셋/레이어 상하좌우 위치 이동 (D-Pad 컨트롤) -->
+        <!-- [위치 이동 D-Pad] -->
         <div class="section-card">
           <div class="section-head">
-            <span>🎮 에셋 위치 이동 (오프셋)</span>
+            <span>🎮 선택 레이어 위치 이동 (오프셋)</span>
             <span id="offsetBadge" style="font-size:10px;color:var(--accent);font-family:monospace;">X: 0, Y: 0</span>
           </div>
           <div class="dpad-container">
@@ -700,10 +700,10 @@
   </div>
 
   <script>
-    // 최초 시작 상태: 모든 데이터가 비어 있는 상태로 초기화
+    // 초기 상태: 빈 상태로 시작
     let assetLibrary = [];  // 에셋 라이브러리 목록 []
-    let layers = [];        // 활성 레이어 스택 []
-    let palette = [];       // 팔레트 목록 []
+    let layers = [];        // 레이어 스택 []
+    let palette = [];       // 전체 추출 팔레트 []
     let activeLayerId = null;
 
     let activeDirection = 'left';
@@ -741,7 +741,7 @@
       return pixelArray.map(([x, y, c]) => [maxX + minX - x, y, c]);
     }
 
-    // 레이어 오프셋(offsetX, offsetY)이 반영된 최종 픽셀 배열 반환
+    // 단일 레이어의 오프셋 반영 좌표
     function getLayerFinalPixels(layer) {
       if (!layer || !layer.pixels) return [];
       const transformed = getTransformedPixels(layer.pixels);
@@ -750,13 +750,33 @@
       return transformed.map(([x, y, c]) => [x + ox, y + oy, c]);
     }
 
-    // 캔버스 렌더링 (아래 레이어부터 순서대로 중첩 렌더링)
+    // [핵심] 켜져 있는(visible) 모든 레이어의 합성된 최종 유효 픽셀 목록 반환
+    // 상위 레이어가 하위 레이어의 동일한 (x, y) 픽셀을 자연스럽게 오버라이트합니다.
+    function getCompositeVisiblePixels() {
+      const pixelMap = new Map();
+      const visibleLayers = layers.filter(l => l.visible && l.pixels && l.pixels.length > 0);
+
+      visibleLayers.forEach(layer => {
+        const renderPx = getLayerFinalPixels(layer);
+        renderPx.forEach(([x, y, c]) => {
+          // 상위 레이어 순서대로 덮어씌움
+          pixelMap.set(`${x},${y}`, [x, y, c]);
+        });
+      });
+
+      // Y축 기준 오름차순, X축 기준 오름차순 정렬 (스프라이트 데이터 표준 포맷)
+      return Array.from(pixelMap.values()).sort((a, b) => {
+        return a[1] !== b[1] ? a[1] - b[1] : a[0] - b[0];
+      });
+    }
+
+    // 캔버스 렌더링
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const yOffset = (isMotion && motionFrame === 1) ? 1 : 0;
 
-      const visibleLayers = layers.filter(l => l.visible && l.pixels.length > 0);
-      if (visibleLayers.length === 0) {
+      const compositePixels = getCompositeVisiblePixels();
+      if (compositePixels.length === 0) {
         ctx.fillStyle = '#334458';
         ctx.font = '12px sans-serif';
         ctx.textAlign = 'center';
@@ -764,26 +784,20 @@
         return;
       }
 
-      // 레이어 스택 순서대로 합성 (index 0이 최하단)
-      layers.forEach(layer => {
-        if (!layer.visible || layer.pixels.length === 0) return;
+      for (let i = 0; i < compositePixels.length; i++) {
+        const [x, y, c] = compositePixels[i];
+        const drawY = (y >= 36) ? y : (y + yOffset);
+        ctx.fillStyle = palette[c] || '#ff00ff';
+        ctx.fillRect(x * scale, drawY * scale, scale, scale);
 
-        const renderPx = getLayerFinalPixels(layer);
-        for (let i = 0; i < renderPx.length; i++) {
-          const [x, y, c] = renderPx[i];
-          const drawY = (y >= 36) ? y : (y + yOffset);
-          ctx.fillStyle = palette[c] || '#ff00ff';
-          ctx.fillRect(x * scale, drawY * scale, scale, scale);
-
-          if (selectedPixel && selectedPixel.x === x && selectedPixel.y === y && activeLayerId === layer.id) {
-            ctx.strokeStyle = '#38bdf8';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(x * scale, drawY * scale, scale, scale);
-          }
+        if (selectedPixel && selectedPixel.x === x && selectedPixel.y === y) {
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x * scale, drawY * scale, scale, scale);
         }
-      });
+      }
 
-      // 격자선 오버레이
+      // 격자 오버레이
       if (showGrid && scale >= 4) {
         ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
         ctx.lineWidth = 0.5;
@@ -797,13 +811,11 @@
     }
 
     function resizeCanvas() {
+      const compositePixels = getCompositeVisiblePixels();
       let maxX = 0, maxY = 0;
-      layers.forEach(layer => {
-        const pxs = getLayerFinalPixels(layer);
-        pxs.forEach(([x, y]) => {
-          if (x > maxX) maxX = x;
-          if (y > maxY) maxY = y;
-        });
+      compositePixels.forEach(([x, y]) => {
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
       });
       const w = Math.max(maxX + 4, 44);
       const h = Math.max(maxY + 4, 68);
@@ -812,7 +824,40 @@
       render();
     }
 
-    // 에셋 위치 이동 처리 함수 (상, 하, 좌, 우)
+    // [핵심] 좌측 코드 창: 켜져 있는 레이어들의 합성 픽셀 좌표를 실시간 반영
+    function updateTreeUI() {
+      const tree = document.getElementById('jsonTree');
+      const compositePixels = getCompositeVisiblePixels();
+      const visibleLayers = layers.filter(l => l.visible && l.pixels && l.pixels.length > 0);
+
+      document.getElementById('pixelCount').textContent = compositePixels.length;
+
+      if (compositePixels.length === 0) {
+        tree.innerHTML = `
+          <div class="empty-placeholder">
+            켜져 있는 레이어의 픽셀이 없습니다.<br>
+            <b>Ctrl+V</b>로 이미지를 붙여넣거나 에셋을 켜세요.
+          </div>
+        `;
+        return;
+      }
+
+      const layerNames = visibleLayers.map(l => l.name).join(' + ');
+      let html = `<div style="color:var(--muted)">// [합성] ${layerNames} · 총 ${compositePixels.length}개 픽셀</div>`;
+      compositePixels.forEach(([x, y, c]) => {
+        html += `<span class="coord-item" data-x="${x}" data-y="${y}" data-c="${c}">[${x},${y},${c}]</span> `;
+      });
+      tree.innerHTML = html;
+
+      tree.querySelectorAll('.coord-item').forEach(el => {
+        el.addEventListener('click', () => {
+          selectedPixel = { x: parseInt(el.dataset.x), y: parseInt(el.dataset.y), c: parseInt(el.dataset.c) };
+          render();
+        });
+      });
+    }
+
+    // 에셋 위치 이동 처리
     function moveActiveLayer(dx, dy) {
       const activeLayer = layers.find(l => l.id === activeLayerId);
       if (!activeLayer) {
@@ -823,11 +868,10 @@
       activeLayer.offsetY = (activeLayer.offsetY || 0) + dy;
 
       updateOffsetBadge();
-      updateTreeUI();
+      updateTreeUI(); // 이동 즉시 좌표 갱신
       resizeCanvas();
     }
 
-    // 오프셋 리셋
     function resetActiveLayerOffset() {
       const activeLayer = layers.find(l => l.id === activeLayerId);
       if (!activeLayer) return;
@@ -835,7 +879,7 @@
       activeLayer.offsetY = 0;
 
       updateOffsetBadge();
-      updateTreeUI();
+      updateTreeUI(); // 리셋 즉시 좌표 갱신
       resizeCanvas();
       showToast(`[${activeLayer.name}] 위치가 (0, 0)으로 리셋되었습니다.`);
     }
@@ -852,7 +896,7 @@
       badge.textContent = `X: ${ox >= 0 ? '+' + ox : ox}, Y: ${oy >= 0 ? '+' + oy : oy}`;
     }
 
-    // 에셋 썸네일 그리드 UI 갱신
+    // 에셋 라이브러리 썸네일 UI 갱신
     function updateAssetUI() {
       const grid = document.getElementById('assetGrid');
       document.getElementById('assetCount').textContent = assetLibrary.length;
@@ -890,7 +934,6 @@
 
         grid.appendChild(card);
 
-        // 썸네일 캔버스 렌더링
         setTimeout(() => {
           const tCanvas = document.getElementById(`thumb-${asset.id}`);
           if (!tCanvas) return;
@@ -905,7 +948,7 @@
       });
     }
 
-    // 에셋 클릭 시 레이어로 장착 또는 해제
+    // 에셋 클릭 시 장착/해제 토글
     function toggleAssetToLayer(asset) {
       const existingLayer = layers.find(l => l.assetId === asset.id);
 
@@ -930,10 +973,11 @@
       updateLayerUI();
       updateAssetUI();
       updateOffsetBadge();
+      updateTreeUI(); // 에셋 변경 즉시 좌측 코드 갱신
       resizeCanvas();
     }
 
-    // 레이어 스택 UI 갱신
+    // 레이어 스택 UI 갱신 (가시성 토글 시 좌측 코드 즉시 동기화)
     function updateLayerUI() {
       const list = document.getElementById('layerList');
       document.getElementById('layerCount').textContent = layers.length;
@@ -966,11 +1010,13 @@
           <span class="layer-pixel-meta">${layer.pixels.length} px</span>
         `;
 
+        // 👁️ 눈 버튼 클릭: 가시성 토글 & 좌측 코드 즉시 갱신
         row.querySelector('.btn-eye').addEventListener('click', (e) => {
           e.stopPropagation();
           layer.visible = !layer.visible;
           updateLayerUI();
           updateAssetUI();
+          updateTreeUI(); // 가시성 토글 즉시 좌측 코드 갱신!
           render();
         });
 
@@ -987,38 +1033,6 @@
       document.getElementById('activeLayerTag').textContent = activeLayer ? `ACTIVE: ${activeLayer.name}` : 'ACTIVE: NONE';
       updateOffsetBadge();
       updateTreeUI();
-    }
-
-    // 좌측 좌표 트리 업데이트 (활성 레이어 오프셋 반영 좌표 표시)
-    function updateTreeUI() {
-      const tree = document.getElementById('jsonTree');
-      const activeLayer = layers.find(l => l.id === activeLayerId);
-
-      if (!activeLayer || activeLayer.pixels.length === 0) {
-        document.getElementById('pixelCount').textContent = 0;
-        tree.innerHTML = `
-          <div class="empty-placeholder">
-            선택된 레이어의 픽셀 좌표가 없습니다.<br>
-            이미지를 붙여넣거나 에셋을 선택하세요.
-          </div>
-        `;
-        return;
-      }
-
-      const finalPixels = getLayerFinalPixels(activeLayer);
-      document.getElementById('pixelCount').textContent = finalPixels.length;
-      let html = `<div style="color:var(--muted)">// [${activeLayer.name}] · ${finalPixels.length}개 노드 (오프셋 반영)</div>`;
-      finalPixels.forEach(([x, y, c]) => {
-        html += `<span class="coord-item" data-x="${x}" data-y="${y}" data-c="${c}">[${x},${y},${c}]</span> `;
-      });
-      tree.innerHTML = html;
-
-      tree.querySelectorAll('.coord-item').forEach(el => {
-        el.addEventListener('click', () => {
-          selectedPixel = { x: parseInt(el.dataset.x), y: parseInt(el.dataset.y), c: parseInt(el.dataset.c) };
-          render();
-        });
-      });
     }
 
     // 팔레트 UI 갱신
@@ -1040,7 +1054,7 @@
       });
     }
 
-    // 이미지 파싱 및 새 에셋/레이어로 등록 (a === 0만 제외 전수 수집)
+    // 이미지 파싱 및 신규 등록
     function parseImageBlob(blob, srcName = "이미지") {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -1063,7 +1077,7 @@
             for (let x = 0; x < w; x++) {
               const idx = (y * w + x) * 4;
               const a = imgData[idx + 3];
-              if (a === 0) continue; // 완전 투명 픽셀만 필터링
+              if (a === 0) continue; // 완전 투명 픽셀만 제외
 
               const hex = rgbToHex(imgData[idx], imgData[idx + 1], imgData[idx + 2]);
               if (!colorMap.has(hex)) {
@@ -1079,7 +1093,6 @@
             return;
           }
 
-          // 1. 에셋 라이브러리에 신규 등록
           const assetId = 'asset_' + Date.now();
           const assetIndex = assetLibrary.length + 1;
           const assetName = `${srcName} #${assetIndex}`;
@@ -1089,7 +1102,6 @@
             pixels: newPixels
           });
 
-          // 2. 현재 레이어에 채우거나 신규 레이어로 장착
           let targetLayer = layers.find(l => l.id === activeLayerId);
           if (!targetLayer || targetLayer.pixels.length > 0) {
             targetLayer = {
@@ -1136,7 +1148,7 @@
       }
     });
 
-    // 키보드 방향키 실시간 이동 이벤트 연동
+    // 방향키 이동
     window.addEventListener('keydown', (e) => {
       if (!activeLayerId) return;
       const targetLayer = layers.find(l => l.id === activeLayerId);
@@ -1148,27 +1160,24 @@
       else if (e.key === 'ArrowRight') { e.preventDefault(); moveActiveLayer(1, 0); }
     });
 
-    // 상하좌우 D-Pad 버튼 클릭 리스너
+    // D-Pad 버튼
     document.getElementById('moveUpBtn').addEventListener('click', () => moveActiveLayer(0, -1));
     document.getElementById('moveDownBtn').addEventListener('click', () => moveActiveLayer(0, 1));
     document.getElementById('moveLeftBtn').addEventListener('click', () => moveActiveLayer(-1, 0));
     document.getElementById('moveRightBtn').addEventListener('click', () => moveActiveLayer(1, 0));
     document.getElementById('moveResetBtn').addEventListener('click', resetActiveLayerOffset);
 
-    // 드래그 앤 드롭 파일 로드
+    // 드래그 드롭 & 파일 인풋
     const dropArea = document.getElementById('dropArea');
     dropArea.addEventListener('dragover', (e) => e.preventDefault());
     dropArea.addEventListener('drop', (e) => {
       e.preventDefault();
       if (e.dataTransfer.files?.[0]) parseImageBlob(e.dataTransfer.files[0], "드롭된 에셋");
     });
-
-    // 파일 선택 인풋
     document.getElementById('imageInput').addEventListener('change', (e) => {
       if (e.target.files?.[0]) parseImageBlob(e.target.files[0], "파일 에셋");
     });
 
-    // 레이어 수동 추가 버튼
     document.getElementById('addLayerBtn').addEventListener('click', () => {
       const newLayer = {
         id: 'layer_' + Date.now(),
@@ -1185,18 +1194,18 @@
       showToast('새 빈 레이어가 생성되었습니다.');
     });
 
-    // 시선 방향 전환 버튼
+    // 방향 전환 (좌우)
     document.querySelectorAll('.dir-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         activeDirection = btn.dataset.dir;
-        updateTreeUI();
+        updateTreeUI(); // 방향 변경 즉시 코드 갱신
         render();
       });
     });
 
-    // 뷰포트 제어
+    // 뷰 제어
     document.getElementById('toggleGridBtn').addEventListener('click', (e) => {
       showGrid = !showGrid;
       e.target.classList.toggle('active', showGrid);
@@ -1220,41 +1229,43 @@
       }
     });
 
-    // [핵심] 참고 코드를 적용한 팔레트 포함 & 한 줄 픽셀 포맷 JSON 복사
+    // [핵심] 켜져 있는 레이어들의 합성 픽셀 + 팔레트 한 줄 포맷 복사
     document.getElementById('copyJsonBtn').addEventListener('click', () => {
-      const activeLayer = layers.find(l => l.id === activeLayerId);
-      if (!activeLayer || activeLayer.pixels.length === 0) {
-        alert('복사할 활성 레이어의 픽셀이 없습니다.');
+      const compositePixels = getCompositeVisiblePixels();
+      const visibleLayers = layers.filter(l => l.visible && l.pixels && l.pixels.length > 0);
+
+      if (compositePixels.length === 0) {
+        alert('현재 켜져 있는 레이어에 픽셀이 없습니다.');
         return;
       }
 
-      // 오프셋 및 방향 변환이 완료된 최종 픽셀 리스트
-      const finalPixels = getLayerFinalPixels(activeLayer);
-
       const metaData = {
-        name: activeLayer.name,
+        name: visibleLayers.map(l => l.name).join(' + ') || "composite_sprite",
         direction: activeDirection,
-        totalPixels: finalPixels.length,
-        offsetX: activeLayer.offsetX || 0,
-        offsetY: activeLayer.offsetY || 0
+        totalPixels: compositePixels.length,
+        visibleLayers: visibleLayers.map(l => ({
+          name: l.name,
+          offsetX: l.offsetX || 0,
+          offsetY: l.offsetY || 0,
+          pixelsCount: l.pixels.length
+        }))
       };
-      const paletteData = palette;
 
-      // 사용자 제공 참고 코드 패턴 적용: __PIXELS_PLACEHOLDER__ 치환으로 [x, y, c] 한 줄씩 포맷팅
+      // __PIXELS_PLACEHOLDER__ 치환 방식으로 [x, y, c] 한 줄씩 포맷팅
       const result = JSON.stringify({
         meta: metaData,
-        palette: paletteData,
+        palette: palette,
         pixels: "__PIXELS_PLACEHOLDER__"
       }, null, 2).replace(
         '"__PIXELS_PLACEHOLDER__"',
-        '[\n' + finalPixels.map(p => `    [${p[0]}, ${p[1]}, ${p[2]}]`).join(',\n') + '\n  ]'
+        '[\n' + compositePixels.map(p => `    [${p[0]}, ${p[1]}, ${p[2]}]`).join(',\n') + '\n  ]'
       );
 
       navigator.clipboard.writeText(result);
-      showToast(`✓ [${activeLayer.name}] 팔레트 포함 JSON 복사 완료 (${finalPixels.length}px)`);
+      showToast(`✓ 켜져 있는 레이어(${visibleLayers.length}개) 합성 좌표 ${compositePixels.length}개가 JSON으로 복사되었습니다!`);
     });
 
-    // 초기 빈 화면 렌더링
+    // 초기 실행
     render();
   </script>
 </body>
