@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MapleStory 캐릭터 파츠 랩 & 시뮬레이터</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Pretendard:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- 사이드바: 아바타 실시간 렌더링 & 장착 파츠 관리 -->
+    <aside class="avatar-sidebar">
+      <div class="brand">
+        <div class="brand-badge">🍁 MapleStory.io Live</div>
+        <h1 class="brand-title">캐릭터 파츠 랩</h1>
+        <p class="brand-sub">KMS v389 파츠 • 가구 • 펫 • 건물 • 장식품</p>
+      </div>
+
+      <!-- 아바타 디스플레이 카드 -->
+      <div class="avatar-card">
+        <!-- 모션 상태 뱃지 & 안내 -->
+        <div class="viewport-header">
+          <span class="motion-status-badge" id="motionStatusBadge">
+            <span class="status-indicator">⚪</span> 정지 상태
+          </span>
+          <span class="viewport-hint">모션 재생 토글 지원</span>
+        </div>
+
+        <div class="avatar-viewport" id="avatarViewport">
+          <div class="avatar-loading" id="avatarLoading">
+            <div class="spinner"></div>
+            <span>코디 조합 중...</span>
+          </div>
+
+          <!-- 건물 / 실내 맵 배경 레이어 -->
+          <div class="avatar-bg-layer" id="avatarBgLayer" style="display:none;">
+            <img id="avatarBgImg" src="" alt="건물 배경" />
+            <div class="bg-gradient-overlay"></div>
+            <span class="bg-location-badge" id="bgLocationBadge">헤네시스 민가</span>
+          </div>
+
+          <!-- 동행 펫 박스 -->
+          <div class="companion-pet-box" id="companionPetBox" style="display:none;" title="동행 중인 펫">
+            <img id="companionPetImg" src="" alt="동행 펫" />
+            <span class="pet-name-tag" id="companionPetName">갈색고양이</span>
+          </div>
+
+          <!-- 캐릭터 & 가구 착석 메인 아바타 -->
+          <img id="avatarImage" alt="캐릭터 아바타" src="" />
+          <div class="avatar-shadow" id="avatarShadow"></div>
+        </div>
+
+        <div class="avatar-controls">
+          <div class="action-selector">
+            <div class="action-select-left">
+              <label for="animSelect">동작 모션</label>
+              <select id="animSelect">
+                <option value="stand1">기본 서기 1 (숨쉬기)</option>
+                <option value="stand2">기본 서기 2 (한손 흔들기)</option>
+                <option value="sit">앉기 (가구/의자 착석 모션)</option>
+                <option value="walk1">걷기 1 (팔다리 흔들기)</option>
+                <option value="walk2">걷기 2 (경보)</option>
+                <option value="jump">점프 (공중 모션)</option>
+                <option value="alert">경계 (무기 준비 태세)</option>
+                <option value="prone">엎드리기 (바닥)</option>
+                <option value="proneStab">엎드려 찌르기</option>
+                <option value="fly">날기 (부유 모션)</option>
+                <option value="ladder">사다리 타기</option>
+                <option value="rope">로프 타기</option>
+              </select>
+            </div>
+            <button type="button" class="btn-motion-play" id="btnMotionPlay" title="동작 모션 재생/정지">
+              <span class="motion-icon" id="motionIcon">▶</span>
+              <span class="motion-label" id="motionLabel">재생</span>
+            </button>
+          </div>
+
+          <div class="action-buttons">
+            <button class="btn btn-primary" id="btnRandom" title="랜덤 코디">🎲 랜덤 코디</button>
+            <button class="btn btn-secondary" id="btnReset" title="초기화">🔄 초기화</button>
+            <button class="btn btn-outline" id="btnDownloadAvatar" title="아바타 저장">💾 이미지 저장</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 현재 장착 중인 파츠 슬롯 -->
+      <div class="equipped-panel">
+        <div class="panel-header-row">
+          <h2 class="panel-title">현재 장착 파츠 <span id="equippedCountBadge" class="equipped-count-badge">0</span></h2>
+          <button class="btn-text-clear" id="btnUnequipAll" title="전체 해제">모두 해제</button>
+        </div>
+        <div class="equipped-slots" id="equippedSlots">
+          <!-- JS로 동적 생성 -->
+        </div>
+      </div>
+
+      <!-- 통계 바 -->
+      <div class="stats-box" id="statsBox">
+        <!-- JS로 동적 생성 -->
+      </div>
+    </aside>
+
+    <!-- 메인: 파츠 브라우저 & 카테고리 갤러리 -->
+    <main class="main-content">
+      <!-- 상단 툴바 -->
+      <header class="top-toolbar">
+        <!-- 카테고리 탭 (스크롤 내비게이션 포함) -->
+        <div class="category-tabs-wrap">
+          <button class="tab-scroll-btn left" id="btnScrollTabLeft" title="왼쪽 스크롤">‹</button>
+          <nav class="category-tabs" id="categoryTabs">
+            <button class="tab active" data-cat="all">✨ 전체 (<span id="count-all">0</span>)</button>
+            <button class="tab" data-cat="hair">💇 헤어 (<span id="count-hair">0</span>)</button>
+            <button class="tab" data-cat="face">👀 표정/성형 (<span id="count-face">0</span>)</button>
+            <button class="tab" data-cat="clothes">👗 의상 (<span id="count-clothes">0</span>)</button>
+            <button class="tab" data-cat="accessories">👑 모자/악세 (<span id="count-accessories">0</span>)</button>
+            <button class="tab" data-cat="shoes">👟 신발 (<span id="count-shoes">0</span>)</button>
+            <button class="tab" data-cat="furniture">🪑 가구/의자 (<span id="count-furniture">0</span>)</button>
+            <button class="tab" data-cat="pet">🐾 펫/반려동물 (<span id="count-pet">0</span>)</button>
+            <button class="tab" data-cat="building">🏛️ 건물/공간 (<span id="count-building">0</span>)</button>
+            <button class="tab" data-cat="decoration">✨ 장식품/이펙트 (<span id="count-decoration">0</span>)</button>
+            <button class="tab" data-cat="skin">🎨 피부 (<span id="count-skin">0</span>)</button>
+          </nav>
+          <button class="tab-scroll-btn right" id="btnScrollTabRight" title="오른쪽 스크롤">›</button>
+        </div>
+
+        <!-- 검색 & 필터 바 -->
+        <div class="search-filter-bar">
+          <div class="search-input-wrap">
+            <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 14z"/></svg>
+            <input type="text" id="searchInput" placeholder="수만 개의 파츠, 가구, 펫, 건물, 장식품 검색..." />
+            <button class="btn-clear" id="btnClearSearch" style="display:none">✕</button>
+          </div>
+          <div class="sub-filters" id="subFilters">
+            <!-- 서브카테고리 필터 칩 동적 생성 -->
+          </div>
+        </div>
+      </header>
+
+      <!-- 파츠 갤러리 그리드 -->
+      <section class="gallery-container" id="galleryContainer">
+        <div class="gallery-header">
+          <div class="gallery-title-wrap">
+            <h2 class="gallery-title" id="currentCategoryTitle">전체 항목 목록</h2>
+            <span class="gallery-subtitle" id="galleryResultCount">아이템 집계 중...</span>
+          </div>
+          <div class="gallery-options">
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkOnlyEquipped" />
+              <span>장착 중인 항목만</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 카드 그리드 -->
+        <div class="parts-grid" id="partsGrid">
+          <!-- 카드 점진적 렌더링 -->
+        </div>
+
+        <!-- 더 보기 로더 / 무한 스크롤 트리거 -->
+        <div class="load-more-wrap" id="loadMoreWrap" style="display:none;">
+          <button class="btn btn-secondary" id="btnLoadMore">더 많은 항목 불러오기</button>
+          <span class="load-more-info" id="loadMoreInfo"></span>
+        </div>
+
+        <div class="empty-state" id="emptyState" style="display: none;">
+          <div class="empty-icon">🔍</div>
+          <h3>검색 결과가 없습니다</h3>
+          <p>검색어를 변경하거나 다른 카테고리를 선택해 보세요.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 파츠 세부 정보 모달 -->
+  <div class="modal-backdrop" id="partModal" style="display: none;">
+    <div class="modal-card">
+      <button class="modal-close" id="btnModalClose">✕</button>
+      <div class="modal-header">
+        <div class="modal-icon-box">
+          <img id="modalPartIcon" src="" alt="아이템 아이콘" />
+        </div>
+        <div>
+          <span class="badge" id="modalPartCat">아이템</span>
+          <h3 class="modal-title" id="modalPartName">이름</h3>
+          <span class="modal-id" id="modalPartId">ID: 0</span>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="meta-row">
+          <span class="meta-label">카테고리</span>
+          <span class="meta-value" id="modalPartSubCat">Hair</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">로컬 이미지</span>
+          <span class="meta-value" id="modalPartLocalPath">images/...</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">API 소스</span>
+          <span class="meta-value link" id="modalPartApiLink">maplestory.io</span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btnModalEquip">이 항목 적용/배치하기</button>
+        <button class="btn btn-secondary" id="btnModalCancel">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 토스트 알림 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- 데이터 및 앱 스크립트 -->
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

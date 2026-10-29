@@ -1,0 +1,16 @@
+{
+  "name": "character-collector",
+  "version": "1.0.0",
+  "description": "Collect MapleStory character data and display dashboard",
+  "type": "module",
+  "main": "collect.js",
+  "scripts": {
+    "start": "node collect.js",
+    "collect": "node collect.js",
+    "dashboard": "npx -y serve ."
+  },
+  "license": "MIT",
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "region": "KMS",
+  "version": "389",
+  "updatedAt": "2026-10-15T11:34:37.052Z",
+  "totalParts": 29491,
+  "counts": {
+    "skin": 13,
+    "hair": 9497,
+    "face": 5913,
+    "clothes": 3195,
+    "shoes": 1320,
+    "accessories": 4782,
+    "furniture": 1159,
+    "pet": 958,
+    "building": 1310,
+    "decoration": 1344
+  }
+}
