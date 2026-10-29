@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXUS · AI Office Dashboard</title><link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="dashboard">
+<div class="app">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI WORKSPACE</div></div></a>
+  <div class="nav-label">WORKSPACE</div>
+  <nav class="nav-group">
+    <a class="nav-link active" href="index.html" aria-current="page"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a>
+    <a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">3D 가상 오피스</span><span class="nav-pill">LIVE</span></a>
+    <a class="nav-link" href="agents.html"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a>
+    <a class="nav-link" href="agents.html#activity"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a>
+  </nav>
+  <div class="nav-label" style="margin-top:30px">MANAGEMENT</div>
+  <nav class="nav-group">
+    <a class="nav-link" href="agents.html#activity"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a>
+    <a class="nav-link" href="#usage"><span class="nav-icon">▤</span><span class="nav-text">사용량 & 비용</span></a>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Workspace status</div><div class="workspace-caption">모든 시스템이 정상적으로<br>작동하고 있습니다.</div><div class="usage"><span>AI 사용량</span><strong>63%</strong></div><div class="usage-track"><span></span></div></div>
+    <div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Owner · Pro plan</div></div><span class="profile-more">···</span></div>
+  </div>
+</aside>
+<main class="main">
+<header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>Overview</strong></div><div class="top-actions"><div class="system-pill"><span class="system-dot"></span> 모든 시스템 정상 <span style="color:#b0bac5">·</span> 데모 데이터</div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
+<div class="content">
+  <div class="page-heading"><div><div class="eyebrow">WEDNESDAY, OCTOBER 14, 2026 · DAILY BRIEFING</div><h1>좋은 저녁입니다, 팀장님 <span style="font-size:23px">✦</span></h1><p>오늘도 AI 팀이 업무를 진행하고 있습니다. 현재 오피스 상태를 확인해 보세요.</p></div><div class="heading-actions"><a class="btn" href="agents.html">♙ 직원 관리</a><a class="btn primary" href="office.html">3D 오피스 입장 <span class="arrow">↗</span></a></div></div>
+  <section class="stats-grid">
+    <div class="stat-card"><div class="stat-head"><span>등록된 AI 직원</span><span class="stat-ico ico-blue">♙</span></div><div class="stat-value">12</div><div class="stat-foot"><span class="positive">+2</span> <span>이번 주 추가됨</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>현재 작업 중</span><span class="stat-ico ico-mint">↗</span></div><div class="stat-value">08 <span style="font-size:12px;color:#98a5b2;font-weight:600">/ 12</span></div><div class="stat-foot"><span class="tiny-dot"></span><span>AI 직원 8명 활동 중</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>검토 대기</span><span class="stat-ico ico-amber">◷</span></div><div class="stat-value">03</div><div class="stat-foot"><span style="color:#bf8b35;font-weight:700">승인 필요</span><span>·</span><a href="agents.html" style="color:#8493a5;text-decoration:underline">확인하기</a></div></div>
+    <div class="stat-card"><div class="stat-head"><span>작업 성공률</span><span class="stat-ico ico-purple">⌁</span></div><div class="stat-value">97.8<span style="font-size:15px">%</span></div><div class="stat-foot"><span class="positive">+2.4%</span><span>지난 7일 대비</span></div></div>
+  </section>
+
+  <section class="overview-grid">
+    <div class="panel"><div class="panel-head"><div><div class="panel-title">나의 AI 오피스</div><div class="panel-sub">팀의 현재 상태를 3D 공간에서 확인하세요.</div></div><a href="office.html" class="text-link">공간 열기 ↗</a></div>
+      <a href="office.html" class="office-preview" aria-label="3D 가상 오피스 열기"><span class="preview-window"></span><span class="preview-window two"></span><span class="preview-desk d1"></span><span class="preview-desk d2"></span><span class="preview-desk d3"></span><span class="preview-monitor"></span><span class="preview-monitor m2"></span><span class="preview-monitor m3"></span><span class="preview-person p1"></span><span class="preview-person p2"></span><span class="preview-person p3"></span><span class="preview-tag"><i class="system-dot"></i> NEXUS HQ · FLOOR 01</span><span class="preview-bottom"><span>● 8명 활동 중</span><span>·</span><span>3개 팀</span><span>↗</span></span></a>
+    </div>
+    <div class="panel activity-panel"><div class="panel-head"><div><div class="panel-title">실시간 활동</div><div class="panel-sub">AI 팀에서 발생한 최근 이벤트</div></div><a href="agents.html#activity" class="text-link">전체 로그 ↗</a></div><div class="activity-list" id="dashboardActivity">
+      <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">리서치 보고서 초안 완성</div><div class="event-desc">Research AI · 시장 분석 프로젝트</div></div><div class="event-time">방금 전</div></div>
+      <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">콘텐츠 검토 승인 대기</div><div class="event-desc">Writer AI · 블로그 콘텐츠 03</div></div><div class="event-time">2분 전</div></div>
+      <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">고객 데이터 동기화 실행</div><div class="event-desc">Ops AI · CRM 레코드 128건</div></div><div class="event-time">5분 전</div></div>
+      <div class="activity-item"><div class="event-icon ico-purple">⌁</div><div class="event-main"><div class="event-title">주간 요약 생성 중</div><div class="event-desc">Executive AI · 주간 업무 리포트</div></div><div class="event-time">8분 전</div></div>
+    </div></div>
+  </section>
+  <section class="bottom-grid">
+    <div class="panel"><div class="panel-head"><div><div class="panel-title">현재 작업 중인 AI 직원</div><div class="panel-sub">진행 중인 작업을 빠르게 확인하세요.</div></div><a href="agents.html" class="text-link">직원 전체 보기 ↗</a></div><div class="table-wrap"><table class="mini-table"><thead><tr><th>AI 직원</th><th>현재 작업</th><th>진행률</th><th>상태</th></tr></thead><tbody>
+      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#e2edff;color:#5275c8">R</div><div><div class="agent-name">Research AI</div><div class="agent-type">리서치 팀</div></div></div></td><td>시장 자료 분석</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:72%"></span></div><span class="progress-label">72%</span></div></td><td><span class="status running">실행 중</span></td></tr>
+      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#f0e7ff;color:#886bc5">W</div><div><div class="agent-name">Writer AI</div><div class="agent-type">콘텐츠 팀</div></div></div></td><td>블로그 콘텐츠 작성</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:88%;background:#ad91f3"></span></div><span class="progress-label">88%</span></div></td><td><span class="status review">검토 대기</span></td></tr>
+      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#ddf7ed;color:#288a69">O</div><div><div class="agent-name">Ops AI</div><div class="agent-type">운영 팀</div></div></div></td><td>CRM 데이터 동기화</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:45%"></span></div><span class="progress-label">45%</span></div></td><td><span class="status running">실행 중</span></td></tr>
+      </tbody></table></div></div>
+    <div class="panel" id="usage"><div class="panel-head"><div><div class="panel-title">AI 실행 현황</div><div class="panel-sub">지난 7일 · 일별 완료 작업 수 (데모)</div></div><button class="btn small">최근 7일⌄</button></div><div class="chart-area"><div class="chart-y"><span>60</span><span>40</span><span>20</span><span>0</span></div><div class="chart-plot"><div class="bar-group"><span class="bar" style="height:45%"></span><span class="bar alt" style="height:35%"></span><span class="bar-label">목</span></div><div class="bar-group"><span class="bar" style="height:57%"></span><span class="bar alt" style="height:44%"></span><span class="bar-label">금</span></div><div class="bar-group"><span class="bar" style="height:48%"></span><span class="bar alt" style="height:39%"></span><span class="bar-label">토</span></div><div class="bar-group"><span class="bar" style="height:68%"></span><span class="bar alt" style="height:53%"></span><span class="bar-label">일</span></div><div class="bar-group"><span class="bar" style="height:60%"></span><span class="bar alt" style="height:50%"></span><span class="bar-label">월</span></div><div class="bar-group"><span class="bar" style="height:82%"></span><span class="bar alt" style="height:63%"></span><span class="bar-label">화</span></div><div class="bar-group"><span class="bar" style="height:90%"></span><span class="bar alt" style="height:72%"></span><span class="bar-label">수</span></div></div></div><div class="section-foot"><span>전체 284개 작업 완료</span><div class="legend"><span><i class="lg1"></i>완료</span><span><i class="lg2"></i>자동화</span></div></div></div>
+  </section>
+</div>
+</main>
+</div>
+<script src="app.js"></script>
+</body></html>
