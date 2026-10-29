@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CharacterSpriteData, PixelSpriteRenderer } from './avatar/scripts/pixel-base-character.js';
 
 // NEXUS floor-plan scene inspired by the supplied 330 m² office reference.
 const canvas = document.getElementById('office3d');
@@ -136,32 +137,238 @@ function addDesk(parent, x, z, variant = 0, scale = 1) {
   return g;
 }
 function addAvatar(parent, spec) {
-  const root = new THREE.Group(); root.position.set(spec.x, 0, spec.z + .6); root.rotation.y = Math.PI; root.userData.agentId = spec.id; parent.add(root);
-  const shirt = mat(spec.color), skin = mat(spec.skin), hair = mat(spec.hair), pants = mat('#40505c');
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.19, .32, 4, 8), shirt); torso.position.y = .75; torso.castShadow = true; root.add(torso);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(.06, .07, .1, 8), skin); neck.position.y = 1.01; root.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(.17, 12, 10), skin); head.position.set(0, 1.18, 0); head.castShadow = true; root.add(head);
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(.18, 12, 8, 0, Math.PI * 2, 0, Math.PI * .58), hair); cap.position.set(0, 1.22, -.02); root.add(cap);
-  const face = mat('#594b47');
+  const root = new THREE.Group();
+  root.position.set(spec.x, 0, spec.z + .6);
+  root.rotation.y = Math.PI;
+  root.userData.agentId = spec.id;
+  parent.add(root);
+
+  const shirt = mat(spec.color || '#1e293b');
+  const skin = mat(spec.skin || '#fde2d2', 0.65);
+  const hair = mat(spec.hair || '#4a3525', 0.75);
+  const pants = mat(spec.pantsColor || '#27466b');
+  const shoeWhite = mat('#ffffff', 0.4);
+  const shoeAccent = mat(spec.accentColor || '#ef4444', 0.5);
+  const eyeMat = mat('#1e293b', 0.2);
+  const eyeSpec = mat('#ffffff', 0.1);
+  const blushMat = mat('#ff7f7f', 0.8, 0, true, 0.6);
+  const lanyardMat = mat('#10b981', 0.5);
+  const cardMat = mat('#ffffff', 0.3);
+
+  // [1] 바닥 접지 그림자 (Soft Contact Shadow)
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.34, 16),
+    mat('#182536', 1, 0, true, 0.22)
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.012;
+  root.add(shadow);
+
+  // [2] 하체 & 다리 & 스니커즈 (2등신 치비 비율)
+  box(root, 0.25, 0.08, 0.18, pants, 0, 0.44, 0);
+
   for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(.014, 6, 5), face); eye.position.set(side * .06, 1.18, .15); root.add(eye);
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(.052, .22, 3, 6), shirt); arm.position.set(side * .23, .76, .02); arm.rotation.z = -side * .27; root.add(arm);
-    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(.06, .2, 3, 6), pants); leg.position.set(side * .09, .28, 0); root.add(leg);
-    box(root, .13, .07, .18, '#303e48', side * .09, .07, .02);
+    const legX = side * 0.09;
+    // 다리 (바지)
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.055, 0.26, 10), pants);
+    leg.position.set(legX, 0.29, 0);
+    leg.castShadow = true;
+    root.add(leg);
+
+    // 롤업 밑단 (Roll-up cuff)
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.04, 10), mat('#cbd5e1'));
+    cuff.position.set(legX, 0.16, 0);
+    root.add(cuff);
+
+    // 스니커즈 밑창 + 액센트 라인 + 슈즈 바디
+    box(root, 0.12, 0.04, 0.17, shoeWhite, legX, 0.03, 0.02, { cast: true });
+    box(root, 0.12, 0.025, 0.17, shoeAccent, legX, 0.065, 0.02);
+    box(root, 0.11, 0.06, 0.15, shoeWhite, legX, 0.105, 0.015, { cast: true });
   }
+
+  // [3] 상체 그룹 (Torso Group - 호흡 바운스)
+  const torsoGroup = new THREE.Group();
+  torsoGroup.position.y = 0.58;
+  root.add(torsoGroup);
+
+  // 상의 몸통 (Chibi Torso)
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.24, 12), shirt);
+  torso.position.y = 0.04;
+  torso.castShadow = true;
+  torsoGroup.add(torso);
+
+  // 목 (Neck)
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.08, 10), skin);
+  neck.position.y = 0.18;
+  torsoGroup.add(neck);
+
+  // 사원증 넥스트랩 & 카드 (Lanyard & ID badge)
+  const strapL = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6), lanyardMat);
+  strapL.position.set(-0.035, 0.10, 0.13);
+  strapL.rotation.z = -0.35;
+  torsoGroup.add(strapL);
+
+  const strapR = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6), lanyardMat);
+  strapR.position.set(0.035, 0.10, 0.13);
+  strapR.rotation.z = 0.35;
+  torsoGroup.add(strapR);
+
+  // 사원증 카드 & 블루 헤더 바
+  box(torsoGroup, 0.065, 0.08, 0.012, cardMat, 0, 0.01, 0.145);
+  box(torsoGroup, 0.065, 0.02, 0.014, mat('#3b82f6'), 0, 0.04, 0.146);
+
+  // [4] 양팔 & 타이핑 애니메이션 (Arms with desk typing action)
+  const leftArm = new THREE.Group();
+  leftArm.position.set(-0.16, 0.68, 0.02);
+  const leftSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.046, 0.14, 4, 8), shirt);
+  leftSleeve.position.set(0, -0.07, 0.04);
+  leftSleeve.rotation.x = -0.55;
+  leftArm.add(leftSleeve);
+  const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), skin);
+  leftHand.position.set(0, -0.14, 0.14);
+  leftArm.add(leftHand);
+  root.add(leftArm);
+
+  const rightArm = new THREE.Group();
+  rightArm.position.set(0.16, 0.68, 0.02);
+  const rightSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.046, 0.14, 4, 8), shirt);
+  rightSleeve.position.set(0, -0.07, 0.04);
+  rightSleeve.rotation.x = -0.55;
+  rightArm.add(rightSleeve);
+  const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), skin);
+  rightHand.position.set(0, -0.14, 0.14);
+  rightArm.add(rightHand);
+  root.add(rightArm);
+
+  // [5] 2등신 대두 치비 헤드 (2-Head Chibi Head Group)
+  const headGroup = new THREE.Group();
+  headGroup.position.set(0, 1.02, 0);
+  root.add(headGroup);
+
+  // 두상 구체 (큰 2등신 치비 비율)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 14), skin);
+  head.scale.set(1.06, 0.98, 1.0);
+  head.castShadow = true;
+  headGroup.add(head);
+
+  // 양쪽 귀
+  const earL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), skin);
+  earL.position.set(-0.245, 0.01, 0);
+  headGroup.add(earL);
+  const earR = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), skin);
+  earR.position.set(0.245, 0.01, 0);
+  headGroup.add(earR);
+
+  // 핑크빛 볼터치 (Blush)
+  const blushL = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), blushMat);
+  blushL.scale.set(1.4, 0.8, 0.4);
+  blushL.position.set(-0.145, -0.04, 0.205);
+  headGroup.add(blushL);
+
+  const blushR = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), blushMat);
+  blushR.scale.set(1.4, 0.8, 0.4);
+  blushR.position.set(0.145, -0.04, 0.205);
+  headGroup.add(blushR);
+
+  // 아잉/모험가 맑은 미소 눈 (흑요석 동공 + 스펙큘러 하이라이트)
+  for (const side of [-1, 1]) {
+    const eyeX = side * 0.082;
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 8), eyeMat);
+    pupil.scale.set(1.0, 1.2, 0.4);
+    pupil.position.set(eyeX, 0.025, 0.228);
+    headGroup.add(pupil);
+
+    // 반짝이는 화이트 하이라이트
+    const spec1 = new THREE.Mesh(new THREE.SphereGeometry(0.009, 6, 6), eyeSpec);
+    spec1.position.set(eyeX - 0.007, 0.036, 0.238);
+    headGroup.add(spec1);
+
+    const spec2 = new THREE.Mesh(new THREE.SphereGeometry(0.005, 6, 6), eyeSpec);
+    spec2.position.set(eyeX + 0.007, 0.016, 0.238);
+    headGroup.add(spec2);
+  }
+
+  // 방긋 웃는 미소 입
+  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.005, 6, 12, Math.PI * 0.85), mat('#e11d48'));
+  mouth.rotation.z = Math.PI * 0.08;
+  mouth.position.set(0, -0.07, 0.232);
+  headGroup.add(mouth);
+
+  // 헤어 볼륨 & 스타일 (Hair)
+  const hairCap = new THREE.Mesh(
+    new THREE.SphereGeometry(0.252, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62),
+    hair
+  );
+  hairCap.position.set(0, 0.02, -0.015);
+  hairCap.castShadow = true;
+  headGroup.add(hairCap);
+
+  // 앞머리 뱅 (Fringe) & 옆머리 락
+  box(headGroup, 0.34, 0.09, 0.07, hair, 0, 0.17, 0.18, { rx: 0.2 });
+  box(headGroup, 0.06, 0.15, 0.08, hair, -0.21, 0.04, 0.12, { rz: 0.15 });
+  box(headGroup, 0.06, 0.15, 0.08, hair, 0.21, 0.04, 0.12, { rz: -0.15 });
+
+  // [6] 상태 표시 링 & 플로팅 핀 & 3D 홀로그램 명찰
   const statusColor = spec.statusKey === 'review' ? '#f1b64f' : spec.statusKey === 'idle' ? '#a3b0bd' : '#45c89b';
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(.28, .027, 7, 22), mat(statusColor)); ring.rotation.x = Math.PI / 2; ring.position.y = .045; root.add(ring);
-  const pin = new THREE.Mesh(new THREE.SphereGeometry(.055, 8, 7), mat(statusColor)); pin.position.set(0, 1.52, 0); root.add(pin);
-  const label = document.createElement('canvas'); label.width = 400; label.height = 84;
-  const ctx = label.getContext('2d'); ctx.fillStyle = 'rgba(255,255,255,.96)'; ctx.beginPath(); ctx.roundRect(6, 6, 388, 72, 17); ctx.fill();
-  ctx.fillStyle = statusColor; ctx.beginPath(); ctx.arc(29, 42, 7, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#243645'; ctx.font = 'bold 25px Arial,sans-serif'; ctx.fillText(spec.name, 48, 37);
-  ctx.fillStyle = '#81909d'; ctx.font = '19px Arial,sans-serif'; ctx.fillText(spec.role, 48, 61);
-  const tex = new THREE.CanvasTexture(label); tex.colorSpace = THREE.SRGBColorSpace;
-  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })); tag.scale.set(1.8, .38, 1); tag.position.y = 1.91; tag.renderOrder = 11; tag.userData.agentId = spec.id; root.add(tag);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.03, 8, 28), mat(statusColor));
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.03;
+  root.add(ring);
+
+  const pin = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), mat(statusColor));
+  pin.position.set(0, 1.58, 0);
+  root.add(pin);
+
+  // 홀로그램 네임택
+  const label = document.createElement('canvas');
+  label.width = 440;
+  label.height = 96;
+  const ctx = label.getContext('2d');
+  ctx.fillStyle = 'rgba(255,255,255,0.96)';
+  ctx.beginPath();
+  ctx.roundRect(8, 8, 424, 80, 20);
+  ctx.fill();
+  ctx.strokeStyle = '#dbe5ec';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // 상태 점
+  ctx.fillStyle = statusColor;
+  ctx.beginPath();
+  ctx.arc(36, 48, 8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#1e293b';
+  ctx.font = 'bold 26px "Noto Sans KR", Arial, sans-serif';
+  ctx.fillText(spec.name, 56, 42);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '19px "Noto Sans KR", Arial, sans-serif';
+  ctx.fillText(`${spec.role} · ${spec.task}`, 56, 68);
+
+  const tex = new THREE.CanvasTexture(label);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  tag.scale.set(1.9, 0.42, 1);
+  tag.position.y = 1.95;
+  tag.renderOrder = 12;
+  tag.userData.agentId = spec.id;
+  root.add(tag);
+
   root.traverse(o => { if (o.isMesh) o.userData.agentId = spec.id; });
-  return { ...spec, root, ring, pin, torso };
+
+  return {
+    ...spec,
+    root,
+    ring,
+    pin,
+    torsoGroup,
+    headGroup,
+    leftArm,
+    rightArm
+  };
 }
+
 function addSofa(parent, x, z, color, rotation = 0, scale = 1) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rotation; g.scale.setScalar(scale); parent.add(g);
   box(g, 2.1, .36, .78, color, 0, .42, 0);
@@ -316,15 +523,112 @@ function addOfficeArchitecture(parent, floor) {
   return stations;
 }
 
+const spriteRenderer = new PixelSpriteRenderer(CharacterSpriteData);
+
+function getAgentAvatarSvg(agentSpec, size = 34) {
+  if (!agentSpec) return '';
+  spriteRenderer.setPalette(agentSpec.skinPreset || 'fair');
+  return spriteRenderer.renderToSVG("idle_0", {
+    width: size,
+    height: size,
+    className: "chibi-pixel-avatar"
+  });
+}
+
 const agentSpecs = [
-  { id: 'research', name: 'Research AI', role: '리서치 팀', task: '시장 자료 분석', progress: '72%', status: '실행 중', statusKey: 'running', color: '#5b91d7', skin: '#d9ad8d', hair: '#57483f', x: -8.5, z: -4.15, floorId: 1 },
-  { id: 'writer', name: 'Writer AI', role: '콘텐츠 팀', task: '콘텐츠 검토 승인 대기', progress: '88%', status: '검토 대기', statusKey: 'review', color: '#a68be5', skin: '#e1b99c', hair: '#4d424e', x: -5.5, z: -1.0, floorId: 1 },
-  { id: 'ops', name: 'Ops AI', role: '운영 팀', task: 'CRM 데이터 동기화', progress: '45%', status: '실행 중', statusKey: 'running', color: '#54b99a', skin: '#bd8f6d', hair: '#393d40', x: -2.5, z: 2.15, floorId: 1 },
-  { id: 'design', name: 'Design AI', role: '디자인 팀', task: '다음 작업 대기', progress: '—', status: '대기 중', statusKey: 'idle', color: '#e2a26e', skin: '#e7c3a4', hair: '#5b4233', x: -8.5, z: 2.15, floorId: 1 },
-  { id: 'data', name: 'Data AI', role: '데이터 팀', task: '데이터셋 정제', progress: '61%', status: '실행 중', statusKey: 'running', color: '#5bb7c0', skin: '#d7a989', hair: '#383d48', x: -5.5, z: -4.25, floorId: 1 }
+  {
+    id: 'research',
+    name: 'Research AI',
+    role: '리서치 팀',
+    dept: '기획&전략팀 · Agent #001',
+    task: '시장 자료 분석',
+    progress: '72%',
+    status: '실행 중',
+    statusKey: 'running',
+    color: '#1e293b',       // 캐주얼 로고 반팔티
+    pantsColor: '#27466b',  // 롤업 인디고 진
+    accentColor: '#ef4444', // 레드 포인트 스니커즈
+    skin: '#fde2d2',        // 뽀송 스킨
+    skinPreset: 'fair',
+    hair: '#4a3525',        // 다크 브라운
+    gender: '남성',
+    x: -8.5, z: -4.15, floorId: 1
+  },
+  {
+    id: 'writer',
+    name: 'Writer AI',
+    role: '콘텐츠 팀',
+    dept: '콘텐츠&미디어팀 · Agent #002',
+    task: '콘텐츠 검토 승인 대기',
+    progress: '88%',
+    status: '검토 대기',
+    statusKey: 'review',
+    color: '#3b597b',
+    pantsColor: '#334155',
+    accentColor: '#38bdf8',
+    skin: '#fff0e6',        // 미백 스킨
+    skinPreset: 'rosy',
+    hair: '#7c4a2d',        // 초코 브라운
+    gender: '여성',
+    x: -5.5, z: -1.0, floorId: 1
+  },
+  {
+    id: 'ops',
+    name: 'Ops AI',
+    role: '운영 팀',
+    dept: '인프라&보안팀 · Agent #003',
+    task: 'CRM 데이터 동기화',
+    progress: '45%',
+    status: '실행 중',
+    statusKey: 'running',
+    color: '#1e293b',
+    pantsColor: '#3b597b',
+    accentColor: '#10b981',
+    skin: '#fef3e2',        // 내추럴 웜 스킨
+    skinPreset: 'warm',
+    hair: '#1e1e24',
+    gender: '남성',
+    x: -2.5, z: 2.15, floorId: 1
+  },
+  {
+    id: 'design',
+    name: 'Design AI',
+    role: '디자인 팀',
+    dept: 'UI/UX 디자인팀 · Agent #004',
+    task: '다음 작업 대기',
+    progress: '—',
+    status: '대기 중',
+    statusKey: 'idle',
+    color: '#ea580c',
+    pantsColor: '#334155',
+    accentColor: '#f43f5e',
+    skin: '#fff3ea',
+    skinPreset: 'fair',
+    hair: '#b45309',
+    gender: '여성',
+    x: -8.5, z: 2.15, floorId: 1
+  },
+  {
+    id: 'data',
+    name: 'Data AI',
+    role: '데이터 팀',
+    dept: '데이터엔지니어링 · Agent #007',
+    task: '데이터셋 정제',
+    progress: '61%',
+    status: '실행 중',
+    statusKey: 'running',
+    color: '#0f172a',
+    pantsColor: '#1e293b',
+    accentColor: '#3b82f6',
+    skin: '#eaf4fc',        // 사이보그 쿨스킨
+    skinPreset: 'cyborg',
+    hair: '#334155',
+    gender: '남성',
+    x: -5.5, z: -4.25, floorId: 1
+  }
 ];
 const panels = {
-  research: { initial: 'R', bg: '#e2edff', fg: '#5275c8', sub: '리서치 팀 · Agent #001', status: '실행 중', statusClass: 'running', task: '시장 자료 분석', progress: '72%', time: '04:32' },
+  research: { initial: 'R', bg: '#e2edff', fg: '#5275c8', sub: '기획&전략팀 · Agent #001', status: '실행 중', statusClass: 'running', task: '시장 자료 분석', progress: '72%', time: '04:32' },
   writer: { initial: 'W', bg: '#f0e7ff', fg: '#886bc5', sub: '콘텐츠 팀 · Agent #002', status: '검토 대기', statusClass: 'review', task: '콘텐츠 검토 승인 대기', progress: '88%', time: '06:18' },
   ops: { initial: 'O', bg: '#ddf7ed', fg: '#288a69', sub: '운영 팀 · Agent #003', status: '실행 중', statusClass: 'running', task: 'CRM 데이터 동기화', progress: '45%', time: '02:51' },
   design: { initial: 'D', bg: '#ffe9dc', fg: '#bb7950', sub: '디자인 팀 · Agent #004', status: '대기 중', statusClass: 'idle', task: '다음 작업 대기', progress: '—', time: '대기 중' },
@@ -393,9 +697,13 @@ function renderFloorAgents() {
     if (!assigned.length) {
       teamList.innerHTML = '<div class="floor-empty"><strong>이 층에 배치된 AI 직원이 없습니다.</strong><span>직원 관리에서 직원 배치 기능을 추가할 수 있습니다.</span></div>';
     } else {
-      teamList.innerHTML = assigned.map(a => {
-        const p = panels[a.id];
-        return `<button type="button" class="team-row${a.id === 'research' ? ' selected' : ''}" data-agent="${a.id}"><span class="agent-avatar" style="background:${p.bg};color:${p.fg}">${p.initial}</span><span class="team-row-main"><strong>${a.name}</strong><small>${a.task} · ${a.progress}</small></span><span class="mini-online" style="background:${a.statusKey === 'review' ? '#f4bf60' : a.statusKey === 'idle' ? '#a5b2c2' : '#5ecda9'}"></span></button>`;
+      teamList.innerHTML = assigned.map((a, idx) => {
+        const avatarSvg = getAgentAvatarSvg(a, 34);
+        return `<button type="button" class="team-row${idx === 0 ? ' selected' : ''}" data-agent="${a.id}">
+          <span class="agent-avatar" title="${a.name}">${avatarSvg}</span>
+          <span class="team-row-main"><strong>${a.name}</strong><small>${a.task} · ${a.progress}</small></span>
+          <span class="mini-online" style="background:${a.statusKey === 'review' ? '#f4bf60' : a.statusKey === 'idle' ? '#a5b2c2' : '#5ecda9'}"></span>
+        </button>`;
       }).join('');
       teamList.querySelectorAll('.team-row').forEach(row => row.addEventListener('click', () => selectAgent(row.dataset.agent, true)));
     }
@@ -411,7 +719,24 @@ function selectAgent(id, moveCamera = false) {
   const spec = agentSpecs.find(a => a.id === id);
   if (!info || !spec || spec.floorId !== activeFloorId) return;
   teamList?.querySelectorAll('.team-row').forEach(el => el.classList.toggle('selected', el.dataset.agent === id));
-  if (selectedAgentPanel) selectedAgentPanel.innerHTML = `<div class="selected-identity"><div class="agent-avatar" style="background:${info.bg};color:${info.fg}">${info.initial}</div><div><strong>${spec.name}</strong><small>${info.sub}</small></div></div><div class="detail-line"><span>상태</span><strong><span class="status ${info.statusClass}">${info.status}</span></strong></div><div class="detail-line"><span>현재 작업</span><strong>${info.task}</strong></div><div class="detail-line"><span>진행률</span><strong>${info.progress}</strong></div><div class="detail-line"><span>실행 시간</span><strong>${info.time}</strong></div><a class="btn small" href="agents.html" style="width:100%;justify-content:center;margin-top:12px">직원 상세 관리 ↗</a>`;
+  if (selectedAgentPanel) {
+    const avatarSvg = getAgentAvatarSvg(spec, 52);
+    selectedAgentPanel.innerHTML = `
+      <div class="selected-identity">
+        <div class="agent-avatar">${avatarSvg}</div>
+        <div>
+          <strong>${spec.name}</strong>
+          <small>${spec.dept || info.sub}</small>
+        </div>
+      </div>
+      <div class="detail-line"><span>캐릭터 체형</span><strong>2등신 메이플 치비 (${spec.gender || '남성'})</strong></div>
+      <div class="detail-line"><span>상태</span><strong><span class="status ${info.statusClass}">${info.status}</span></strong></div>
+      <div class="detail-line"><span>현재 작업</span><strong>${info.task}</strong></div>
+      <div class="detail-line"><span>진행률</span><strong>${info.progress}</strong></div>
+      <div class="detail-line"><span>실행 시간</span><strong>${info.time}</strong></div>
+      <a class="btn small mint" href="agents.html#characters" style="width:100%;justify-content:center;margin-top:12px">🎨 캐릭터 스튜디오에서 의상 변경 ↗</a>
+    `;
+  }
   if (moveCamera) {
     const selected = activeAgents.find(a => a.id === id);
     if (selected) controls.target.set(selected.root.position.x, .8, selected.root.position.z);
@@ -475,7 +800,26 @@ const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   const t = clock.getElapsedTime();
-  if (!paused) activeAgents.forEach((a, i) => { a.torso.position.y = .75 + .009 * Math.sin(t * 1.6 + i); a.pin.position.y = 1.52 + .04 * Math.sin(t * 2.1 + i * 1.3); a.ring.rotation.z = t * .18; });
-  controls.update(); renderer.render(scene, camera);
+  if (!paused) activeAgents.forEach((a, i) => {
+    // 1. 2등신 치비 호흡 바운스
+    const breath = Math.sin(t * 2.2 + i * 0.8) * 0.012;
+    if (a.headGroup) a.headGroup.position.y = 1.02 + breath;
+    if (a.torsoGroup) a.torsoGroup.position.y = 0.58 + breath * 0.5;
+
+    // 2. 키보드 타이핑 모션 (Desk typing motion)
+    if (a.leftArm && a.rightArm) {
+      a.leftArm.rotation.x = -0.52 + Math.sin(t * 7.5 + i * 1.5) * 0.14;
+      a.rightArm.rotation.x = -0.52 - Math.cos(t * 7.5 + i * 1.5) * 0.14;
+    }
+
+    // 3. 플로팅 핀 & 상태 링 회전
+    if (a.pin) {
+      a.pin.position.y = 1.58 + 0.035 * Math.sin(t * 2.2 + i * 1.3);
+      a.pin.rotation.y = t * 1.2;
+    }
+    if (a.ring) a.ring.rotation.z = t * 0.18;
+  });
+  controls.update();
+  renderer.render(scene, camera);
 }
 animate();

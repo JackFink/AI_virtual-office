@@ -24,43 +24,302 @@
 <div class="log-row"><div class="log-marker ico-purple">⌁</div><div class="log-copy"><strong>Executive AI · 요약 생성</strong><p>주간 보고서 초안이 준비되었습니다.</p><time>21:51:27 · task-1026</time></div></div>
 </div><div class="right-note"><strong>관측 정보 안내</strong><p>실서비스에서는 서버에서 발생한 실행 이벤트를 WebSocket 또는 Realtime 채널로 수신하고, 영속 로그는 데이터베이스에 저장합니다. 현재 화면은 UI 확인용 예시입니다.</p></div></aside></div>  <section class="character-studio panel" id="characters">
     <div class="panel-head character-studio-heading">
-      <div><div class="panel-title">모듈형 AI 캐릭터 스튜디오</div><div class="panel-sub">20종의 픽셀 캐릭터를 선택하고 파츠 ID 조합을 실시간으로 구성합니다.</div></div>
-      <div class="character-heading-actions"><span class="character-total"><span class="character-total-dot"></span> 20 CHARACTER PRESETS</span><a class="text-link" href="assets/character-sprite-board.png" target="_blank" rel="noopener">원본 파츠 보드 ↗</a></div>
+      <div><div class="panel-title">모듈형 AI 캐릭터 스튜디오</div><div class="panel-sub">기본 베이스 신체(Base Body)와 5개 파츠 레이어로 20종 부서별 캐릭터를 실시간 구성합니다.</div></div>
+      <div class="character-heading-actions"><span class="character-total"><span class="character-total-dot"></span> 20 AGENT PRESETS</span><a class="text-link" href="office.html">3D 가상 오피스 ↗</a></div>
     </div>
     <div class="character-studio-layout">
       <div class="character-library">
-        <div class="character-library-toolbar"><div><strong>캐릭터 라이브러리</strong><span>선택하여 구성을 편집하세요</span></div><span class="library-count">20종 샘플</span></div>
-        <div class="character-grid" id="characterGrid" aria-label="캐릭터 샘플 20종"></div>
-        <div class="character-library-foot"><span class="library-foot-mark">✦</span><span>모든 캐릭터는 교체 가능한 파츠 ID를 가진 데모 프리셋입니다.</span></div>
+        <div class="character-library-toolbar">
+          <div><strong>캐릭터 디렉토리</strong><span>1F ~ 10F 부서별 AI 직원 매핑</span></div>
+          <div style="display:flex;align-items:center;gap:7px">
+            <select id="floorFilter" style="height:28px;border:1px solid #dce4eb;border-radius:6px;padding:0 7px;font-size:9px;background:#fff;color:#506072;outline:none" aria-label="층별 부서 필터">
+              <option value="all">전체 층 (1F~10F)</option>
+              <option value="1F">1F 기획&전략팀</option>
+              <option value="2F">2F 인사&경영지원</option>
+              <option value="3F">3F 개발&엔지니어링</option>
+              <option value="4F">4F 디자인&콘텐츠</option>
+              <option value="5F">5F 마케팅&홍보</option>
+              <option value="6F">6F 영업&파트너십</option>
+              <option value="7F">7F 재무&회계</option>
+              <option value="8F">8F 고객지원 CS</option>
+              <option value="9F">9F 연구&R&D</option>
+              <option value="10F">10F 글로벌 사업</option>
+            </select>
+            <span class="library-count">20 PRESETS</span>
+          </div>
+        </div>
+        <div class="char-directory-grid" id="charDirectoryGrid" aria-label="캐릭터 샘플 20종 디렉토리"></div>
+        <div class="character-library-foot"><span class="library-foot-mark">✦</span><span>카드를 클릭하면 우측 편집기에서 파츠를 실시간으로 스왑할 수 있습니다.</span></div>
       </div>
-      <aside class="character-editor" aria-label="캐릭터 파츠 편집기">
-        <div class="character-editor-head"><div><div class="editor-overline">CHARACTER CONFIGURATOR</div><strong>선택한 캐릭터</strong></div><span class="editor-live"><i></i> DEMO</span></div>
-        <div class="selected-character-card">
-          <div class="selected-character-sprite"><img id="selectedCharacterImage" src="assets/characters/agent-01.png" alt="선택한 픽셀 캐릭터 미리보기"></div>
-          <div class="selected-character-copy"><div class="selected-character-number" id="selectedCharacterNumber">AGENT 01 / 20</div><strong id="selectedCharacterName">Research AI</strong><span id="selectedCharacterRole">리서치 팀 · 자료 분석</span><div class="selected-character-tags"><span id="selectedCharacterStatus" class="status running">작업 중</span><span class="part-count">5 MODULAR PARTS</span></div></div>
+      <aside class="character-editor maples-simulator" aria-label="메이플스토리 시뮬레이터 방식 캐릭터 커스터마이저">
+        <!-- maples.im Simulator Head -->
+        <div class="maples-sim-head">
+          <div class="maples-logo-wrap">
+            <span class="maples-badge">maples.im style</span>
+            <strong>캐릭터 시뮬레이터</strong>
+          </div>
+          <div class="maples-sim-status">
+            <span class="maples-live-dot"></span>
+            <span class="customizer-code-pill" id="customizerCodePill">BASE_M/H02/F02/O01/B01/A03</span>
+          </div>
         </div>
-        <div class="part-editor-title"><strong>모듈 파츠 조합</strong><span>값을 바꾸면 JSON이 갱신됩니다</span></div>
-        <div class="part-fields">
-          <label class="part-field"><span><i>01</i> 헤어</span><select id="partHair" aria-label="헤어 파츠"></select></label>
-          <label class="part-field"><span><i>02</i> 얼굴 / 표정</span><select id="partFace" aria-label="얼굴 및 표정 파츠"></select></label>
-          <label class="part-field"><span><i>03</i> 상의 / 의상</span><select id="partTop" aria-label="상의 및 의상 파츠"></select></label>
-          <label class="part-field"><span><i>04</i> 하의 / 신발</span><select id="partBottom" aria-label="하의 및 신발 파츠"></select></label>
-          <label class="part-field part-field-wide"><span><i>05</i> 액세서리</span><select id="partAccessory" aria-label="액세서리 파츠"></select></label>
+
+        <!-- Viewport & Canvas Area -->
+        <div class="maples-viewport-card">
+          <!-- Top Tool Strip -->
+          <div class="maples-viewport-toolbar">
+            <div class="maples-tool-group">
+              <button type="button" class="sim-btn" id="btnFlipDir" title="좌우 반전 (Flip)">
+                <span>⇄</span> <span>방향</span>
+              </button>
+              <select id="selStance" class="sim-select" title="모션 / 스탠스">
+                <option value="stand1">스탠드 1 (기본)</option>
+                <option value="stand2">스탠드 2 (당당함)</option>
+                <option value="walk">워킹 (걸음)</option>
+                <option value="jump">점프 (도약)</option>
+                <option value="sit">착석 (의자)</option>
+              </select>
+            </div>
+            <div class="maples-tool-group">
+              <div class="zoom-pill-group">
+                <button type="button" class="zoom-btn active" data-zoom="1">1x</button>
+                <button type="button" class="zoom-btn" data-zoom="1.4">1.5x</button>
+                <button type="button" class="zoom-btn" data-zoom="1.8">2x</button>
+              </div>
+              <button type="button" class="sim-btn" id="btnBackdrop" title="배경 전환">
+                <span>🏁</span> <span>배경</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Canvas Box -->
+          <div class="maples-canvas-area backdrop-checker" id="simCanvasArea">
+            <div class="customizer-stage stance-stand1" id="customizerStage"></div>
+          </div>
+
+          <!-- Stage Actions -->
+          <div class="maples-stage-actions">
+            <button type="button" class="stage-action-btn primary" id="btnRandomize" title="무작위 파츠 조합">
+              <span>🎲</span> <span>랜덤</span>
+            </button>
+            <button type="button" class="stage-action-btn" id="btnLoadDefault" title="메이플 시뮬레이터 기본 캐릭터 로드">
+              <span>⭐</span> <span>기본</span>
+            </button>
+            <button type="button" class="stage-action-btn" id="btnResetParts" title="초기화">
+              <span>🔄</span> <span>초기화</span>
+            </button>
+            <button type="button" class="stage-action-btn" id="btnExportPng" title="투명 배경 PNG 저장">
+              <span>💾</span> <span>PNG</span>
+            </button>
+            <button type="button" class="stage-action-btn" id="btnCopyJson" title="maples.im JSON 복사">
+              <span>📋</span> <span>JSON</span>
+            </button>
+          </div>
+
+          <!-- Agent Identity Meta -->
+          <div class="maples-agent-info">
+            <span class="agent-id-tag" id="selectedCharBadge">#01</span>
+            <div class="agent-name-meta">
+              <strong id="customizerName">전략기획 AI</strong>
+              <span id="customizerDept">1F 기획&전략팀 · 남성</span>
+            </div>
+          </div>
         </div>
-        <div class="character-json-heading"><div><strong>Character Parts JSON</strong><span>개발용 데이터 프리뷰</span></div><button class="btn small" id="copyCharacterConfig" type="button">복사 ↗</button></div>
-        <pre class="character-json" id="characterConfigPreview">{
-  "agentId": "agent-01",
-  "characterParts": {
-    "hair": "H01",
-    "face": "F03",
-    "top": "O02",
-    "bottom": "P01",
-    "accessory": "A00"
-  }
-}</pre>
-        <div class="character-editor-note" id="characterCopyFeedback">현재는 파츠 ID와 JSON 설정을 편집하는 UI 데모입니다. 실제 이미지 합성은 파츠별 투명 PNG 에셋 연결 후 활성화할 수 있습니다.</div>
-        <div class="character-editor-actions"><a class="btn" href="agents.html">직원 관리</a><a class="btn primary" href="office.html">3D 오피스에서 보기 ↗</a></div>
+
+        <!-- maples.im Tab Navigation -->
+        <div class="maples-tab-bar" role="tablist">
+          <button type="button" class="maples-tab active" data-tab="tab-body" role="tab">👤 바디/피부</button>
+          <button type="button" class="maples-tab" data-tab="tab-hair" role="tab">💇 헤어/염색</button>
+          <button type="button" class="maples-tab" data-tab="tab-face" role="tab">👀 얼굴/성형</button>
+          <button type="button" class="maples-tab" data-tab="tab-outfit" role="tab">👔 상의/의상</button>
+          <button type="button" class="maples-tab" data-tab="tab-bottom" role="tab">👖 하의/신발</button>
+          <button type="button" class="maples-tab" data-tab="tab-acc" role="tab">🎒 소품/장식</button>
+          <button type="button" class="maples-tab" data-tab="tab-layers" role="tab">📋 장착 목록</button>
+        </div>
+
+        <!-- Tab Panels Container -->
+        <div class="maples-tab-content">
+          <!-- 1. Body & Skin Tab -->
+          <div class="maples-panel active" id="tab-body">
+            <div>
+              <div class="maples-subhead"><span>체형 / 성별 베이스 (Body Base)</span><em>3 Types</em></div>
+              <div class="maples-item-grid" data-part="base">
+                <button type="button" class="maples-item-card" data-val="BASE_PIXEL">
+                  <span class="item-code">BASE_PIXEL</span>
+                  <span class="item-title">정밀 픽셀 치비 바디</span>
+                </button>
+                <button type="button" class="maples-item-card" data-val="BASE_M">
+                  <span class="item-code">BASE_M</span>
+                  <span class="item-title">남성형 치비 바디</span>
+                </button>
+                <button type="button" class="maples-item-card" data-val="BASE_F">
+                  <span class="item-code">BASE_F</span>
+                  <span class="item-title">여성형 치비 바디</span>
+                </button>
+              </div>
+            </div>
+            <div>
+              <div class="maples-subhead"><span>피부톤 컬러 (Skin Tone Palette)</span><em>6 Colors</em></div>
+              <div class="maples-swatch-row" id="skinPalette">
+                <button type="button" class="maples-swatch" data-color="#fff0e6" title="미백 스킨" style="background:#fff0e6"></button>
+                <button type="button" class="maples-swatch" data-color="#fde2d2" title="뽀송 스킨" style="background:#fde2d2"></button>
+                <button type="button" class="maples-swatch" data-color="#f8cfbe" title="홍조 스킨" style="background:#f8cfbe"></button>
+                <button type="button" class="maples-swatch" data-color="#ebb99a" title="내추럴 스킨" style="background:#ebb99a"></button>
+                <button type="button" class="maples-swatch" data-color="#cf9571" title="태닝 스킨" style="background:#cf9571"></button>
+                <button type="button" class="maples-swatch" data-color="#e3e8ee" title="시원한 쿨톤" style="background:#e3e8ee"></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Hair & Dye Tab -->
+          <div class="maples-panel" id="tab-hair">
+            <div>
+              <div class="maples-subhead"><span>헤어스타일 (Maple Royal Hair)</span><em>9 Styles</em></div>
+              <div class="maples-item-grid" data-part="hair">
+                <button type="button" class="maples-item-card" data-val="H00"><span class="item-code">H00</span><span class="item-title">삭발/민머리</span></button>
+                <button type="button" class="maples-item-card" data-val="H01"><span class="item-code">H01</span><span class="item-title">단발 보브컷</span></button>
+                <button type="button" class="maples-item-card" data-val="H02"><span class="item-code">H02</span><span class="item-title">모던 댄디컷</span></button>
+                <button type="button" class="maples-item-card" data-val="H03"><span class="item-code">H03</span><span class="item-title">로맨틱 웨이브</span></button>
+                <button type="button" class="maples-item-card" data-val="H04"><span class="item-code">H04</span><span class="item-title">클래식 포마드</span></button>
+                <button type="button" class="maples-item-card" data-val="H05"><span class="item-code">H05</span><span class="item-title">큐티 포니테일</span></button>
+                <button type="button" class="maples-item-card" data-val="H06"><span class="item-code">H06</span><span class="item-title">플러피 펌</span></button>
+                <button type="button" class="maples-item-card" data-val="H07"><span class="item-code">H07</span><span class="item-title">샤기 울프컷</span></button>
+                <button type="button" class="maples-item-card" data-val="H08"><span class="item-code">H08</span><span class="item-title">시니어 그레이</span></button>
+              </div>
+            </div>
+            <div>
+              <div class="maples-subhead"><span>믹스 염색 컬러 (Mix Dye Palette)</span><em>8 Colors</em></div>
+              <div class="maples-swatch-row" id="hairPalette">
+                <button type="button" class="maples-swatch" data-color="#1e1e24" title="옵시디언 블랙" style="background:#1e1e24"></button>
+                <button type="button" class="maples-swatch" data-color="#4a3525" title="다크 브라운" style="background:#4a3525"></button>
+                <button type="button" class="maples-swatch" data-color="#7c4a2d" title="초코 브라운" style="background:#7c4a2d"></button>
+                <button type="button" class="maples-swatch" data-color="#d4a359" title="골드 블론드" style="background:#d4a359"></button>
+                <button type="button" class="maples-swatch" data-color="#f472b6" title="로즈 핑크" style="background:#f472b6"></button>
+                <button type="button" class="maples-swatch" data-color="#3b82f6" title="코발트 블루" style="background:#3b82f6"></button>
+                <button type="button" class="maples-swatch" data-color="#94a3b8" title="애쉬 실버" style="background:#94a3b8"></button>
+                <button type="button" class="maples-swatch" data-color="#10b981" title="에메랄드" style="background:#10b981"></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. Face & Eyes Tab -->
+          <div class="maples-panel" id="tab-face">
+            <div>
+              <div class="maples-subhead"><span>얼굴 성형 / 표정 (Face Expression)</span><em>11 Faces</em></div>
+              <div class="maples-item-grid" data-part="face">
+                <button type="button" class="maples-item-card" data-val="F00"><span class="item-code">F00</span><span class="item-title">투명/자체 표정</span></button>
+                <button type="button" class="maples-item-card" data-val="F01"><span class="item-code">F01</span><span class="item-title">아잉/방긋 미소</span></button>
+                <button type="button" class="maples-item-card" data-val="F02"><span class="item-code">F02</span><span class="item-title">조용한 눈 (시크)</span></button>
+                <button type="button" class="maples-item-card" data-val="F03"><span class="item-code">F03</span><span class="item-title">당당한 윙크</span></button>
+                <button type="button" class="maples-item-card" data-val="F04"><span class="item-code">F04</span><span class="item-title">멍한 인형 눈</span></button>
+                <button type="button" class="maples-item-card" data-val="F05"><span class="item-code">F05</span><span class="item-title">초롱 호기심 눈</span></button>
+                <button type="button" class="maples-item-card" data-val="F06"><span class="item-code">F06</span><span class="item-title">샤프 분석 눈빛</span></button>
+                <button type="button" class="maples-item-card" data-val="F07"><span class="item-code">F07</span><span class="item-title">정밀 멍한 눈 (160px)</span></button>
+                <button type="button" class="maples-item-card" data-val="F08"><span class="item-code">F08</span><span class="item-title">초롱 미소 눈 (144px)</span></button>
+                <button type="button" class="maples-item-card" data-val="F09"><span class="item-code">F09</span><span class="item-title">자신감 눈빛 (118px)</span></button>
+                <button type="button" class="maples-item-card" data-val="F10"><span class="item-code">F10</span><span class="item-title">반짝 미소 눈 (28px)</span></button>
+              </div>
+
+              <!-- F07 / F08 / F09 / F10+ 정밀 오프셋 실시간 튜너 (눈/입 위치 미세조정) -->
+              <div class="maples-offset-tuner" id="f07OffsetTuner" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                  <span style="font-size:12px;font-weight:700;color:#0f172a;">🎯 표정 위치 실시간 미세조정 (F07 ~ F10+)</span>
+                  <span id="f07CoordBadge" style="font-size:11px;font-family:monospace;background:#ea580c;color:#fff;font-weight:700;padding:2px 8px;border-radius:4px;">[F07] X: 7, Y: 17</span>
+                </div>
+                <div style="display:flex;gap:12px;align-items:center;">
+                  <div style="display:grid;grid-template-columns:repeat(3, 26px);grid-gap:3px;">
+                    <span></span>
+                    <button type="button" class="btn small f07-move-btn" data-axis="y" data-delta="-1" title="위로 1px 이동" style="padding:2px 0;font-size:11px;">▲</button>
+                    <span></span>
+                    <button type="button" class="btn small f07-move-btn" data-axis="x" data-delta="-1" title="왼쪽으로 1px 이동" style="padding:2px 0;font-size:11px;">◀</button>
+                    <button type="button" class="btn small f07-reset-btn" title="기본 정위치로 복원" style="padding:2px 0;background:#0284c7;color:#fff;font-size:10px;">●</button>
+                    <button type="button" class="btn small f07-move-btn" data-axis="x" data-delta="1" title="오른쪽으로 1px 이동" style="padding:2px 0;font-size:11px;">▶</button>
+                    <span></span>
+                    <button type="button" class="btn small f07-move-btn" data-axis="y" data-delta="1" title="아래로 1px 이동" style="padding:2px 0;font-size:11px;">▼</button>
+                    <span></span>
+                  </div>
+                  <div style="font-size:11px;color:#64748b;line-height:1.4;">
+                    버튼 클릭 또는 <code>F07.json</code> / <code>F08.json</code> / <code>F09.json</code> 수정 시 즉시 화면에 이동 반영됩니다.<br>
+                    <strong style="color:#0284c7;">정위치: F07/F08 (X:7, Y:17) · F09 (X:0, Y:0)</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="maples-subhead"><span>동공 렌즈 컬러 (Color Lens)</span><em>6 Lens</em></div>
+              <div class="maples-swatch-row" id="eyePalette">
+                <button type="button" class="maples-swatch" data-color="#1e293b" title="옵시디언 렌즈" style="background:#1e293b"></button>
+                <button type="button" class="maples-swatch" data-color="#2563eb" title="사파이어 블루" style="background:#2563eb"></button>
+                <button type="button" class="maples-swatch" data-color="#059669" title="에메랄드 그린" style="background:#059669"></button>
+                <button type="button" class="maples-swatch" data-color="#dc2626" title="루비 레드" style="background:#dc2626"></button>
+                <button type="button" class="maples-swatch" data-color="#d97706" title="앰버 브라운" style="background:#d97706"></button>
+                <button type="button" class="maples-swatch" data-color="#9333ea" title="아메시스트" style="background:#9333ea"></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. Outfit Tab -->
+          <div class="maples-panel" id="tab-outfit">
+            <div class="maples-subhead"><span>상의 / 의상 (Top & Outfit)</span><em>8 Outfits</em></div>
+            <div class="maples-item-grid" data-part="outfit">
+              <button type="button" class="maples-item-card" data-val="O00"><span class="item-code">O00</span><span class="item-title">없음 (이너웨어)</span></button>
+              <button type="button" class="maples-item-card" data-val="O01"><span class="item-code">O01</span><span class="item-title">비즈니스 수트</span></button>
+              <button type="button" class="maples-item-card" data-val="O02"><span class="item-code">O02</span><span class="item-title">개발자 후드티</span></button>
+              <button type="button" class="maples-item-card" data-val="O03"><span class="item-code">O03</span><span class="item-title">스마트 셔츠&니트</span></button>
+              <button type="button" class="maples-item-card" data-val="O04"><span class="item-code">O04</span><span class="item-title">연구실 랩가운</span></button>
+              <button type="button" class="maples-item-card" data-val="O05"><span class="item-code">O05</span><span class="item-title">크리에이티브 워크웨어</span></button>
+              <button type="button" class="maples-item-card" data-val="O06"><span class="item-code">O06</span><span class="item-title">클래식 트렌치코트</span></button>
+              <button type="button" class="maples-item-card" data-val="O07"><span class="item-code">O07</span><span class="item-title">캐주얼 로고 반팔티</span></button>
+            </div>
+          </div>
+
+          <!-- 5. Bottom Tab -->
+          <div class="maples-panel" id="tab-bottom">
+            <div class="maples-subhead"><span>하의 & 신발 (Bottom & Shoes)</span><em>5 Bottoms</em></div>
+            <div class="maples-item-grid" data-part="bottom">
+              <button type="button" class="maples-item-card" data-val="B00"><span class="item-code">B00</span><span class="item-title">없음 (이너웨어)</span></button>
+              <button type="button" class="maples-item-card" data-val="B01"><span class="item-code">B01</span><span class="item-title">포멀 슬랙스 & 구두</span></button>
+              <button type="button" class="maples-item-card" data-val="B02"><span class="item-code">B02</span><span class="item-title">롤업 진 & 스니커즈</span></button>
+              <button type="button" class="maples-item-card" data-val="B03"><span class="item-code">B03</span><span class="item-title">오피스 스커트 & 구두</span></button>
+              <button type="button" class="maples-item-card" data-val="B04"><span class="item-code">B04</span><span class="item-title">베이지 치노 & 로퍼</span></button>
+            </div>
+          </div>
+
+          <!-- 6. Accessory Tab -->
+          <div class="maples-panel" id="tab-acc">
+            <div class="maples-subhead"><span>액세서리 & 도구 (Acc & Handheld)</span><em>8 Items</em></div>
+            <div class="maples-item-grid" data-part="acc">
+              <button type="button" class="maples-item-card" data-val="A00"><span class="item-code">A00</span><span class="item-title">장착 해제</span></button>
+              <button type="button" class="maples-item-card" data-val="A01"><span class="item-code">A01</span><span class="item-title">동글이 오피스 안경</span></button>
+              <button type="button" class="maples-item-card" data-val="A02"><span class="item-code">A02</span><span class="item-title">무선 CS 헤드셋</span></button>
+              <button type="button" class="maples-item-card" data-val="A03"><span class="item-code">A03</span><span class="item-title">사원증 & 스마트폰</span></button>
+              <button type="button" class="maples-item-card" data-val="A04"><span class="item-code">A04</span><span class="item-title">슬림 랩탑 노트북</span></button>
+              <button type="button" class="maples-item-card" data-val="A05"><span class="item-code">A05</span><span class="item-title">클래식 서류 가방</span></button>
+              <button type="button" class="maples-item-card" data-val="A06"><span class="item-code">A06</span><span class="item-title">모닝 커피 텀블러</span></button>
+              <button type="button" class="maples-item-card" data-val="A07"><span class="item-code">A07</span><span class="item-title">스타일러스 펜&패드</span></button>
+            </div>
+          </div>
+
+          <!-- 7. Equipped Layers List (maples.im Layer Stack) -->
+          <div class="maples-panel" id="tab-layers">
+            <div class="maples-subhead"><span>장착 중인 레이어 스택 (Layer Stack)</span><em>👁️ 토글 / 🗑️ 해제</em></div>
+            <div class="maples-layer-list" id="equippedLayerList"></div>
+          </div>
+        </div>
+
+        <!-- Code & Preset Box -->
+        <div class="char-code-box">
+          <div class="char-code-head">
+            <strong>maples.im JSON Preset Specification</strong>
+            <button class="btn small" id="copyCharCode" type="button">코드 복사 ↗</button>
+          </div>
+          <pre class="character-json" id="charCodeOutput"><code></code></pre>
+        </div>
+        <div class="character-editor-actions" style="margin-top:10px">
+          <a class="btn" href="agents.html">직원 목록 새로고침</a>
+          <a class="btn primary" href="office.html">3D 가상 오피스에서 보기 ↗</a>
+        </div>
       </aside>
     </div>
   </section></div>
-</main></div><script src="app.js"></script></body></html>
+</main></div><script src="avatar/scripts/pixel-character.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-base.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-parts.js?v=1007"></script><script src="avatar/scripts/avatar-loader.js?v=1007"></script><script src="avatar/scripts/default-character.js?v=1007"></script><script src="app.js?v=1007"></script></body></html>

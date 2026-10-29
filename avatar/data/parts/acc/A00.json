@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "name": "acc_a00_none",
+    "category": "acc",
+    "id": "A00",
+    "title": "장착 해제",
+    "width": 43,
+    "height": 68,
+    "totalPixels": 0
+  },
+  "palette": [],
+  "spans": {},
+  "pixels": []
+}
