@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>픽셀 스프라이트 좌표 전수 컨버터 & 뷰어</title>
+  <title>픽셀 스프라이트 좌표 전수 컨버터 & 방향 변환기</title>
   <style>
     :root {
       --bg: #090e17;
@@ -15,6 +15,7 @@
       --accent: #38bdf8;
       --mint: #34d399;
       --amber: #fbbf24;
+      --purple: #a78bfa;
     }
 
     * {
@@ -34,7 +35,7 @@
     }
 
     header {
-      padding: 12px 20px;
+      padding: 10px 20px;
       background: #0f1724;
       border-bottom: 1px solid var(--border);
       display: flex;
@@ -47,12 +48,25 @@
       font-size: 15px;
       font-weight: 800;
       color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .paste-badge {
+      font-size: 10px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 2px 7px;
+      border-radius: 12px;
+      font-weight: 600;
     }
 
     .header-actions {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
 
     .file-btn-wrap {
@@ -90,7 +104,7 @@
     }
 
     .panel-header {
-      padding: 11px 14px;
+      padding: 10px 14px;
       border-bottom: 1px solid var(--border);
       font-size: 12px;
       font-weight: 700;
@@ -141,14 +155,56 @@
     .drop-overlay {
       position: absolute;
       inset: 0;
-      background: rgba(56, 189, 248, 0.15);
+      background: rgba(56, 189, 248, 0.18);
       border: 2px dashed var(--accent);
       display: none;
       place-items: center;
       font-size: 16px;
       font-weight: 700;
       color: var(--accent);
-      z-index: 10;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .toast-alert {
+      position: absolute;
+      top: 60px;
+      background: #10b981;
+      color: #042f1a;
+      padding: 7px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 800;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      z-index: 30;
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: 0.25s ease;
+      pointer-events: none;
+    }
+
+    .toast-alert.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .top-toolbar {
+      position: absolute;
+      top: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0c1420f0;
+      padding: 6px 14px;
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      z-index: 5;
+    }
+
+    .direction-group {
+      display: flex;
+      gap: 4px;
     }
 
     .canvas-container {
@@ -165,13 +221,14 @@
       image-rendering: pixelated;
     }
 
-    .controls {
+    .bottom-controls {
       position: absolute;
-      bottom: 16px;
+      bottom: 14px;
       display: flex;
+      align-items: center;
       gap: 8px;
       background: #0c1420ee;
-      padding: 6px 12px;
+      padding: 6px 14px;
       border-radius: 20px;
       border: 1px solid var(--border);
     }
@@ -180,7 +237,7 @@
       background: #1a2638;
       color: var(--text);
       border: 1px solid var(--border);
-      padding: 6px 12px;
+      padding: 5px 11px;
       border-radius: 6px;
       font-size: 11px;
       font-weight: 600;
@@ -204,6 +261,28 @@
       background: var(--mint);
       color: #081711;
       font-weight: 700;
+      border-color: var(--mint);
+    }
+
+    .btn.dir-btn.active {
+      background: var(--accent);
+      color: #081711;
+    }
+
+    .slider-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      padding-left: 6px;
+      border-left: 1px solid var(--border);
+    }
+
+    .slider-wrap input[type=range] {
+      width: 70px;
+      cursor: pointer;
+      accent-color: var(--accent);
     }
 
     /* 우측 인스펙터 패널 */
@@ -248,6 +327,8 @@
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 5px;
+      max-height: 220px;
+      overflow-y: auto;
     }
 
     .swatch {
@@ -292,33 +373,53 @@
 <body>
 
   <header>
-    <div class="brand-title">픽셀 좌표 스프라이트 전수 컨버터 & 뷰어</div>
+    <div class="brand-title">
+      픽셀 좌표 스프라이트 전수 컨버터 & 방향 변환기
+      <span class="paste-badge">📋 Ctrl+V 붙여넣기 지원</span>
+    </div>
     <div class="header-actions">
       <div class="file-btn-wrap">
-        <button class="btn primary">📁 0.png 파일 불러오기</button>
+        <button class="btn">📁 새 PNG 불러오기</button>
         <input type="file" id="imageInput" accept="image/*">
       </div>
-      <button class="btn" id="copyJsonBtn">데이터 전체 복사 (JSON)</button>
+      <button class="btn primary" id="copyJsonBtn">현재 방향 좌표 복사 (JSON)</button>
     </div>
   </header>
 
   <div class="layout">
-    <!-- 1. 좌표 데이터 구조 패널 -->
+    <!-- 1. 좌측 변환 좌표 노드 트리 -->
     <div class="panel">
       <div class="panel-header">
-        <span>추출된 픽셀 좌표 (<span id="pixelCount">0</span>개)</span>
+        <span>현재 방향 좌표 (<span id="pixelCount">1586</span>개)</span>
         <span style="font-size:10px;color:var(--muted)">[X, Y, PaletteIndex]</span>
       </div>
       <div class="tree-scroll" id="jsonTree"></div>
     </div>
 
-    <!-- 2. 중앙 캔버스 뷰포트 -->
+    <!-- 2. 중앙 렌더링 뷰포트 & 방향 툴바 -->
     <div class="panel viewport" id="dropArea">
-      <div class="drop-overlay" id="dropOverlay">0.png 이미지를 여기에 놓으세요!</div>
+      <div class="drop-overlay" id="dropOverlay">이미지를 여기에 놓으세요!</div>
+      <div class="toast-alert" id="toastAlert">클립보드 이미지가 성공적으로 반영되었습니다!</div>
+
+      <div class="top-toolbar">
+        <span style="font-size:11px;font-weight:700;color:var(--muted)">시선 방향:</span>
+        <div class="direction-group">
+          <button class="btn dir-btn active" data-dir="left">⬅️ 좌측 (원본)</button>
+          <button class="btn dir-btn" data-dir="right">➡️ 우측 (반전)</button>
+          <button class="btn dir-btn" data-dir="front">👤 정면 (대칭 합성)</button>
+        </div>
+        <div class="slider-wrap" id="centerControl" style="display:none;">
+          <span>중심축:</span>
+          <input type="range" id="centerSlider" min="10" max="30" value="20" step="1">
+          <span id="centerVal" style="color:var(--accent);font-weight:700;">20</span>
+        </div>
+      </div>
+
       <div class="canvas-container">
         <canvas id="spriteCanvas"></canvas>
       </div>
-      <div class="controls">
+
+      <div class="bottom-controls">
         <button class="btn active" id="toggleGridBtn">격자 (Grid)</button>
         <button class="btn" id="zoomInBtn">확대 (+)</button>
         <button class="btn" id="zoomOutBtn">축소 (-)</button>
@@ -326,14 +427,15 @@
       </div>
     </div>
 
-    <!-- 3. 우측 정보 및 팔레트 패널 -->
+    <!-- 3. 우측 상태 & 팔레트 인스펙터 -->
     <div class="panel">
       <div class="panel-header">스프라이트 인스펙터</div>
       <div class="info-panel">
         <div class="card">
           <div class="card-title">스프라이트 규격</div>
-          <div class="stats-row"><span>해상도</span><b id="resText">40 × 64 px</b></div>
-          <div class="stats-row"><span>유효 픽셀 수</span><b id="validPixelText">0 개</b></div>
+          <div class="stats-row"><span>시선 상태</span><b id="dirText" style="color:var(--accent)">좌측 (Left)</b></div>
+          <div class="stats-row"><span>캔버스 해상도</span><b id="resText">44 × 68 px</b></div>
+          <div class="stats-row"><span>현재 노드 수</span><b id="validPixelText">1,586 개</b></div>
           <div class="stats-row"><span>배율</span><b id="scaleText">6x</b></div>
         </div>
 
@@ -345,7 +447,7 @@
         </div>
 
         <div class="card">
-          <div class="card-title">색상 팔레트 (<span id="paletteCount">0</span>종)</div>
+          <div class="card-title">색상 팔레트 (<span id="paletteCount">24</span>종)</div>
           <div class="palette-grid" id="paletteGrid"></div>
         </div>
       </div>
@@ -353,92 +455,177 @@
   </div>
 
   <script>
-    // 스프라이트 기본 상태 객체
-    const spriteData = {
-      meta: { name: "agent_chibi_base", width: 40, height: 64, pixelSize: 6 },
-      palette: [],
-      pixels: []
-    };
+    // 기본 1,586개 노드 원본 데이터셋
+    let rawPixels = [
+      [15, 2, 0], [16, 2, 0], [17, 2, 0], [18, 2, 0], [19, 2, 0], [20, 2, 0], [21, 2, 0], [22, 2, 0], [23, 2, 0], [24, 2, 0], [25, 2, 0], [12, 3, 0], [13, 3, 0], [14, 3, 0], [15, 3, 1], [16, 3, 1], [17, 3, 1], [18, 3, 1], [19, 3, 1], [20, 3, 1], [21, 3, 1], [22, 3, 1], [23, 3, 2], [24, 3, 2], [25, 3, 3], [26, 3, 0], [27, 3, 0], [28, 3, 0], [10, 4, 0], [11, 4, 0], [12, 4, 1], [13, 4, 1], [14, 4, 1], [15, 4, 1], [16, 4, 1], [17, 4, 1], [18, 4, 1], [19, 4, 1], [20, 4, 1], [21, 4, 1], [22, 4, 4], [23, 4, 2], [24, 4, 2], [25, 4, 2], [26, 4, 3], [27, 4, 5], [28, 4, 5], [29, 4, 0], [30, 4, 0], [9, 5, 0], [10, 5, 1], [11, 5, 1], [12, 5, 1], [13, 5, 1], [14, 5, 1], [15, 5, 1], [16, 5, 1], [17, 5, 2], [18, 5, 2], [19, 5, 2], [20, 5, 2], [21, 5, 2], [22, 5, 2], [23, 5, 2], [24, 5, 2], [25, 5, 2], [26, 5, 2], [27, 5, 2], [28, 5, 5], [29, 5, 5], [30, 5, 5], [31, 5, 0], [32, 5, 0], [7, 6, 0], [8, 6, 0], [9, 6, 1], [10, 6, 1], [11, 6, 1], [12, 6, 1], [13, 6, 1], [14, 6, 1], [15, 6, 2], [16, 6, 2], [17, 6, 2], [18, 6, 2], [19, 6, 2], [20, 6, 2], [21, 6, 2], [22, 6, 2], [23, 6, 2], [24, 6, 2], [25, 6, 2], [26, 6, 2], [27, 6, 2], [28, 6, 2], [29, 6, 3], [30, 6, 5], [31, 6, 5], [32, 6, 6], [33, 6, 0], [6, 7, 0], [7, 7, 1], [8, 7, 1], [9, 7, 1], [10, 7, 1], [11, 7, 1], [12, 7, 1], [13, 7, 1], [14, 7, 2], [15, 7, 2], [16, 7, 2], [17, 7, 2], [18, 7, 2], [19, 7, 2], [20, 7, 2], [21, 7, 2], [22, 7, 2], [23, 7, 2], [24, 7, 2], [25, 7, 2], [26, 7, 2], [27, 7, 2], [28, 7, 2], [29, 7, 2], [30, 7, 7], [31, 7, 5], [32, 7, 6], [33, 7, 8], [34, 7, 0], [5, 8, 0], [6, 8, 1], [7, 8, 1], [8, 8, 1], [9, 8, 1], [10, 8, 1], [11, 8, 1], [12, 8, 2], [13, 8, 2], [14, 8, 2], [15, 8, 2], [16, 8, 2], [17, 8, 2], [18, 8, 2], [19, 8, 2], [20, 8, 2], [21, 8, 2], [22, 8, 2], [23, 8, 2], [24, 8, 2], [25, 8, 2], [26, 8, 2], [27, 8, 2], [28, 8, 2], [29, 8, 2], [30, 8, 2], [31, 8, 5], [32, 8, 5], [33, 8, 8], [34, 8, 0], [5, 9, 0], [6, 9, 1], [7, 9, 1], [8, 9, 1], [9, 9, 1], [10, 9, 1], [11, 9, 1], [12, 9, 2], [13, 9, 2], [14, 9, 2], [15, 9, 2], [16, 9, 2], [17, 9, 2], [18, 9, 2], [19, 9, 2], [20, 9, 2], [21, 9, 2], [22, 9, 2], [23, 9, 2], [24, 9, 2], [25, 9, 2], [26, 9, 2], [27, 9, 2], [28, 9, 2], [29, 9, 2], [30, 9, 2], [31, 9, 7], [32, 9, 5], [33, 9, 9], [34, 9, 8], [35, 9, 0], [4, 10, 0], [5, 10, 1], [6, 10, 1], [7, 10, 1], [8, 10, 1], [9, 10, 1], [10, 10, 1], [11, 10, 2], [12, 10, 2], [13, 10, 2], [14, 10, 2], [15, 10, 2], [16, 10, 2], [17, 10, 2], [18, 10, 2], [19, 10, 2], [20, 10, 2], [21, 10, 2], [22, 10, 2], [23, 10, 2], [24, 10, 2], [25, 10, 2], [26, 10, 2], [27, 10, 2], [28, 10, 2], [29, 10, 2], [30, 10, 2], [31, 10, 7], [32, 10, 5], [33, 10, 5], [34, 10, 8], [35, 10, 0], [4, 11, 0], [5, 11, 1], [6, 11, 1], [7, 11, 1], [8, 11, 1], [9, 11, 1], [10, 11, 1], [11, 11, 2], [12, 11, 2], [13, 11, 2], [14, 11, 2], [15, 11, 2], [16, 11, 2], [17, 11, 2], [18, 11, 2], [19, 11, 2], [20, 11, 2], [21, 11, 2], [22, 11, 2], [23, 11, 2], [24, 11, 2], [25, 11, 2], [26, 11, 2], [27, 11, 2], [28, 11, 2], [29, 11, 2], [30, 11, 2], [31, 11, 7], [32, 11, 5], [33, 11, 5], [34, 11, 8], [35, 11, 8], [36, 11, 0], [4, 12, 0], [5, 12, 1], [6, 12, 1], [7, 12, 1], [8, 12, 1], [9, 12, 1], [10, 12, 1], [11, 12, 2], [12, 12, 2], [13, 12, 2], [14, 12, 2], [15, 12, 2], [16, 12, 2], [17, 12, 2], [18, 12, 2], [19, 12, 2], [20, 12, 2], [21, 12, 2], [22, 12, 2], [23, 12, 2], [24, 12, 2], [25, 12, 2], [26, 12, 2], [27, 12, 2], [28, 12, 2], [29, 12, 2], [30, 12, 3], [31, 12, 5], [32, 12, 5], [33, 12, 5], [34, 12, 8], [35, 12, 8], [36, 12, 0], [3, 13, 0], [4, 13, 1], [5, 13, 1], [6, 13, 1], [7, 13, 1], [8, 13, 1], [9, 13, 1], [10, 13, 2], [11, 13, 2], [12, 13, 2], [13, 13, 2], [14, 13, 2], [15, 13, 2], [16, 13, 2], [17, 13, 2], [18, 13, 2], [19, 13, 2], [20, 13, 2], [21, 13, 2], [22, 13, 2], [23, 13, 2], [24, 13, 2], [25, 13, 2], [26, 13, 2], [27, 13, 2], [28, 13, 2], [29, 13, 2], [30, 13, 7], [31, 13, 5], [32, 13, 5], [33, 13, 5], [34, 13, 8], [35, 13, 8], [36, 13, 0], [3, 14, 0], [4, 14, 1], [5, 14, 1], [6, 14, 1], [7, 14, 1], [8, 14, 1], [9, 14, 2], [10, 14, 2], [11, 14, 2], [12, 14, 2], [13, 14, 2], [14, 14, 2], [15, 14, 2], [16, 14, 2], [17, 14, 2], [18, 14, 2], [19, 14, 2], [20, 14, 2], [21, 14, 2], [22, 14, 2], [23, 14, 2], [24, 14, 2], [25, 14, 2], [26, 14, 2], [27, 14, 2], [28, 14, 2], [29, 14, 2], [30, 14, 5], [31, 14, 5], [32, 14, 5], [33, 14, 6], [34, 14, 6], [35, 14, 8], [36, 14, 8], [37, 14, 0], [3, 15, 0], [4, 15, 1], [5, 15, 1], [6, 15, 1], [7, 15, 2], [8, 15, 2], [9, 15, 2], [10, 15, 2], [11, 15, 2], [12, 15, 2], [13, 15, 2], [14, 15, 2], [15, 15, 2], [16, 15, 2], [17, 15, 2], [18, 15, 2], [19, 15, 2], [20, 15, 2], [21, 15, 2], [22, 15, 2], [23, 15, 2], [24, 15, 2], [25, 15, 2], [26, 15, 2], [27, 15, 2], [28, 15, 2], [29, 15, 3], [30, 15, 5], [31, 15, 5], [32, 15, 5], [33, 15, 6], [34, 15, 8], [35, 15, 8], [36, 15, 8], [37, 15, 0], [3, 16, 0], [4, 16, 1], [5, 16, 1], [6, 16, 2], [7, 16, 2], [8, 16, 2], [9, 16, 2], [10, 16, 2], [11, 16, 2], [12, 16, 2], [13, 16, 2], [14, 16, 2], [15, 16, 2], [16, 16, 2], [17, 16, 2], [18, 16, 2], [19, 16, 2], [20, 16, 2], [21, 16, 2], [22, 16, 2], [23, 16, 2], [24, 16, 2], [25, 16, 2], [26, 16, 2], [27, 16, 2], [28, 16, 2], [29, 16, 3], [30, 16, 5], [31, 16, 5], [32, 16, 5], [33, 16, 8], [34, 16, 8], [35, 16, 10], [36, 16, 11], [37, 16, 0], [3, 17, 0], [4, 17, 1], [5, 17, 2], [6, 17, 2], [7, 17, 2], [8, 17, 2], [9, 17, 2], [10, 17, 2], [11, 17, 2], [12, 17, 2], [13, 17, 2], [14, 17, 2], [15, 17, 2], [16, 17, 2], [17, 17, 2], [18, 17, 2], [19, 17, 2], [20, 17, 2], [21, 17, 2], [22, 17, 2], [23, 17, 2], [24, 17, 2], [25, 17, 2], [26, 17, 2], [27, 17, 2], [28, 17, 2], [29, 17, 3], [30, 17, 5], [31, 17, 5], [32, 17, 5], [33, 17, 8], [34, 17, 8], [35, 17, 12], [36, 17, 13], [37, 17, 0], [3, 18, 0], [4, 18, 2], [5, 18, 2], [6, 18, 2], [7, 18, 2], [8, 18, 2], [9, 18, 2], [10, 18, 2], [11, 18, 2], [12, 18, 2], [13, 18, 2], [14, 18, 2], [15, 18, 2], [16, 18, 2], [17, 18, 2], [18, 18, 2], [19, 18, 2], [20, 18, 2], [21, 18, 2], [22, 18, 2], [23, 18, 2], [24, 18, 2], [25, 18, 2], [26, 18, 2], [27, 18, 2], [28, 18, 2], [29, 18, 2], [30, 18, 5], [31, 18, 5], [32, 18, 5], [33, 18, 8], [34, 18, 8], [35, 18, 12], [36, 18, 13], [37, 18, 0], [3, 19, 0], [4, 19, 2], [5, 19, 14], [6, 19, 5], [7, 19, 5], [8, 19, 7], [9, 19, 14], [10, 19, 2], [11, 19, 2], [12, 19, 2], [13, 19, 2], [14, 19, 2], [15, 19, 2], [16, 19, 2], [17, 19, 2], [18, 19, 2], [19, 19, 2], [20, 19, 2], [21, 19, 3], [22, 19, 3], [23, 19, 3], [24, 19, 3], [25, 19, 2], [26, 19, 2], [27, 19, 2], [28, 19, 2], [29, 19, 2], [30, 19, 5], [31, 19, 5], [32, 19, 5], [33, 19, 6], [34, 19, 8], [35, 19, 12], [36, 19, 15], [37, 19, 0], [3, 20, 0], [4, 20, 5], [5, 20, 5], [6, 20, 6], [7, 20, 6], [8, 20, 5], [9, 20, 5], [10, 20, 5], [11, 20, 7], [12, 20, 3], [13, 20, 2], [14, 20, 2], [15, 20, 2], [16, 20, 2], [17, 20, 2], [18, 20, 3], [19, 20, 7], [20, 20, 7], [21, 20, 5], [22, 20, 5], [23, 20, 5], [24, 20, 5], [25, 20, 5], [26, 20, 5], [27, 20, 7], [28, 20, 3], [29, 20, 2], [30, 20, 2], [31, 20, 5], [32, 20, 5], [33, 20, 8], [34, 20, 10], [35, 20, 13], [36, 20, 15], [37, 20, 0], [3, 21, 0], [4, 21, 5], [5, 21, 16], [6, 21, 8], [7, 21, 16], [8, 21, 8], [9, 21, 8], [10, 21, 5], [11, 21, 5], [12, 21, 5], [13, 21, 5], [14, 21, 3], [15, 21, 2], [16, 21, 7], [17, 21, 5], [18, 21, 5], [19, 21, 5], [20, 21, 5], [21, 21, 5], [22, 21, 6], [23, 21, 8], [24, 21, 8], [25, 21, 8], [26, 21, 6], [27, 21, 5], [28, 21, 5], [29, 21, 5], [30, 21, 7], [31, 21, 5], [32, 21, 5], [33, 21, 8], [34, 21, 10], [35, 21, 17], [36, 21, 0], [37, 21, 0], [38, 21, 0], [2, 22, 0], [3, 22, 1], [4, 22, 0], [5, 22, 8], [6, 22, 16], [7, 22, 16], [8, 22, 16], [9, 22, 12], [10, 22, 13], [11, 22, 18], [12, 22, 16], [13, 22, 6], [14, 22, 5], [15, 22, 5], [16, 22, 5], [17, 22, 5], [18, 22, 6], [19, 22, 12], [20, 22, 19], [21, 22, 19], [22, 22, 13], [23, 22, 12], [24, 22, 8], [25, 22, 8], [26, 22, 8], [27, 22, 8], [28, 22, 8], [29, 22, 8], [30, 22, 9], [31, 22, 5], [32, 22, 6], [33, 22, 8], [34, 22, 8], [35, 22, 0], [36, 22, 2], [37, 22, 2], [38, 22, 2], [39, 22, 0], [2, 23, 0], [3, 23, 1], [4, 23, 0], [5, 23, 8], [6, 23, 16], [7, 23, 16], [8, 23, 16], [9, 23, 12], [10, 23, 13], [11, 23, 13], [12, 23, 19], [13, 23, 18], [14, 23, 8], [15, 23, 5], [16, 23, 5], [17, 23, 8], [18, 23, 12], [19, 23, 15], [20, 23, 15], [21, 23, 15], [22, 23, 19], [23, 23, 12], [24, 23, 11], [25, 23, 8], [26, 23, 8], [27, 23, 8], [28, 23, 8], [29, 23, 8], [30, 23, 8], [31, 23, 16], [32, 23, 8], [33, 23, 5], [34, 23, 5], [35, 23, 5], [36, 23, 5], [37, 23, 8], [38, 23, 2], [39, 23, 2], [40, 23, 0], [2, 24, 0], [3, 24, 2], [4, 24, 0], [5, 24, 6], [6, 24, 8], [7, 24, 16], [8, 24, 16], [9, 24, 16], [10, 24, 11], [11, 24, 18], [12, 24, 13], [13, 24, 11], [14, 24, 8], [15, 24, 5], [16, 24, 5], [17, 24, 8], [18, 24, 13], [19, 24, 15], [20, 24, 19], [21, 24, 18], [22, 24, 12], [23, 24, 11], [24, 24, 8], [25, 24, 8], [26, 24, 8], [27, 24, 8], [28, 24, 8], [29, 24, 8], [30, 24, 8], [31, 24, 8], [32, 24, 5], [33, 24, 5], [34, 24, 2], [35, 24, 0], [36, 24, 0], [37, 24, 19], [38, 24, 6], [39, 24, 2], [40, 24, 0], [2, 25, 0], [3, 25, 2], [4, 25, 5], [5, 25, 0], [6, 25, 7], [7, 25, 8], [8, 25, 16], [9, 25, 16], [10, 25, 16], [11, 25, 16], [12, 25, 18], [13, 25, 11], [14, 25, 5], [15, 25, 5], [16, 25, 5], [17, 25, 6], [18, 25, 11], [19, 25, 18], [20, 25, 12], [21, 25, 11], [22, 25, 8], [23, 25, 8], [24, 25, 8], [25, 25, 8], [26, 25, 8], [27, 25, 8], [28, 25, 8], [29, 25, 8], [30, 25, 8], [31, 25, 7], [32, 25, 5], [33, 25, 5], [34, 25, 2], [35, 25, 0], [36, 25, 15], [37, 25, 0], [38, 25, 2], [39, 25, 2], [40, 25, 0], [2, 26, 0], [3, 26, 2], [4, 26, 3], [5, 26, 0], [6, 26, 5], [7, 26, 7], [8, 26, 16], [9, 26, 8], [10, 26, 16], [11, 26, 16], [12, 26, 6], [13, 26, 5], [14, 26, 5], [15, 26, 5], [16, 26, 5], [17, 26, 5], [18, 26, 6], [19, 26, 8], [20, 26, 8], [21, 26, 8], [22, 26, 8], [23, 26, 8], [24, 26, 8], [25, 26, 8], [26, 26, 8], [27, 26, 8], [28, 26, 8], [29, 26, 5], [30, 26, 5], [31, 26, 5], [32, 26, 5], [33, 26, 7], [34, 26, 2], [35, 26, 0], [36, 26, 15], [37, 26, 6], [38, 26, 2], [39, 26, 3], [40, 26, 0], [3, 27, 0], [4, 27, 2], [5, 27, 0], [6, 27, 2], [7, 27, 7], [8, 27, 5], [9, 27, 8], [10, 27, 8], [11, 27, 5], [12, 27, 5], [13, 27, 5], [14, 27, 2], [15, 27, 3], [16, 27, 2], [17, 27, 3], [18, 27, 5], [19, 27, 5], [20, 27, 5], [21, 27, 8], [22, 27, 8], [23, 27, 8], [24, 27, 8], [25, 27, 6], [26, 27, 5], [27, 27, 5], [28, 27, 5], [29, 27, 5], [30, 27, 5], [31, 27, 5], [32, 27, 5], [33, 27, 5], [34, 27, 0], [35, 27, 2], [36, 27, 2], [37, 27, 2], [38, 27, 3], [39, 27, 0], [3, 28, 0], [4, 28, 2], [5, 28, 2], [6, 28, 0], [7, 28, 2], [8, 28, 7], [9, 28, 5], [10, 28, 5], [11, 28, 5], [12, 28, 3], [13, 28, 2], [14, 28, 2], [15, 28, 2], [16, 28, 2], [17, 28, 2], [18, 28, 2], [19, 28, 3], [20, 28, 5], [21, 28, 5], [22, 28, 5], [23, 28, 5], [24, 28, 5], [25, 28, 5], [26, 28, 5], [27, 28, 5], [28, 28, 5], [29, 28, 5], [30, 28, 5], [31, 28, 5], [32, 28, 8], [33, 28, 6], [34, 28, 2], [35, 28, 2], [36, 28, 3], [37, 28, 6], [38, 28, 6], [39, 28, 0], [4, 29, 0], [5, 29, 2], [6, 29, 0], [7, 29, 2], [8, 29, 2], [9, 29, 2], [10, 29, 2], [11, 29, 2], [12, 29, 2], [13, 29, 2], [14, 29, 2], [15, 29, 2], [16, 29, 2], [17, 29, 2], [18, 29, 2], [19, 29, 2], [20, 29, 2], [21, 29, 2], [22, 29, 14], [23, 29, 5], [24, 29, 5], [25, 29, 5], [26, 29, 3], [27, 29, 5], [28, 29, 5], [29, 29, 5], [30, 29, 5], [31, 29, 8], [32, 29, 16], [33, 29, 8], [34, 29, 6], [35, 29, 8], [36, 29, 10], [37, 29, 15], [38, 29, 0], [5, 30, 0], [6, 30, 0], [7, 30, 2], [8, 30, 2], [9, 30, 2], [10, 30, 2], [11, 30, 2], [12, 30, 2], [13, 30, 2], [14, 30, 2], [15, 30, 2], [16, 30, 2], [17, 30, 2], [18, 30, 2], [19, 30, 2], [20, 30, 2], [21, 30, 2], [22, 30, 2], [23, 30, 2], [24, 30, 2], [25, 30, 2], [26, 30, 5], [27, 30, 5], [28, 30, 5], [29, 30, 5], [30, 30, 16], [31, 30, 16], [32, 30, 16], [33, 30, 0], [34, 30, 20], [35, 30, 15], [36, 30, 0], [37, 30, 0], [6, 31, 0], [7, 31, 2], [8, 31, 2], [9, 31, 2], [10, 31, 2], [11, 31, 2], [12, 31, 2], [13, 31, 2], [14, 31, 2], [15, 31, 2], [16, 31, 2], [17, 31, 2], [18, 31, 2], [19, 31, 2], [20, 31, 2], [21, 31, 2], [22, 31, 2], [23, 31, 2], [24, 31, 3], [25, 31, 5], [26, 31, 5], [27, 31, 5], [28, 31, 8], [29, 31, 16], [30, 31, 16], [31, 31, 0], [32, 31, 0], [34, 31, 0], [35, 31, 0], [7, 32, 0], [8, 32, 2], [9, 32, 3], [10, 32, 3], [11, 32, 2], [12, 32, 2], [13, 32, 2], [14, 32, 2], [15, 32, 2], [16, 32, 2], [17, 32, 2], [18, 32, 2], [19, 32, 2], [20, 32, 2], [21, 32, 3], [22, 32, 3], [23, 32, 7], [24, 32, 5], [25, 32, 5], [26, 32, 5], [27, 32, 8], [28, 32, 16], [29, 32, 8], [30, 32, 0], [8, 33, 0], [9, 33, 5], [10, 33, 5], [11, 33, 7], [12, 33, 3], [13, 33, 2], [14, 33, 2], [15, 33, 2], [16, 33, 3], [17, 33, 3], [18, 33, 3], [19, 33, 7], [20, 33, 5], [21, 33, 5], [22, 33, 5], [23, 33, 5], [24, 33, 8], [25, 33, 16], [26, 33, 16], [27, 33, 8], [28, 33, 0], [29, 33, 0], [9, 34, 0], [10, 34, 0], [11, 34, 7], [12, 34, 5], [13, 34, 5], [14, 34, 5], [15, 34, 5], [16, 34, 5], [17, 34, 5], [18, 34, 7], [19, 34, 5], [20, 34, 5], [21, 34, 8], [22, 34, 16], [23, 34, 11], [24, 34, 8], [25, 34, 8], [26, 34, 0], [27, 34, 0], [11, 35, 0], [12, 35, 0], [13, 35, 10], [14, 35, 11], [15, 35, 16], [16, 35, 16], [17, 35, 16], [18, 35, 16], [19, 35, 16], [20, 35, 11], [21, 35, 16], [22, 35, 0], [23, 35, 0], [24, 35, 0], [25, 35, 0], [13, 36, 0], [14, 36, 0], [15, 36, 0], [16, 36, 0], [17, 36, 0], [18, 36, 0], [19, 36, 0], [20, 36, 0], [21, 36, 0], [22, 36, 8], [23, 36, 0], [24, 36, 0], [25, 36, 0], [16, 37, 0], [17, 37, 0], [18, 37, 3], [19, 37, 3], [20, 37, 3], [21, 37, 6], [22, 37, 8], [23, 37, 19], [24, 37, 15], [25, 37, 19], [26, 37, 0], [27, 37, 0], [15, 38, 0], [16, 38, 1], [17, 38, 2], [18, 38, 3], [19, 38, 3], [20, 38, 3], [21, 38, 3], [22, 38, 3], [23, 38, 3], [24, 38, 7], [25, 38, 6], [26, 38, 5], [27, 38, 10], [28, 38, 0], [15, 39, 0], [16, 39, 1], [17, 39, 0], [18, 39, 1], [19, 39, 3], [20, 39, 3], [21, 39, 3], [22, 39, 3], [23, 39, 3], [24, 39, 7], [25, 39, 8], [26, 39, 3], [27, 39, 14], [28, 39, 10], [29, 39, 0], [14, 40, 0], [15, 40, 1], [16, 40, 0], [17, 40, 1], [18, 40, 1], [19, 40, 3], [20, 40, 3], [21, 40, 3], [22, 40, 3], [23, 40, 3], [24, 40, 7], [25, 40, 8], [26, 40, 0], [27, 40, 3], [28, 40, 9], [29, 40, 0], [14, 41, 0], [15, 41, 0], [16, 41, 2], [17, 41, 1], [18, 41, 3], [19, 41, 3], [20, 41, 3], [21, 41, 3], [22, 41, 3], [23, 41, 7], [24, 41, 9], [25, 41, 8], [26, 41, 0], [27, 41, 0], [28, 41, 7], [29, 41, 6], [30, 41, 0], [14, 42, 0], [15, 42, 0], [16, 42, 1], [17, 42, 2], [18, 42, 3], [19, 42, 3], [20, 42, 3], [21, 42, 3], [22, 42, 14], [23, 42, 5], [24, 42, 9], [25, 42, 16], [26, 42, 0], [27, 42, 0], [28, 42, 7], [29, 42, 5], [30, 42, 15], [31, 42, 0], [14, 43, 0], [15, 43, 0], [16, 43, 1], [17, 43, 3], [18, 43, 3], [19, 43, 3], [20, 43, 3], [21, 43, 3], [22, 43, 7], [23, 43, 5], [24, 43, 10], [25, 43, 10], [26, 43, 0], [27, 43, 0], [28, 43, 7], [29, 43, 7], [30, 43, 16], [31, 43, 0], [14, 44, 0], [15, 44, 21], [16, 44, 2], [17, 44, 3], [18, 44, 3], [19, 44, 3], [20, 44, 3], [21, 44, 3], [22, 44, 7], [23, 44, 5], [24, 44, 10], [25, 44, 10], [26, 44, 0], [27, 44, 0], [28, 44, 22], [29, 44, 7], [30, 44, 9], [31, 44, 20], [32, 44, 0], [13, 45, 0], [14, 45, 0], [15, 45, 1], [16, 45, 3], [17, 45, 3], [18, 45, 3], [19, 45, 3], [20, 45, 3], [21, 45, 3], [22, 45, 7], [23, 45, 5], [24, 45, 16], [25, 45, 10], [26, 45, 15], [27, 45, 0], [28, 45, 0], [29, 45, 3], [30, 45, 7], [31, 45, 12], [32, 45, 0], [12, 46, 0], [13, 46, 8], [14, 46, 0], [15, 46, 2], [16, 46, 3], [17, 46, 3], [18, 46, 3], [19, 46, 3], [20, 46, 3], [21, 46, 14], [22, 46, 5], [23, 46, 5], [24, 46, 8], [25, 46, 8], [26, 46, 15], [27, 46, 0], [28, 46, 0], [29, 46, 7], [30, 46, 3], [31, 46, 6], [32, 46, 0], [11, 47, 0], [12, 47, 3], [13, 47, 8], [14, 47, 0], [15, 47, 3], [16, 47, 14], [17, 47, 3], [18, 47, 3], [19, 47, 3], [20, 47, 3], [21, 47, 5], [22, 47, 5], [23, 47, 8], [24, 47, 10], [25, 47, 10], [26, 47, 0], [27, 47, 0], [28, 47, 0], [29, 47, 17], [30, 47, 3], [31, 47, 8], [32, 47, 18], [33, 47, 0], [10, 48, 0], [11, 48, 1], [12, 48, 1], [13, 48, 3], [14, 48, 0], [15, 48, 7], [16, 48, 8], [17, 48, 5], [18, 48, 7], [19, 48, 5], [20, 48, 5], [21, 48, 5], [22, 48, 16], [23, 48, 10], [24, 48, 8], [25, 48, 0], [26, 48, 23], [27, 48, 2], [28, 48, 2], [29, 48, 2], [30, 48, 3], [31, 48, 6], [32, 48, 16], [33, 48, 0], [9, 49, 0], [10, 49, 1], [11, 49, 1], [12, 49, 3], [13, 49, 2], [14, 49, 0], [15, 49, 3], [16, 49, 5], [17, 49, 19], [18, 49, 8], [19, 49, 6], [20, 49, 6], [21, 49, 8], [22, 49, 10], [23, 49, 16], [24, 49, 16], [25, 49, 0], [26, 49, 3], [27, 49, 3], [28, 49, 3], [29, 49, 3], [30, 49, 3], [31, 49, 9], [32, 49, 10], [33, 49, 0], [9, 50, 0], [10, 50, 1], [11, 50, 7], [12, 50, 3], [13, 50, 14], [14, 50, 0], [15, 50, 3], [16, 50, 3], [17, 50, 8], [18, 50, 0], [19, 50, 15], [20, 50, 13], [21, 50, 10], [22, 50, 8], [23, 50, 8], [24, 50, 11], [25, 50, 0], [26, 50, 7], [27, 50, 3], [28, 50, 3], [29, 50, 14], [30, 50, 7], [31, 50, 8], [32, 50, 8], [33, 50, 15], [34, 50, 0], [9, 51, 0], [10, 51, 2], [11, 51, 14], [12, 51, 14], [13, 51, 5], [14, 51, 10], [15, 51, 0], [16, 51, 7], [17, 51, 8], [18, 51, 19], [19, 51, 0], [20, 51, 13], [21, 51, 3], [22, 51, 8], [23, 51, 8], [24, 51, 11], [25, 51, 0], [26, 51, 5], [27, 51, 7], [28, 51, 7], [29, 51, 7], [30, 51, 7], [31, 51, 8], [32, 51, 16], [33, 51, 15], [34, 51, 0], [9, 52, 0], [10, 52, 3], [11, 52, 3], [12, 52, 9], [13, 52, 9], [14, 52, 10], [15, 52, 0], [16, 52, 3], [17, 52, 8], [18, 52, 11], [19, 52, 0], [20, 52, 0], [21, 52, 3], [22, 52, 3], [23, 52, 8], [24, 52, 13], [25, 52, 0], [26, 52, 19], [27, 52, 6], [28, 52, 9], [29, 52, 9], [30, 52, 8], [31, 52, 8], [32, 52, 13], [33, 52, 15], [34, 52, 0], [10, 53, 0], [11, 53, 9], [12, 53, 9], [13, 53, 11], [14, 53, 13], [15, 53, 0], [16, 53, 3], [17, 53, 6], [18, 53, 13], [19, 53, 0], [21, 53, 0], [22, 53, 3], [23, 53, 8], [24, 53, 13], [25, 53, 0], [26, 53, 0], [27, 53, 8], [28, 53, 8], [29, 53, 8], [30, 53, 8], [31, 53, 10], [32, 53, 15], [33, 53, 0], [11, 54, 0], [12, 54, 0], [13, 54, 0], [14, 54, 0], [15, 54, 0], [16, 54, 3], [17, 54, 6], [18, 54, 19], [19, 54, 0], [21, 54, 0], [22, 54, 3], [23, 54, 5], [24, 54, 11], [25, 54, 17], [26, 54, 0], [27, 54, 8], [28, 54, 8], [29, 54, 12], [30, 54, 15], [31, 54, 15], [32, 54, 0], [15, 55, 0], [16, 55, 3], [17, 55, 5], [18, 55, 13], [19, 55, 0], [21, 55, 0], [22, 55, 3], [23, 55, 3], [24, 55, 8], [25, 55, 19], [26, 55, 0], [27, 55, 0], [28, 55, 0], [29, 55, 0], [30, 55, 0], [31, 55, 0], [15, 56, 0], [16, 56, 3], [17, 56, 5], [18, 56, 10], [19, 56, 19], [20, 56, 0], [22, 56, 0], [23, 56, 3], [24, 56, 5], [25, 56, 13], [26, 56, 0], [16, 57, 0], [17, 57, 3], [18, 57, 5], [19, 57, 19], [20, 57, 0], [22, 57, 0], [23, 57, 3], [24, 57, 7], [25, 57, 8], [26, 57, 0], [16, 58, 0], [17, 58, 3], [18, 58, 5], [19, 58, 11], [20, 58, 0], [22, 58, 0], [23, 58, 3], [24, 58, 3], [25, 58, 8], [26, 58, 13], [27, 58, 0], [16, 59, 0], [17, 59, 3], [18, 59, 7], [19, 59, 8], [20, 59, 19], [21, 59, 0], [23, 59, 0], [24, 59, 3], [25, 59, 6], [26, 59, 12], [27, 59, 0], [16, 60, 0], [17, 60, 3], [18, 60, 3], [19, 60, 6], [20, 60, 19], [21, 60, 0], [23, 60, 0], [24, 60, 3], [25, 60, 7], [26, 60, 8], [27, 60, 19], [28, 60, 0], [15, 61, 0], [16, 61, 3], [17, 61, 3], [18, 61, 3], [19, 61, 6], [20, 61, 13], [21, 61, 0], [23, 61, 0], [24, 61, 3], [25, 61, 3], [26, 61, 8], [27, 61, 11], [28, 61, 0], [11, 62, 0], [12, 62, 0], [13, 62, 0], [14, 62, 0], [15, 62, 0], [16, 62, 0], [17, 62, 3], [18, 62, 7], [19, 62, 6], [20, 62, 13], [21, 62, 0], [22, 62, 0], [23, 62, 0], [24, 62, 0], [25, 62, 3], [26, 62, 6], [27, 62, 6], [28, 62, 13], [29, 62, 0], [10, 63, 0], [11, 63, 3], [12, 63, 3], [13, 63, 3], [14, 63, 14], [15, 63, 3], [16, 63, 3], [17, 63, 3], [18, 63, 5], [19, 63, 12], [20, 63, 0], [21, 63, 3], [22, 63, 3], [23, 63, 7], [24, 63, 14], [25, 63, 9], [26, 63, 5], [27, 63, 13], [28, 63, 19], [29, 63, 0], [10, 64, 0], [11, 64, 3], [12, 64, 3], [13, 64, 3], [14, 64, 5], [15, 64, 10], [16, 64, 10], [17, 64, 18], [18, 64, 19], [19, 64, 19], [20, 64, 0], [21, 64, 3], [22, 64, 5], [23, 64, 6], [24, 64, 13], [25, 64, 13], [26, 64, 19], [27, 64, 19], [28, 64, 19], [29, 64, 0], [11, 65, 0], [12, 65, 0], [13, 65, 0], [14, 65, 0], [15, 65, 0], [16, 65, 0], [17, 65, 0], [18, 65, 0], [19, 65, 0], [20, 65, 0], [21, 65, 0], [22, 65, 0], [23, 65, 0], [24, 65, 0], [25, 65, 0], [26, 65, 0], [27, 65, 0], [28, 65, 0]
+    ];
 
-    const canvas = document.getElementById('spriteCanvas');
-    const ctx = canvas.getContext('2d');
-    let scale = spriteData.meta.pixelSize;
+    let palette = [
+      "#000000", "#fdf6f0", "#ffffff", "#ffefe4", "#ffe1cb",
+      "#ffc89b", "#ffa665", "#fb924a", "#eb7d38", "#fa9c5b",
+      "#d86a28", "#be5418", "#a4430e", "#8a3508", "#ffd9b7",
+      "#732904", "#5f1e02", "#4c1601", "#7d2e07", "#3b0f00",
+      "#2c0a00", "#fffcf7", "#f0853f", "#fff8f2"
+    ];
+
+    let currentPixels = [...rawPixels];
+    let activeDirection = 'left';
+    let frontCenterX = 20;
+    let scale = 6;
     let showGrid = true;
     let selectedPixel = null;
     let isMotion = false;
     let motionTimer = null;
     let motionFrame = 0;
 
-    // RGBA -> HEX 변환
+    const canvas = document.getElementById('spriteCanvas');
+    const ctx = canvas.getContext('2d');
+
     function rgbToHex(r, g, b) {
       return "#" + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
     }
 
-    // [핵심] 이미지 파일(0.png)로부터 전체 유효 픽셀 좌표 및 색상 전수 추출
-    function parseImageFile(file) {
+    function showToast(message) {
+      const toast = document.getElementById('toastAlert');
+      toast.textContent = message;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    // [핵심] 붙여넣기 또는 업로드된 이미지 파일 파싱
+    function parseImageBlob(blob, sourceName = "클립보드") {
       const reader = new FileReader();
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
           const offCanvas = document.createElement('canvas');
           const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
-          offCanvas.width = img.naturalWidth || img.width;
-          offCanvas.height = img.naturalHeight || img.height;
+          const w = img.naturalWidth || img.width;
+          const h = img.naturalHeight || img.height;
+          offCanvas.width = w;
+          offCanvas.height = h;
           offCtx.drawImage(img, 0, 0);
 
-          const w = offCanvas.width;
-          const h = offCanvas.height;
           const imgData = offCtx.getImageData(0, 0, w, h).data;
-
-          spriteData.meta.width = w;
-          spriteData.meta.height = h;
-          spriteData.palette = [];
-          spriteData.pixels = [];
-
+          const newPalette = [];
           const colorMap = new Map();
+          const newPixels = [];
 
-          // 모든 픽셀을 순회하며 투명하지 않은 픽셀 전수 수집
           for (let y = 0; y < h; y++) {
             for (let x = 0; x < w; x++) {
               const idx = (y * w + x) * 4;
               const a = imgData[idx + 3];
-              if (a < 25) continue; // 투명 픽셀 필터링
+              if (a < 25) continue; // 투명 픽셀 제거
 
               const hex = rgbToHex(imgData[idx], imgData[idx + 1], imgData[idx + 2]);
               if (!colorMap.has(hex)) {
-                colorMap.set(hex, spriteData.palette.length);
-                spriteData.palette.push(hex);
+                colorMap.set(hex, newPalette.length);
+                newPalette.push(hex);
               }
-              const pColorIdx = colorMap.get(hex);
-              spriteData.pixels.push([x, y, pColorIdx]);
+              newPixels.push([x, y, colorMap.get(hex)]);
             }
           }
 
-          // UI 및 캔버스 즉시 갱신
-          document.getElementById('resText').textContent = `${w} × ${h} px`;
-          document.getElementById('pixelCount').textContent = spriteData.pixels.length;
-          document.getElementById('validPixelText').textContent = `${spriteData.pixels.length} 개`;
-          document.getElementById('paletteCount').textContent = spriteData.palette.length;
+          if (newPixels.length === 0) {
+            alert('유효한 픽셀이 없는 빈 이미지입니다.');
+            return;
+          }
+
+          // 전역 데이터셋 갱신
+          rawPixels = newPixels;
+          palette = newPalette;
+          frontCenterX = Math.round(w / 2);
+          document.getElementById('centerSlider').max = w;
+          document.getElementById('centerSlider').value = frontCenterX;
+          document.getElementById('centerVal').textContent = frontCenterX;
+
+          // 방향을 좌측(원본)으로 리셋 후 변환 적용
+          activeDirection = 'left';
+          document.querySelectorAll('.dir-btn').forEach(b => b.classList.toggle('active', b.dataset.dir === 'left'));
+          document.getElementById('centerControl').style.display = 'none';
 
           buildPaletteUI();
-          buildTreeUI();
-          resizeCanvas();
+          transformPixels();
+          showToast(`✓ ${sourceName}에서 ${newPixels.length}개의 픽셀을 성공적으로 추출했습니다!`);
         };
         img.src = e.target.result;
       };
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(blob);
     }
 
-    // 캔버스 렌더링
+    // [신규] 클립보드 이미지 붙여넣기(Paste) 이벤트 리스너
+    window.addEventListener('paste', (e) => {
+      const clipboard = e.clipboardData || window.clipboardData;
+      if (!clipboard || !clipboard.items) return;
+
+      for (let i = 0; i < clipboard.items.length; i++) {
+        const item = clipboard.items[i];
+        if (item.type.indexOf('image') !== -1) {
+          const blob = item.getAsFile();
+          if (blob) {
+            parseImageBlob(blob, "웹 클립보드");
+            break;
+          }
+        }
+      }
+    });
+
+    // 방향 변환 로직
+    function transformPixels() {
+      if (activeDirection === 'left') {
+        currentPixels = [...rawPixels];
+      } else if (activeDirection === 'right') {
+        let minX = Infinity, maxX = -Infinity;
+        rawPixels.forEach(([x]) => {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        });
+        currentPixels = rawPixels.map(([x, y, c]) => [maxX + minX - x, y, c]);
+      } else if (activeDirection === 'front') {
+        const cx = frontCenterX;
+        const pixelMap = new Map();
+
+        rawPixels.forEach(([x, y, c]) => {
+          if (x <= cx) {
+            pixelMap.set(`${x},${y}`, [x, y, c]);
+            const symX = cx + (cx - x);
+            pixelMap.set(`${symX},${y}`, [symX, y, c]);
+          }
+        });
+
+        // 우측 귀 및 디테일 영역 대칭 처리
+        let maxX = 0; rawPixels.forEach(([x]) => { if (x > maxX) maxX = x; });
+        rawPixels.forEach(([x, y, c]) => {
+          if (x >= maxX - 8 && y >= 14 && y <= 28) {
+            pixelMap.set(`${x},${y}`, [x, y, c]);
+            const symLeftX = cx - (x - cx);
+            if (symLeftX >= 0) pixelMap.set(`${symLeftX},${y}`, [symLeftX, y, c]);
+          }
+        });
+
+        currentPixels = Array.from(pixelMap.values());
+      }
+
+      // X축 최소 여백 2px 정렬
+      let minX = Infinity;
+      currentPixels.forEach(([x]) => { if (x < minX) minX = x; });
+      if (minX > 2) {
+        const offset = minX - 2;
+        currentPixels = currentPixels.map(([x, y, c]) => [x - offset, y, c]);
+      }
+
+      updateUI();
+      render();
+    }
+
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const yOffset = (isMotion && motionFrame === 1) ? 1 : 0;
 
-      // 1. 모든 픽셀을 정확한 좌표에 그리기
-      for (let i = 0; i < spriteData.pixels.length; i++) {
-        const [x, y, cIdx] = spriteData.pixels[i];
-        const drawY = (y >= 26) ? y : (y + yOffset); // 상체 숨쉬기 모션 반영
-        ctx.fillStyle = spriteData.palette[cIdx];
+      for (let i = 0; i < currentPixels.length; i++) {
+        const [x, y, c] = currentPixels[i];
+        const drawY = (y >= 36) ? y : (y + yOffset);
+        ctx.fillStyle = palette[c] || '#ff00ff';
         ctx.fillRect(x * scale, drawY * scale, scale, scale);
 
         if (selectedPixel && selectedPixel.x === x && selectedPixel.y === y) {
@@ -448,7 +635,6 @@
         }
       }
 
-      // 2. 픽셀 격자선 오버레이
       if (showGrid && scale >= 4) {
         ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
         ctx.lineWidth = 0.5;
@@ -462,26 +648,30 @@
     }
 
     function resizeCanvas() {
-      canvas.width = spriteData.meta.width * scale;
-      canvas.height = spriteData.meta.height * scale;
+      let maxX = 0, maxY = 0;
+      currentPixels.forEach(([x, y]) => {
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      });
+      const w = Math.max(maxX + 4, 44);
+      const h = Math.max(maxY + 4, 68);
+      canvas.width = w * scale;
+      canvas.height = h * scale;
+      document.getElementById('resText').textContent = `${w} × ${h} px`;
       render();
     }
 
-    function buildPaletteUI() {
-      const pGrid = document.getElementById('paletteGrid');
-      pGrid.innerHTML = '';
-      spriteData.palette.forEach((hex, i) => {
-        const item = document.createElement('div');
-        item.className = 'swatch';
-        item.innerHTML = `<span class="swatch-color" style="background:${hex}"></span><span>[${i}] ${hex}</span>`;
-        pGrid.appendChild(item);
-      });
-    }
+    function updateUI() {
+      document.getElementById('pixelCount').textContent = currentPixels.length;
+      document.getElementById('validPixelText').textContent = `${currentPixels.length} 개`;
+      document.getElementById('paletteCount').textContent = palette.length;
+      document.getElementById('dirText').textContent =
+        activeDirection === 'left' ? '좌측 (Left)' :
+          activeDirection === 'right' ? '우측 (Right)' : `정면 (Front / Axis:${frontCenterX})`;
 
-    function buildTreeUI() {
       const tree = document.getElementById('jsonTree');
-      let html = `<div style="color:var(--muted)">// 총 ${spriteData.pixels.length}개의 유효 노드</div>`;
-      spriteData.pixels.forEach(([x, y, c]) => {
+      let html = `<div style="color:var(--muted)">// ${activeDirection.toUpperCase()} 모드 · 총 ${currentPixels.length}개 노드</div>`;
+      currentPixels.forEach(([x, y, c]) => {
         html += `<span class="coord-item" data-x="${x}" data-y="${y}" data-c="${c}">[${x},${y},${c}]</span> `;
       });
       tree.innerHTML = html;
@@ -491,11 +681,24 @@
           selectPixel(parseInt(el.dataset.x), parseInt(el.dataset.y), parseInt(el.dataset.c));
         });
       });
+
+      resizeCanvas();
+    }
+
+    function buildPaletteUI() {
+      const pGrid = document.getElementById('paletteGrid');
+      pGrid.innerHTML = '';
+      palette.forEach((hex, i) => {
+        const item = document.createElement('div');
+        item.className = 'swatch';
+        item.innerHTML = `<span class="swatch-color" style="background:${hex}"></span><span>[${i}] ${hex}</span>`;
+        pGrid.appendChild(item);
+      });
     }
 
     function selectPixel(x, y, c) {
       selectedPixel = { x, y, c };
-      const hex = spriteData.palette[c];
+      const hex = palette[c];
       document.getElementById('pixelInspector').innerHTML = `
         • 좌표: <strong>X: ${x}, Y: ${y}</strong><br>
         • 팔레트 인덱스: <strong>[${c}]</strong><br>
@@ -505,33 +708,47 @@
       render();
     }
 
-    // 캔버스 클릭 시 해당 위치 픽셀 검출
-    canvas.addEventListener('click', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rect.left) / scale);
-      const y = Math.floor((e.clientY - rect.top) / scale);
-      const found = spriteData.pixels.find(p => p[0] === x && p[1] === y);
-      if (found) selectPixel(found[0], found[1], found[2]);
-    });
-
-    // 드래그 앤 드롭 및 파일 업로드 리스너
+    // 파일 업로드 & 드래그 앤 드롭
+    const imageInput = document.getElementById('imageInput');
     const dropArea = document.getElementById('dropArea');
     const dropOverlay = document.getElementById('dropOverlay');
-    const imageInput = document.getElementById('imageInput');
 
     imageInput.addEventListener('change', (e) => {
-      if (e.target.files?.[0]) parseImageFile(e.target.files[0]);
+      if (e.target.files?.[0]) parseImageBlob(e.target.files[0], "로컬 파일");
     });
-
     dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropOverlay.style.display = 'grid'; });
     dropArea.addEventListener('dragleave', () => { dropOverlay.style.display = 'none'; });
     dropArea.addEventListener('drop', (e) => {
       e.preventDefault();
       dropOverlay.style.display = 'none';
-      if (e.dataTransfer.files?.[0]) parseImageFile(e.dataTransfer.files[0]);
+      if (e.dataTransfer.files?.[0]) parseImageBlob(e.dataTransfer.files[0], "드롭된 파일");
     });
 
-    // 컨트롤 버튼들
+    // 방향 전환 버튼
+    document.querySelectorAll('.dir-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeDirection = btn.dataset.dir;
+        document.getElementById('centerControl').style.display = (activeDirection === 'front') ? 'flex' : 'none';
+        transformPixels();
+      });
+    });
+
+    document.getElementById('centerSlider').addEventListener('input', (e) => {
+      frontCenterX = parseInt(e.target.value);
+      document.getElementById('centerVal').textContent = frontCenterX;
+      if (activeDirection === 'front') transformPixels();
+    });
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rect.left) / scale);
+      const y = Math.floor((e.clientY - rect.top) / scale);
+      const found = currentPixels.find(p => p[0] === x && p[1] === y);
+      if (found) selectPixel(found[0], found[1], found[2]);
+    });
+
     document.getElementById('toggleGridBtn').addEventListener('click', (e) => {
       showGrid = !showGrid;
       e.target.classList.toggle('active', showGrid);
@@ -555,33 +772,22 @@
       }
     });
 
-    // 완성된 전체 데이터 JSON 클립보드 복사
     document.getElementById('copyJsonBtn').addEventListener('click', () => {
-      if (!spriteData.pixels.length) {
-        alert('먼저 0.png 이미지를 불러와 주세요.');
-        return;
-      }
-      const exportJson = {
+      const exportData = {
         meta: {
-          name: "agent_chibi_base",
-          width: spriteData.meta.width,
-          height: spriteData.meta.height,
-          totalPixels: spriteData.pixels.length
+          direction: activeDirection,
+          totalPixels: currentPixels.length,
+          frontCenterX: activeDirection === 'front' ? frontCenterX : null
         },
-        palette: spriteData.palette,
-        frames: {
-          "idle_0": {
-            pixels: spriteData.pixels
-          }
-        }
+        pixels: currentPixels
       };
-      navigator.clipboard.writeText(JSON.stringify(exportJson, null, 2));
-      alert(`성공! 총 ${spriteData.pixels.length}개의 전수 픽셀 데이터가 JSON 형식으로 복사되었습니다.`);
+      navigator.clipboard.writeText(JSON.stringify(exportData, null, 2));
+      showToast(`✓ [${activeDirection.toUpperCase()}] 좌표 ${currentPixels.length}개가 복사되었습니다!`);
     });
 
-    // 기본 안내 표시
-    resizeCanvas();
-    document.getElementById('jsonTree').innerHTML = '<div style="color:var(--amber);padding:10px;">상단의 [📁 0.png 파일 불러오기]를 누르거나 이미지를 이 창으로 드래그하면, 약 1,000여 개의 모든 픽셀 좌표가 즉시 추출되어 완벽한 캐릭터가 렌더링됩니다.</div>';
+    // 최초 렌더링
+    buildPaletteUI();
+    transformPixels();
   </script>
 </body>
 
