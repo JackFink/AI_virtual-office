@@ -320,7 +320,7 @@
 
     /* 에셋 라이브러리 (독립 스크롤) */
     .asset-scroll {
-      max-height: 200px;
+      max-height: 180px;
       overflow-y: auto;
       padding: 8px;
     }
@@ -402,7 +402,7 @@
 
     /* 레이어 리스트 (독립 스크롤) */
     .layer-scroll {
-      max-height: 180px;
+      max-height: 160px;
       overflow-y: auto;
       padding: 8px;
       display: flex;
@@ -474,9 +474,54 @@
       color: var(--muted);
     }
 
+    /* [신규] 상하좌우 D-Pad 컨트롤러 스타일 */
+    .dpad-container {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dpad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 34px);
+      grid-template-rows: repeat(3, 34px);
+      gap: 5px;
+      justify-content: center;
+    }
+
+    .dpad-btn {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      border-radius: 6px;
+      user-select: none;
+    }
+
+    .dpad-btn.reset {
+      font-size: 9px;
+      color: var(--muted);
+      background: #152233;
+    }
+
+    .dpad-btn.reset:hover {
+      color: var(--accent);
+      background: #1e334d;
+    }
+
+    .dpad-hint {
+      font-size: 9.5px;
+      color: var(--muted);
+      text-align: center;
+    }
+
     /* 팔레트 (독립 스크롤) */
     .palette-scroll {
-      max-height: 130px;
+      max-height: 120px;
       overflow-y: auto;
       padding: 8px;
     }
@@ -509,7 +554,7 @@
 
     /* 빈 상태 안내 스타일 */
     .empty-placeholder {
-      padding: 24px 12px;
+      padding: 20px 12px;
       text-align: center;
       color: var(--muted);
       font-size: 11px;
@@ -539,7 +584,7 @@
   </header>
 
   <div class="layout">
-    <!-- 1. 좌측 변환 좌표 노드 트리 (독립 스크롤) -->
+    <!-- 1. 좌측 좌표 트리 패널 (독립 스크롤) -->
     <div class="panel">
       <div class="panel-header">
         <span>선택 레이어 좌표 (<span id="pixelCount">0</span>개)</span>
@@ -577,7 +622,7 @@
       </div>
     </div>
 
-    <!-- 3. 우측: 에셋 썸네일 & 레이어 스택 & 팔레트 (각 패널 독립 스크롤) -->
+    <!-- 3. 우측: 에셋 / 레이어 / 위치 조정 D-Pad / 팔레트 패널 -->
     <div class="panel">
       <div class="panel-header">
         <span>에셋 & 레이어 컨트롤</span>
@@ -616,6 +661,28 @@
           </div>
         </div>
 
+        <!-- [신규] 활성 에셋/레이어 상하좌우 위치 이동 (D-Pad 컨트롤) -->
+        <div class="section-card">
+          <div class="section-head">
+            <span>🎮 에셋 위치 이동 (오프셋)</span>
+            <span id="offsetBadge" style="font-size:10px;color:var(--accent);font-family:monospace;">X: 0, Y: 0</span>
+          </div>
+          <div class="dpad-container">
+            <div class="dpad-grid">
+              <div></div>
+              <button class="btn dpad-btn" id="moveUpBtn" title="위로 1px (↑)">▲</button>
+              <div></div>
+              <button class="btn dpad-btn" id="moveLeftBtn" title="왼쪽으로 1px (←)">◀</button>
+              <button class="btn dpad-btn reset" id="moveResetBtn" title="원위치로 리셋 (0,0)">●</button>
+              <button class="btn dpad-btn" id="moveRightBtn" title="오른쪽으로 1px (→)">▶</button>
+              <div></div>
+              <button class="btn dpad-btn" id="moveDownBtn" title="아래로 1px (↓)">▼</button>
+              <div></div>
+            </div>
+            <div class="dpad-hint">💡 키보드 방향키(↑↓←→)로도 실시간 이동 가능</div>
+          </div>
+        </div>
+
         <!-- [색상 팔레트] 독립 스크롤 -->
         <div class="section-card">
           <div class="section-head">
@@ -633,7 +700,7 @@
   </div>
 
   <script>
-    // 최초 시작 상태: 모든 데이터가 빈 상태로 시작
+    // 최초 시작 상태: 모든 데이터가 비어 있는 상태로 초기화
     let assetLibrary = [];  // 에셋 라이브러리 목록 []
     let layers = [];        // 활성 레이어 스택 []
     let palette = [];       // 팔레트 목록 []
@@ -674,12 +741,20 @@
       return pixelArray.map(([x, y, c]) => [maxX + minX - x, y, c]);
     }
 
+    // 레이어 오프셋(offsetX, offsetY)이 반영된 최종 픽셀 배열 반환
+    function getLayerFinalPixels(layer) {
+      if (!layer || !layer.pixels) return [];
+      const transformed = getTransformedPixels(layer.pixels);
+      const ox = layer.offsetX || 0;
+      const oy = layer.offsetY || 0;
+      return transformed.map(([x, y, c]) => [x + ox, y + oy, c]);
+    }
+
     // 캔버스 렌더링 (아래 레이어부터 순서대로 중첩 렌더링)
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const yOffset = (isMotion && motionFrame === 1) ? 1 : 0;
 
-      // 등록된 레이어가 없거나 모두 숨김 상태인 경우 안내문
       const visibleLayers = layers.filter(l => l.visible && l.pixels.length > 0);
       if (visibleLayers.length === 0) {
         ctx.fillStyle = '#334458';
@@ -689,13 +764,13 @@
         return;
       }
 
-      // 레이어 스택 순서대로 덮어씌움 (index 0이 가장 아래)
+      // 레이어 스택 순서대로 합성 (index 0이 최하단)
       layers.forEach(layer => {
         if (!layer.visible || layer.pixels.length === 0) return;
 
-        const transformed = getTransformedPixels(layer.pixels);
-        for (let i = 0; i < transformed.length; i++) {
-          const [x, y, c] = transformed[i];
+        const renderPx = getLayerFinalPixels(layer);
+        for (let i = 0; i < renderPx.length; i++) {
+          const [x, y, c] = renderPx[i];
           const drawY = (y >= 36) ? y : (y + yOffset);
           ctx.fillStyle = palette[c] || '#ff00ff';
           ctx.fillRect(x * scale, drawY * scale, scale, scale);
@@ -708,7 +783,7 @@
         }
       });
 
-      // 격자 오버레이
+      // 격자선 오버레이
       if (showGrid && scale >= 4) {
         ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
         ctx.lineWidth = 0.5;
@@ -724,7 +799,8 @@
     function resizeCanvas() {
       let maxX = 0, maxY = 0;
       layers.forEach(layer => {
-        layer.pixels.forEach(([x, y]) => {
+        const pxs = getLayerFinalPixels(layer);
+        pxs.forEach(([x, y]) => {
           if (x > maxX) maxX = x;
           if (y > maxY) maxY = y;
         });
@@ -734,6 +810,46 @@
       canvas.width = w * scale;
       canvas.height = h * scale;
       render();
+    }
+
+    // 에셋 위치 이동 처리 함수 (상, 하, 좌, 우)
+    function moveActiveLayer(dx, dy) {
+      const activeLayer = layers.find(l => l.id === activeLayerId);
+      if (!activeLayer) {
+        showToast('이동할 활성 레이어를 먼저 선택하세요.');
+        return;
+      }
+      activeLayer.offsetX = (activeLayer.offsetX || 0) + dx;
+      activeLayer.offsetY = (activeLayer.offsetY || 0) + dy;
+
+      updateOffsetBadge();
+      updateTreeUI();
+      resizeCanvas();
+    }
+
+    // 오프셋 리셋
+    function resetActiveLayerOffset() {
+      const activeLayer = layers.find(l => l.id === activeLayerId);
+      if (!activeLayer) return;
+      activeLayer.offsetX = 0;
+      activeLayer.offsetY = 0;
+
+      updateOffsetBadge();
+      updateTreeUI();
+      resizeCanvas();
+      showToast(`[${activeLayer.name}] 위치가 (0, 0)으로 리셋되었습니다.`);
+    }
+
+    function updateOffsetBadge() {
+      const activeLayer = layers.find(l => l.id === activeLayerId);
+      const badge = document.getElementById('offsetBadge');
+      if (!activeLayer) {
+        badge.textContent = 'X: 0, Y: 0';
+        return;
+      }
+      const ox = activeLayer.offsetX || 0;
+      const oy = activeLayer.offsetY || 0;
+      badge.textContent = `X: ${ox >= 0 ? '+' + ox : ox}, Y: ${oy >= 0 ? '+' + oy : oy}`;
     }
 
     // 에셋 썸네일 그리드 UI 갱신
@@ -794,16 +910,16 @@
       const existingLayer = layers.find(l => l.assetId === asset.id);
 
       if (existingLayer) {
-        // 이미 레이어가 있으면 가시성 토글
         existingLayer.visible = !existingLayer.visible;
         showToast(`에셋 [${asset.name}] ${existingLayer.visible ? '표시됨' : '숨김'}`);
       } else {
-        // 새 레이어로 추가 장착
         const newLayer = {
           id: 'layer_' + Date.now(),
           assetId: asset.id,
           name: asset.name,
           visible: true,
+          offsetX: 0,
+          offsetY: 0,
           pixels: [...asset.pixels]
         };
         layers.push(newLayer);
@@ -813,6 +929,7 @@
 
       updateLayerUI();
       updateAssetUI();
+      updateOffsetBadge();
       resizeCanvas();
     }
 
@@ -829,12 +946,12 @@
           </div>
         `;
         document.getElementById('activeLayerTag').textContent = 'ACTIVE: NONE';
+        updateOffsetBadge();
         updateTreeUI();
         return;
       }
 
       list.innerHTML = '';
-      // 상단에 높은 레이어가 오도록 역순(Stack) 표시
       [...layers].reverse().forEach((layer, revIdx) => {
         const originalIdx = layers.length - 1 - revIdx;
         const row = document.createElement('div');
@@ -849,7 +966,6 @@
           <span class="layer-pixel-meta">${layer.pixels.length} px</span>
         `;
 
-        // 눈 아이콘 클릭: 가시성 토글
         row.querySelector('.btn-eye').addEventListener('click', (e) => {
           e.stopPropagation();
           layer.visible = !layer.visible;
@@ -858,10 +974,10 @@
           render();
         });
 
-        // 행 클릭: 활성 편집 레이어 지정
         row.addEventListener('click', () => {
           activeLayerId = layer.id;
           updateLayerUI();
+          updateOffsetBadge();
         });
 
         list.appendChild(row);
@@ -869,10 +985,11 @@
 
       const activeLayer = layers.find(l => l.id === activeLayerId);
       document.getElementById('activeLayerTag').textContent = activeLayer ? `ACTIVE: ${activeLayer.name}` : 'ACTIVE: NONE';
+      updateOffsetBadge();
       updateTreeUI();
     }
 
-    // 좌측 좌표 트리 업데이트 (활성 레이어 픽셀 기준)
+    // 좌측 좌표 트리 업데이트 (활성 레이어 오프셋 반영 좌표 표시)
     function updateTreeUI() {
       const tree = document.getElementById('jsonTree');
       const activeLayer = layers.find(l => l.id === activeLayerId);
@@ -888,9 +1005,10 @@
         return;
       }
 
-      document.getElementById('pixelCount').textContent = activeLayer.pixels.length;
-      let html = `<div style="color:var(--muted)">// [${activeLayer.name}] · ${activeLayer.pixels.length}개 노드</div>`;
-      activeLayer.pixels.forEach(([x, y, c]) => {
+      const finalPixels = getLayerFinalPixels(activeLayer);
+      document.getElementById('pixelCount').textContent = finalPixels.length;
+      let html = `<div style="color:var(--muted)">// [${activeLayer.name}] · ${finalPixels.length}개 노드 (오프셋 반영)</div>`;
+      finalPixels.forEach(([x, y, c]) => {
         html += `<span class="coord-item" data-x="${x}" data-y="${y}" data-c="${c}">[${x},${y},${c}]</span> `;
       });
       tree.innerHTML = html;
@@ -945,7 +1063,7 @@
             for (let x = 0; x < w; x++) {
               const idx = (y * w + x) * 4;
               const a = imgData[idx + 3];
-              if (a === 0) continue; // 완전 투명 픽셀만 제외
+              if (a === 0) continue; // 완전 투명 픽셀만 필터링
 
               const hex = rgbToHex(imgData[idx], imgData[idx + 1], imgData[idx + 2]);
               if (!colorMap.has(hex)) {
@@ -979,6 +1097,8 @@
               assetId: assetId,
               name: assetName,
               visible: true,
+              offsetX: 0,
+              offsetY: 0,
               pixels: newPixels
             };
             layers.push(targetLayer);
@@ -987,6 +1107,8 @@
             targetLayer.name = assetName;
             targetLayer.pixels = newPixels;
             targetLayer.visible = true;
+            targetLayer.offsetX = 0;
+            targetLayer.offsetY = 0;
           }
           activeLayerId = targetLayer.id;
 
@@ -1014,6 +1136,25 @@
       }
     });
 
+    // 키보드 방향키 실시간 이동 이벤트 연동
+    window.addEventListener('keydown', (e) => {
+      if (!activeLayerId) return;
+      const targetLayer = layers.find(l => l.id === activeLayerId);
+      if (!targetLayer) return;
+
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveActiveLayer(0, -1); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); moveActiveLayer(0, 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); moveActiveLayer(-1, 0); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); moveActiveLayer(1, 0); }
+    });
+
+    // 상하좌우 D-Pad 버튼 클릭 리스너
+    document.getElementById('moveUpBtn').addEventListener('click', () => moveActiveLayer(0, -1));
+    document.getElementById('moveDownBtn').addEventListener('click', () => moveActiveLayer(0, 1));
+    document.getElementById('moveLeftBtn').addEventListener('click', () => moveActiveLayer(-1, 0));
+    document.getElementById('moveRightBtn').addEventListener('click', () => moveActiveLayer(1, 0));
+    document.getElementById('moveResetBtn').addEventListener('click', resetActiveLayerOffset);
+
     // 드래그 앤 드롭 파일 로드
     const dropArea = document.getElementById('dropArea');
     dropArea.addEventListener('dragover', (e) => e.preventDefault());
@@ -1034,6 +1175,8 @@
         assetId: null,
         name: `빈 레이어 #${layers.length + 1}`,
         visible: true,
+        offsetX: 0,
+        offsetY: 0,
         pixels: []
       };
       layers.push(newLayer);
@@ -1048,6 +1191,7 @@
         document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         activeDirection = btn.dataset.dir;
+        updateTreeUI();
         render();
       });
     });
@@ -1076,21 +1220,38 @@
       }
     });
 
-    // 현재 활성 레이어 좌표 복사
+    // [핵심] 참고 코드를 적용한 팔레트 포함 & 한 줄 픽셀 포맷 JSON 복사
     document.getElementById('copyJsonBtn').addEventListener('click', () => {
       const activeLayer = layers.find(l => l.id === activeLayerId);
       if (!activeLayer || activeLayer.pixels.length === 0) {
         alert('복사할 활성 레이어의 픽셀이 없습니다.');
         return;
       }
-      const exportData = {
+
+      // 오프셋 및 방향 변환이 완료된 최종 픽셀 리스트
+      const finalPixels = getLayerFinalPixels(activeLayer);
+
+      const metaData = {
         name: activeLayer.name,
         direction: activeDirection,
-        totalPixels: activeLayer.pixels.length,
-        pixels: getTransformedPixels(activeLayer.pixels)
+        totalPixels: finalPixels.length,
+        offsetX: activeLayer.offsetX || 0,
+        offsetY: activeLayer.offsetY || 0
       };
-      navigator.clipboard.writeText(JSON.stringify(exportData, null, 2));
-      showToast(`✓ [${activeLayer.name}] 좌표 ${activeLayer.pixels.length}개가 JSON으로 복사되었습니다!`);
+      const paletteData = palette;
+
+      // 사용자 제공 참고 코드 패턴 적용: __PIXELS_PLACEHOLDER__ 치환으로 [x, y, c] 한 줄씩 포맷팅
+      const result = JSON.stringify({
+        meta: metaData,
+        palette: paletteData,
+        pixels: "__PIXELS_PLACEHOLDER__"
+      }, null, 2).replace(
+        '"__PIXELS_PLACEHOLDER__"',
+        '[\n' + finalPixels.map(p => `    [${p[0]}, ${p[1]}, ${p[2]}]`).join(',\n') + '\n  ]'
+      );
+
+      navigator.clipboard.writeText(result);
+      showToast(`✓ [${activeLayer.name}] 팔레트 포함 JSON 복사 완료 (${finalPixels.length}px)`);
     });
 
     // 초기 빈 화면 렌더링
