@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,7 +16,13 @@
       --mint: #34d399;
       --amber: #fbbf24;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
@@ -25,6 +32,7 @@
       height: 100vh;
       overflow: hidden;
     }
+
     header {
       padding: 12px 20px;
       background: #0f1724;
@@ -34,12 +42,35 @@
       align-items: center;
       gap: 12px;
     }
-    .brand-title { font-size: 15px; font-weight: 800; color: var(--accent); }
-    .header-actions { display: flex; align-items: center; gap: 10px; }
-    .file-btn-wrap { position: relative; overflow: hidden; display: inline-block; }
-    .file-btn-wrap input[type=file] {
-      position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+
+    .brand-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--accent);
     }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .file-btn-wrap {
+      position: relative;
+      overflow: hidden;
+      display: inline-block;
+    }
+
+    .file-btn-wrap input[type=file] {
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
     .layout {
       flex: 1;
       display: grid;
@@ -48,6 +79,7 @@
       padding: 10px;
       overflow: hidden;
     }
+
     .panel {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -56,6 +88,7 @@
       flex-direction: column;
       overflow: hidden;
     }
+
     .panel-header {
       padding: 11px 14px;
       border-bottom: 1px solid var(--border);
@@ -66,6 +99,7 @@
       align-items: center;
       background: #111a27;
     }
+
     /* 좌측 데이터 트리 */
     .tree-scroll {
       flex: 1;
@@ -76,6 +110,7 @@
       line-height: 1.6;
       background: #0d1420;
     }
+
     .coord-item {
       padding: 2px 5px;
       border-radius: 3px;
@@ -85,11 +120,14 @@
       color: #93c5fd;
       transition: 0.12s;
     }
-    .coord-item:hover, .coord-item.active {
+
+    .coord-item:hover,
+    .coord-item.active {
       background: var(--accent);
       color: #0f172a;
       font-weight: 700;
     }
+
     /* 중앙 캔버스 뷰포트 */
     .viewport {
       display: flex;
@@ -99,20 +137,34 @@
       position: relative;
       background: radial-gradient(#152233 15%, #0a1019 80%);
     }
+
     .drop-overlay {
-      position: absolute; inset: 0; background: rgba(56,189,248,0.15);
-      border: 2px dashed var(--accent); display: none; place-items: center;
-      font-size: 16px; font-weight: 700; color: var(--accent); z-index: 10;
+      position: absolute;
+      inset: 0;
+      background: rgba(56, 189, 248, 0.15);
+      border: 2px dashed var(--accent);
+      display: none;
+      place-items: center;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent);
+      z-index: 10;
     }
+
     .canvas-container {
       position: relative;
       border: 2px solid #2f435e;
-      box-shadow: 0 16px 36px rgba(0,0,0,0.6);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
       background: #0b111a;
       border-radius: 6px;
       overflow: hidden;
     }
-    canvas { display: block; image-rendering: pixelated; }
+
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+    }
+
     .controls {
       position: absolute;
       bottom: 16px;
@@ -123,6 +175,7 @@
       border-radius: 20px;
       border: 1px solid var(--border);
     }
+
     .btn {
       background: #1a2638;
       color: var(--text);
@@ -134,13 +187,49 @@
       cursor: pointer;
       transition: 0.15s;
     }
-    .btn:hover { background: #263850; border-color: #3b5273; }
-    .btn.primary { background: var(--accent); color: #0a111a; border-color: var(--accent); font-weight: 700; }
-    .btn.active { background: var(--mint); color: #081711; font-weight: 700; }
+
+    .btn:hover {
+      background: #263850;
+      border-color: #3b5273;
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: #0a111a;
+      border-color: var(--accent);
+      font-weight: 700;
+    }
+
+    .btn.active {
+      background: var(--mint);
+      color: #081711;
+      font-weight: 700;
+    }
+
     /* 우측 인스펙터 패널 */
-    .info-panel { padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
-    .card { background: #0c1420; border: 1px solid var(--border); border-radius: 8px; padding: 11px; }
-    .card-title { font-size: 11px; color: var(--muted); margin-bottom: 8px; font-weight: 700; text-transform: uppercase; }
+    .info-panel {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .card {
+      background: #0c1420;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px;
+    }
+
+    .card-title {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
     .pixel-data-box {
       font-family: monospace;
       font-size: 11.5px;
@@ -150,19 +239,56 @@
       line-height: 1.8;
       border: 1px solid #1c2b3d;
     }
-    .pixel-data-box strong { color: var(--mint); }
-    .palette-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
-    .swatch {
-      display: flex; align-items: center; gap: 6px; padding: 4px 6px;
-      background: #111a28; border: 1px solid var(--border); border-radius: 5px;
-      font-size: 10px; cursor: pointer;
+
+    .pixel-data-box strong {
+      color: var(--mint);
     }
-    .swatch:hover, .swatch.active { border-color: var(--accent); }
-    .swatch-color { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #00000033; flex-shrink: 0; }
-    .stats-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 4px 0; }
-    .stats-row b { color: var(--text); }
+
+    .palette-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 5px;
+    }
+
+    .swatch {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px;
+      background: #111a28;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .swatch:hover,
+    .swatch.active {
+      border-color: var(--accent);
+    }
+
+    .swatch-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid #00000033;
+      flex-shrink: 0;
+    }
+
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      padding: 4px 0;
+    }
+
+    .stats-row b {
+      color: var(--text);
+    }
   </style>
 </head>
+
 <body>
 
   <header>
@@ -458,4 +584,5 @@
     document.getElementById('jsonTree').innerHTML = '<div style="color:var(--amber);padding:10px;">상단의 [📁 0.png 파일 불러오기]를 누르거나 이미지를 이 창으로 드래그하면, 약 1,000여 개의 모든 픽셀 좌표가 즉시 추출되어 완벽한 캐릭터가 렌더링됩니다.</div>';
   </script>
 </body>
+
 </html>
