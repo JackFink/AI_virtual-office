@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>픽셀 스프라이트 좌표 전수 컨버터 & 뷰어</title>
+  <style>
+    :root {
+      --bg: #090e17;
+      --panel: #131c2a;
+      --border: #223247;
+      --text: #f1f5f9;
+      --muted: #8497af;
+      --accent: #38bdf8;
+      --mint: #34d399;
+      --amber: #fbbf24;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+    header {
+      padding: 12px 20px;
+      background: #0f1724;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-title { font-size: 15px; font-weight: 800; color: var(--accent); }
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+    .file-btn-wrap { position: relative; overflow: hidden; display: inline-block; }
+    .file-btn-wrap input[type=file] {
+      position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 380px 1fr 320px;
+      gap: 10px;
+      padding: 10px;
+      overflow: hidden;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #111a27;
+    }
+    /* 좌측 데이터 트리 */
+    .tree-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      background: #0d1420;
+    }
+    .coord-item {
+      padding: 2px 5px;
+      border-radius: 3px;
+      cursor: pointer;
+      display: inline-block;
+      margin: 1px 0;
+      color: #93c5fd;
+      transition: 0.12s;
+    }
+    .coord-item:hover, .coord-item.active {
+      background: var(--accent);
+      color: #0f172a;
+      font-weight: 700;
+    }
+    /* 중앙 캔버스 뷰포트 */
+    .viewport {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      background: radial-gradient(#152233 15%, #0a1019 80%);
+    }
+    .drop-overlay {
+      position: absolute; inset: 0; background: rgba(56,189,248,0.15);
+      border: 2px dashed var(--accent); display: none; place-items: center;
+      font-size: 16px; font-weight: 700; color: var(--accent); z-index: 10;
+    }
+    .canvas-container {
+      position: relative;
+      border: 2px solid #2f435e;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.6);
+      background: #0b111a;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    canvas { display: block; image-rendering: pixelated; }
+    .controls {
+      position: absolute;
+      bottom: 16px;
+      display: flex;
+      gap: 8px;
+      background: #0c1420ee;
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+    .btn {
+      background: #1a2638;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+    .btn:hover { background: #263850; border-color: #3b5273; }
+    .btn.primary { background: var(--accent); color: #0a111a; border-color: var(--accent); font-weight: 700; }
+    .btn.active { background: var(--mint); color: #081711; font-weight: 700; }
+    /* 우측 인스펙터 패널 */
+    .info-panel { padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .card { background: #0c1420; border: 1px solid var(--border); border-radius: 8px; padding: 11px; }
+    .card-title { font-size: 11px; color: var(--muted); margin-bottom: 8px; font-weight: 700; text-transform: uppercase; }
+    .pixel-data-box {
+      font-family: monospace;
+      font-size: 11.5px;
+      background: #070c14;
+      padding: 10px;
+      border-radius: 6px;
+      line-height: 1.8;
+      border: 1px solid #1c2b3d;
+    }
+    .pixel-data-box strong { color: var(--mint); }
+    .palette-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
+    .swatch {
+      display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+      background: #111a28; border: 1px solid var(--border); border-radius: 5px;
+      font-size: 10px; cursor: pointer;
+    }
+    .swatch:hover, .swatch.active { border-color: var(--accent); }
+    .swatch-color { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #00000033; flex-shrink: 0; }
+    .stats-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 4px 0; }
+    .stats-row b { color: var(--text); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand-title">픽셀 좌표 스프라이트 전수 컨버터 & 뷰어</div>
+    <div class="header-actions">
+      <div class="file-btn-wrap">
+        <button class="btn primary">📁 0.png 파일 불러오기</button>
+        <input type="file" id="imageInput" accept="image/*">
+      </div>
+      <button class="btn" id="copyJsonBtn">데이터 전체 복사 (JSON)</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 1. 좌표 데이터 구조 패널 -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>추출된 픽셀 좌표 (<span id="pixelCount">0</span>개)</span>
+        <span style="font-size:10px;color:var(--muted)">[X, Y, PaletteIndex]</span>
+      </div>
+      <div class="tree-scroll" id="jsonTree"></div>
+    </div>
+
+    <!-- 2. 중앙 캔버스 뷰포트 -->
+    <div class="panel viewport" id="dropArea">
+      <div class="drop-overlay" id="dropOverlay">0.png 이미지를 여기에 놓으세요!</div>
+      <div class="canvas-container">
+        <canvas id="spriteCanvas"></canvas>
+      </div>
+      <div class="controls">
+        <button class="btn active" id="toggleGridBtn">격자 (Grid)</button>
+        <button class="btn" id="zoomInBtn">확대 (+)</button>
+        <button class="btn" id="zoomOutBtn">축소 (-)</button>
+        <button class="btn" id="motionBtn">숨쉬기 모션</button>
+      </div>
+    </div>
+
+    <!-- 3. 우측 정보 및 팔레트 패널 -->
+    <div class="panel">
+      <div class="panel-header">스프라이트 인스펙터</div>
+      <div class="info-panel">
+        <div class="card">
+          <div class="card-title">스프라이트 규격</div>
+          <div class="stats-row"><span>해상도</span><b id="resText">40 × 64 px</b></div>
+          <div class="stats-row"><span>유효 픽셀 수</span><b id="validPixelText">0 개</b></div>
+          <div class="stats-row"><span>배율</span><b id="scaleText">6x</b></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">선택된 픽셀 정보</div>
+          <div class="pixel-data-box" id="pixelInspector">
+            캔버스나 좌측 좌표를 클릭하면 상세 데이터가 표시됩니다.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">색상 팔레트 (<span id="paletteCount">0</span>종)</div>
+          <div class="palette-grid" id="paletteGrid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 스프라이트 기본 상태 객체
+    const spriteData = {
+      meta: { name: "agent_chibi_base", width: 40, height: 64, pixelSize: 6 },
+      palette: [],
+      pixels: []
+    };
+
+    const canvas = document.getElementById('spriteCanvas');
+    const ctx = canvas.getContext('2d');
+    let scale = spriteData.meta.pixelSize;
+    let showGrid = true;
+    let selectedPixel = null;
+    let isMotion = false;
+    let motionTimer = null;
+    let motionFrame = 0;
+
+    // RGBA -> HEX 변환
+    function rgbToHex(r, g, b) {
+      return "#" + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+    }
+
+    // [핵심] 이미지 파일(0.png)로부터 전체 유효 픽셀 좌표 및 색상 전수 추출
+    function parseImageFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const offCanvas = document.createElement('canvas');
+          const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+          offCanvas.width = img.naturalWidth || img.width;
+          offCanvas.height = img.naturalHeight || img.height;
+          offCtx.drawImage(img, 0, 0);
+
+          const w = offCanvas.width;
+          const h = offCanvas.height;
+          const imgData = offCtx.getImageData(0, 0, w, h).data;
+
+          spriteData.meta.width = w;
+          spriteData.meta.height = h;
+          spriteData.palette = [];
+          spriteData.pixels = [];
+
+          const colorMap = new Map();
+
+          // 모든 픽셀을 순회하며 투명하지 않은 픽셀 전수 수집
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              const idx = (y * w + x) * 4;
+              const a = imgData[idx + 3];
+              if (a < 25) continue; // 투명 픽셀 필터링
+
+              const hex = rgbToHex(imgData[idx], imgData[idx + 1], imgData[idx + 2]);
+              if (!colorMap.has(hex)) {
+                colorMap.set(hex, spriteData.palette.length);
+                spriteData.palette.push(hex);
+              }
+              const pColorIdx = colorMap.get(hex);
+              spriteData.pixels.push([x, y, pColorIdx]);
+            }
+          }
+
+          // UI 및 캔버스 즉시 갱신
+          document.getElementById('resText').textContent = `${w} × ${h} px`;
+          document.getElementById('pixelCount').textContent = spriteData.pixels.length;
+          document.getElementById('validPixelText').textContent = `${spriteData.pixels.length} 개`;
+          document.getElementById('paletteCount').textContent = spriteData.palette.length;
+
+          buildPaletteUI();
+          buildTreeUI();
+          resizeCanvas();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // 캔버스 렌더링
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const yOffset = (isMotion && motionFrame === 1) ? 1 : 0;
+
+      // 1. 모든 픽셀을 정확한 좌표에 그리기
+      for (let i = 0; i < spriteData.pixels.length; i++) {
+        const [x, y, cIdx] = spriteData.pixels[i];
+        const drawY = (y >= 26) ? y : (y + yOffset); // 상체 숨쉬기 모션 반영
+        ctx.fillStyle = spriteData.palette[cIdx];
+        ctx.fillRect(x * scale, drawY * scale, scale, scale);
+
+        if (selectedPixel && selectedPixel.x === x && selectedPixel.y === y) {
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x * scale, drawY * scale, scale, scale);
+        }
+      }
+
+      // 2. 픽셀 격자선 오버레이
+      if (showGrid && scale >= 4) {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.lineWidth = 0.5;
+        for (let x = 0; x <= canvas.width; x += scale) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+        }
+        for (let y = 0; y <= canvas.height; y += scale) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+        }
+      }
+    }
+
+    function resizeCanvas() {
+      canvas.width = spriteData.meta.width * scale;
+      canvas.height = spriteData.meta.height * scale;
+      render();
+    }
+
+    function buildPaletteUI() {
+      const pGrid = document.getElementById('paletteGrid');
+      pGrid.innerHTML = '';
+      spriteData.palette.forEach((hex, i) => {
+        const item = document.createElement('div');
+        item.className = 'swatch';
+        item.innerHTML = `<span class="swatch-color" style="background:${hex}"></span><span>[${i}] ${hex}</span>`;
+        pGrid.appendChild(item);
+      });
+    }
+
+    function buildTreeUI() {
+      const tree = document.getElementById('jsonTree');
+      let html = `<div style="color:var(--muted)">// 총 ${spriteData.pixels.length}개의 유효 노드</div>`;
+      spriteData.pixels.forEach(([x, y, c]) => {
+        html += `<span class="coord-item" data-x="${x}" data-y="${y}" data-c="${c}">[${x},${y},${c}]</span> `;
+      });
+      tree.innerHTML = html;
+
+      tree.querySelectorAll('.coord-item').forEach(el => {
+        el.addEventListener('click', () => {
+          selectPixel(parseInt(el.dataset.x), parseInt(el.dataset.y), parseInt(el.dataset.c));
+        });
+      });
+    }
+
+    function selectPixel(x, y, c) {
+      selectedPixel = { x, y, c };
+      const hex = spriteData.palette[c];
+      document.getElementById('pixelInspector').innerHTML = `
+        • 좌표: <strong>X: ${x}, Y: ${y}</strong><br>
+        • 팔레트 인덱스: <strong>[${c}]</strong><br>
+        • 컬러 코드: <span style="display:inline-block;width:10px;height:10px;background:${hex};vertical-align:middle;margin-right:4px;border-radius:2px;"></span><strong>${hex}</strong><br>
+        • 데이터 노드: <code>[${x}, ${y}, ${c}]</code>
+      `;
+      render();
+    }
+
+    // 캔버스 클릭 시 해당 위치 픽셀 검출
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rect.left) / scale);
+      const y = Math.floor((e.clientY - rect.top) / scale);
+      const found = spriteData.pixels.find(p => p[0] === x && p[1] === y);
+      if (found) selectPixel(found[0], found[1], found[2]);
+    });
+
+    // 드래그 앤 드롭 및 파일 업로드 리스너
+    const dropArea = document.getElementById('dropArea');
+    const dropOverlay = document.getElementById('dropOverlay');
+    const imageInput = document.getElementById('imageInput');
+
+    imageInput.addEventListener('change', (e) => {
+      if (e.target.files?.[0]) parseImageFile(e.target.files[0]);
+    });
+
+    dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropOverlay.style.display = 'grid'; });
+    dropArea.addEventListener('dragleave', () => { dropOverlay.style.display = 'none'; });
+    dropArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropOverlay.style.display = 'none';
+      if (e.dataTransfer.files?.[0]) parseImageFile(e.dataTransfer.files[0]);
+    });
+
+    // 컨트롤 버튼들
+    document.getElementById('toggleGridBtn').addEventListener('click', (e) => {
+      showGrid = !showGrid;
+      e.target.classList.toggle('active', showGrid);
+      render();
+    });
+    document.getElementById('zoomInBtn').addEventListener('click', () => {
+      if (scale < 16) { scale += 1; document.getElementById('scaleText').textContent = `${scale}x`; resizeCanvas(); }
+    });
+    document.getElementById('zoomOutBtn').addEventListener('click', () => {
+      if (scale > 2) { scale -= 1; document.getElementById('scaleText').textContent = `${scale}x`; resizeCanvas(); }
+    });
+    document.getElementById('motionBtn').addEventListener('click', (e) => {
+      isMotion = !isMotion;
+      e.target.classList.toggle('active', isMotion);
+      if (isMotion) {
+        motionTimer = setInterval(() => { motionFrame = (motionFrame === 0 ? 1 : 0); render(); }, 350);
+      } else {
+        clearInterval(motionTimer);
+        motionFrame = 0;
+        render();
+      }
+    });
+
+    // 완성된 전체 데이터 JSON 클립보드 복사
+    document.getElementById('copyJsonBtn').addEventListener('click', () => {
+      if (!spriteData.pixels.length) {
+        alert('먼저 0.png 이미지를 불러와 주세요.');
+        return;
+      }
+      const exportJson = {
+        meta: {
+          name: "agent_chibi_base",
+          width: spriteData.meta.width,
+          height: spriteData.meta.height,
+          totalPixels: spriteData.pixels.length
+        },
+        palette: spriteData.palette,
+        frames: {
+          "idle_0": {
+            pixels: spriteData.pixels
+          }
+        }
+      };
+      navigator.clipboard.writeText(JSON.stringify(exportJson, null, 2));
+      alert(`성공! 총 ${spriteData.pixels.length}개의 전수 픽셀 데이터가 JSON 형식으로 복사되었습니다.`);
+    });
+
+    // 기본 안내 표시
+    resizeCanvas();
+    document.getElementById('jsonTree').innerHTML = '<div style="color:var(--amber);padding:10px;">상단의 [📁 0.png 파일 불러오기]를 누르거나 이미지를 이 창으로 드래그하면, 약 1,000여 개의 모든 픽셀 좌표가 즉시 추출되어 완벽한 캐릭터가 렌더링됩니다.</div>';
+  </script>
+</body>
+</html>
