@@ -2,12 +2,12 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEXUS · AI Office Dashboard</title><link rel="stylesheet" href="styles.css">
+<title>NEXUS · AI Office Dashboard (AI DEV DIRECTOR)</title><link rel="stylesheet" href="styles.css">
 </head>
 <body data-page="dashboard">
 <div class="app">
 <aside class="sidebar">
-  <a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI WORKSPACE</div></div></a>
+  <a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI DEV DIRECTOR</div></div></a>
   <div class="nav-label">WORKSPACE</div>
   <nav class="nav-group">
     <a class="nav-link active" href="index.html" aria-current="page"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a>
@@ -21,42 +21,126 @@
     <a class="nav-link" href="#usage"><span class="nav-icon">▤</span><span class="nav-text">사용량 & 비용</span></a>
   </nav>
   <div class="sidebar-bottom">
-    <div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Workspace status</div><div class="workspace-caption">모든 시스템이 정상적으로<br>작동하고 있습니다.</div><div class="usage"><span>AI 사용량</span><strong>63%</strong></div><div class="usage-track"><span></span></div></div>
-    <div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Owner · Pro plan</div></div><span class="profile-more">···</span></div>
+    <div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption" id="sidebarTriadCaption">구독형 CLI 3종 연동 완료<br>종량제 API 키 차단(Sanitized)</div><div class="usage"><span>미션 단계 예산</span><strong id="sidebarStepUsage">5 / 6</strong></div><div class="usage-track"><span style="width:83%"></span></div></div>
+    <div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div>
   </div>
 </aside>
 <main class="main">
-<header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>Overview</strong></div><div class="top-actions"><div class="system-pill"><span class="system-dot"></span> 모든 시스템 정상 <span style="color:#b0bac5">·</span> 데모 데이터</div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
+<header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>Overview · Triad Orchestrator</strong></div><div class="top-actions"><div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">TRIAD STANDBY · 구독 CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
 <div class="content">
-  <div class="page-heading"><div><div class="eyebrow">WEDNESDAY, OCTOBER 14, 2026 · DAILY BRIEFING</div><h1>좋은 저녁입니다, 팀장님 <span style="font-size:23px">✦</span></h1><p>오늘도 AI 팀이 업무를 진행하고 있습니다. 현재 오피스 상태를 확인해 보세요.</p></div><div class="heading-actions"><a class="btn" href="agents.html">♙ 직원 관리</a><a class="btn primary" href="office.html">3D 오피스 입장 <span class="arrow">↗</span></a></div></div>
+  <div class="page-heading"><div><div class="eyebrow">AI DEV DIRECTOR × NEXUS VIRTUAL OFFICE · TRIAD SYSTEM</div><h1>좋은 저녁입니다, 팀장님 <span style="font-size:23px">✦</span></h1><p>세 개의 AI 코딩 CLI(Claude Code, OpenAI Codex, Google Antigravity)가 HEAD · BUILDER · REVIEWER 역할로 협업하고 있습니다.</p></div><div class="heading-actions"><button type="button" class="btn" id="btnStopMission" style="color:#c45865;border-color:#f5cfd3">■ 작업 정지</button><a class="btn" href="agents.html">♙ 역할 & 직원 관리</a><a class="btn primary" href="office.html">3D 오피스 입장 <span class="arrow">↗</span></a></div></div>
+
+  <!-- Triad Role Assignment Bar (HEAD / BUILDER / REVIEWER) -->
+  <section class="triad-bar" aria-label="다중 AI CLI 역할 배정">
+    <div class="triad-role-card" id="roleCardHead" data-role="head">
+      <div class="triad-role-top">
+        <span class="triad-role-badge role-head">HEAD · 총괄 지휘</span>
+        <select class="triad-cli-select" data-role-select="head" aria-label="HEAD 담당 AI CLI 선택">
+          <option value="claude" selected>Claude Code (claude)</option>
+          <option value="antigravity">Google Antigravity (agy)</option>
+          <option value="openai">OpenAI Codex (codex)</option>
+        </select>
+      </div>
+      <div class="triad-role-meta">
+        <span>목표 분석 · ORDER 발행 · 최종 판정</span>
+        <strong id="headStatusLabel">대기 (STANDBY)</strong>
+      </div>
+    </div>
+    <div class="triad-role-card" id="roleCardBuilder" data-role="builder">
+      <div class="triad-role-top">
+        <span class="triad-role-badge role-builder">BUILDER · 구현 코딩</span>
+        <select class="triad-cli-select" data-role-select="builder" aria-label="BUILDER 담당 AI CLI 선택">
+          <option value="claude">Claude Code (claude)</option>
+          <option value="antigravity" selected>Google Antigravity (agy)</option>
+          <option value="openai">OpenAI Codex (codex)</option>
+        </select>
+      </div>
+      <div class="triad-role-meta">
+        <span>격리 Worktree · 전체 파일 JSON 제안</span>
+        <strong id="builderStatusLabel">대기 (STANDBY)</strong>
+      </div>
+    </div>
+    <div class="triad-role-card" id="roleCardReviewer" data-role="reviewer">
+      <div class="triad-role-top">
+        <span class="triad-role-badge role-reviewer">REVIEWER · 독립 검수</span>
+        <select class="triad-cli-select" data-role-select="reviewer" aria-label="REVIEWER 담당 AI CLI 선택">
+          <option value="claude">Claude Code (claude)</option>
+          <option value="antigravity">Google Antigravity (agy)</option>
+          <option value="openai" selected>OpenAI Codex (codex)</option>
+        </select>
+      </div>
+      <div class="triad-role-meta">
+        <span>Scope Guard 검증 · Fail-Closed 리뷰</span>
+        <strong id="reviewerStatusLabel">대기 (STANDBY)</strong>
+      </div>
+    </div>
+  </section>
+
+  <!-- One-Line Goal Dispatch & 5-Stage Pipeline -->
+  <section class="triad-pipeline-panel" aria-label="직원 선택 질문 및 파이프라인 단계">
+    <form class="triad-goal-form" id="triadGoalForm">
+      <span class="triad-role-badge role-head">AI 직원 질문 / 지시</span>
+      <select class="triad-cli-select" id="triadAgentTargetSelect" aria-label="질문할 AI 직원 선택">
+        <option value="head" selected>👑 HEAD Director AI (총괄 지휘)</option>
+        <option value="builder">🛠 Builder Dev AI (구현 코딩)</option>
+        <option value="reviewer">🔍 Reviewer Audit AI (독립 검수)</option>
+        <option value="director">🛡 Scope Guard AI (안전 검증)</option>
+        <option value="triad">🔬 Triad Research AI (교차 연구)</option>
+      </select>
+      <input type="text" class="triad-goal-input" id="triadGoalInput" placeholder="선택한 AI 직원에게 간단한 질문을 하거나 개발 미션을 지시하세요 (예: 안녕? 지금 맡은 업무가 뭐야?)" required>
+      <select class="triad-cli-select" id="triadProfileSelect" aria-label="실행 모드 선택">
+        <option value="ask" selected>💬 간단 질문 (선택 직원 즉답)</option>
+        <option value="quick">⚡ 개발 미션 Quick (2단계)</option>
+        <option value="standard">🛠 개발 미션 Standard (5단계)</option>
+        <option value="deep">🔬 개발 미션 Deep (심층)</option>
+      </select>
+      <button type="submit" class="btn primary" id="triadGoalSubmit">질문 / 지시 보내기 ↗</button>
+    </form>
+    <div id="triadChatReplyBox" style="padding:11px 14px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;font-size:11.5px;color:#1e293b;line-height:1.6;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div>
+        <strong style="color:#0f6848;display:inline-block;margin-right:6px" id="triadReplyRole">[HEAD Director AI 응답 대기]</strong>
+        <span id="triadReplyText">위 드롭다운에서 원하는 AI 직원을 선택하고 질문을 보내면, 해당 직원의 담당 CLI가 즉시 답변을 반환합니다.</span>
+      </div>
+      <span class="cli-pill" id="triadReplyMeta" style="flex-shrink:0">Ready</span>
+    </div>
+    <div class="triad-steps" id="triadPipelineSteps">
+      <div class="triad-step" data-stage="PLANNING"><b>01 계획 (PLANNING)</b><span id="pipeLabelHead1">HEAD · Claude</span></div>
+      <div class="triad-step" data-stage="BUILDING"><b>02 구현 (BUILDING)</b><span id="pipeLabelBuilder">BUILDER · Antigravity</span></div>
+      <div class="triad-step" data-stage="VERIFYING"><b>03 검증 (VERIFYING)</b><span>DIRECTOR · Scope Guard</span></div>
+      <div class="triad-step" data-stage="REVIEWING"><b>04 검수 (REVIEWING)</b><span id="pipeLabelReviewer">REVIEWER · Codex</span></div>
+      <div class="triad-step" data-stage="DECIDING"><b>05 판정 (DECIDING)</b><span id="pipeLabelHead2">HEAD · PASS/FAIL</span></div>
+    </div>
+  </section>
+
   <section class="stats-grid">
-    <div class="stat-card"><div class="stat-head"><span>등록된 AI 직원</span><span class="stat-ico ico-blue">♙</span></div><div class="stat-value">12</div><div class="stat-foot"><span class="positive">+2</span> <span>이번 주 추가됨</span></div></div>
-    <div class="stat-card"><div class="stat-head"><span>현재 작업 중</span><span class="stat-ico ico-mint">↗</span></div><div class="stat-value">08 <span style="font-size:12px;color:#98a5b2;font-weight:600">/ 12</span></div><div class="stat-foot"><span class="tiny-dot"></span><span>AI 직원 8명 활동 중</span></div></div>
-    <div class="stat-card"><div class="stat-head"><span>검토 대기</span><span class="stat-ico ico-amber">◷</span></div><div class="stat-value">03</div><div class="stat-foot"><span style="color:#bf8b35;font-weight:700">승인 필요</span><span>·</span><a href="agents.html" style="color:#8493a5;text-decoration:underline">확인하기</a></div></div>
-    <div class="stat-card"><div class="stat-head"><span>작업 성공률</span><span class="stat-ico ico-purple">⌁</span></div><div class="stat-value">97.8<span style="font-size:15px">%</span></div><div class="stat-foot"><span class="positive">+2.4%</span><span>지난 7일 대비</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>연동된 AI CLI & 에이전트</span><span class="stat-ico ico-blue">♙</span></div><div class="stat-value" id="statTotalAgents">05</div><div class="stat-foot"><span class="positive">3 CLI</span> <span>Claude · Codex · Antigravity</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>현재 파이프라인 단계</span><span class="stat-ico ico-mint">↗</span></div><div class="stat-value" id="statActivePhase" style="font-size:22px">STANDBY</div><div class="stat-foot"><span class="tiny-dot"></span><span id="statActiveSub">HEAD / BUILDER / REVIEWER 대기</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>독립 검수 (REVIEWER)</span><span class="stat-ico ico-amber">◷</span></div><div class="stat-value" id="statReviewCount">PASS</div><div class="stat-foot"><span style="color:#17a877;font-weight:700" id="statReviewFoot">Fail-Closed 검증 통과</span><span>·</span><a href="agents.html" style="color:#8493a5;text-decoration:underline">확인하기</a></div></div>
+    <div class="stat-card"><div class="stat-head"><span>Scope Guard 통과율</span><span class="stat-ico ico-purple">⌁</span></div><div class="stat-value">100<span style="font-size:15px">%</span></div><div class="stat-foot"><span class="positive">원본 무수정</span><span>격리 Git Worktree</span></div></div>
   </section>
 
   <section class="overview-grid">
-    <div class="panel"><div class="panel-head"><div><div class="panel-title">나의 AI 오피스</div><div class="panel-sub">팀의 현재 상태를 3D 공간에서 확인하세요.</div></div><a href="office.html" class="text-link">공간 열기 ↗</a></div>
-      <a href="office.html" class="office-preview" aria-label="3D 가상 오피스 열기"><span class="preview-window"></span><span class="preview-window two"></span><span class="preview-desk d1"></span><span class="preview-desk d2"></span><span class="preview-desk d3"></span><span class="preview-monitor"></span><span class="preview-monitor m2"></span><span class="preview-monitor m3"></span><span class="preview-person p1"></span><span class="preview-person p2"></span><span class="preview-person p3"></span><span class="preview-tag"><i class="system-dot"></i> NEXUS HQ · FLOOR 01</span><span class="preview-bottom"><span>● 8명 활동 중</span><span>·</span><span>3개 팀</span><span>↗</span></span></a>
+    <div class="panel"><div class="panel-head"><div><div class="panel-title">나의 AI 오피스 (NEXUS GM Office SVG)</div><div class="panel-sub">벡터 SVG로 변환된 GM 오피스 전층 타워에서 20명 AI 직원을 드래그 배치하세요.</div></div><a href="office.html" class="text-link">공간 열기 ↗</a></div>
+      <a href="office.html" class="office-preview" aria-label="GM 오피스 열기" style="background:url('assets/maple-gm-office.svg') center/cover no-repeat"><span class="preview-tag"><i class="system-dot"></i> NEXUS GM HQ · ALL FLOORS SVG TOWER</span><span class="preview-bottom"><span id="previewActiveText">● 3대 CLI 연동 중</span><span>·</span><span>드래그 앤 드롭 & 말풍선 질문</span><span>↗</span></span></a>
     </div>
-    <div class="panel activity-panel"><div class="panel-head"><div><div class="panel-title">실시간 활동</div><div class="panel-sub">AI 팀에서 발생한 최근 이벤트</div></div><a href="agents.html#activity" class="text-link">전체 로그 ↗</a></div><div class="activity-list" id="dashboardActivity">
-      <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">리서치 보고서 초안 완성</div><div class="event-desc">Research AI · 시장 분석 프로젝트</div></div><div class="event-time">방금 전</div></div>
-      <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">콘텐츠 검토 승인 대기</div><div class="event-desc">Writer AI · 블로그 콘텐츠 03</div></div><div class="event-time">2분 전</div></div>
-      <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">고객 데이터 동기화 실행</div><div class="event-desc">Ops AI · CRM 레코드 128건</div></div><div class="event-time">5분 전</div></div>
-      <div class="activity-item"><div class="event-icon ico-purple">⌁</div><div class="event-main"><div class="event-title">주간 요약 생성 중</div><div class="event-desc">Executive AI · 주간 업무 리포트</div></div><div class="event-time">8분 전</div></div>
+    <div class="panel activity-panel"><div class="panel-head"><div><div class="panel-title">실시간 파이프라인 활동</div><div class="panel-sub">HEAD · BUILDER · REVIEWER · DIRECTOR 최근 이벤트</div></div><a href="agents.html#activity" class="text-link">전체 로그 ↗</a></div><div class="activity-list" id="dashboardActivity">
+      <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">HEAD 최종 PASS 판정 · 원본 안전 반영</div><div class="event-desc">HEAD (Claude Code CLI) · mission-1042</div></div><div class="event-time">방금 전</div></div>
+      <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">REVIEWER 독립 코드 검수 통과 (P0:0, P1:0)</div><div class="event-desc">REVIEWER (OpenAI Codex CLI) · read-only 샌드박스</div></div><div class="event-time">1분 전</div></div>
+      <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">BUILDER 전체 파일 JSON 제안 및 Worktree 반영</div><div class="event-desc">BUILDER (Google Antigravity CLI) · Scope Guard 통과</div></div><div class="event-time">2분 전</div></div>
+      <div class="activity-item"><div class="event-icon ico-purple">⌁</div><div class="event-main"><div class="event-title">HEAD 목표 분석 및 ORDER 작업 명세 발행</div><div class="event-desc">HEAD (Claude Code CLI) · 허용 경로 6개, diff 상한 1500줄</div></div><div class="event-time">4분 전</div></div>
     </div></div>
   </section>
   <section class="bottom-grid">
-    <div class="panel"><div class="panel-head"><div><div class="panel-title">현재 작업 중인 AI 직원</div><div class="panel-sub">진행 중인 작업을 빠르게 확인하세요.</div></div><a href="agents.html" class="text-link">직원 전체 보기 ↗</a></div><div class="table-wrap"><table class="mini-table"><thead><tr><th>AI 직원</th><th>현재 작업</th><th>진행률</th><th>상태</th></tr></thead><tbody>
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#e2edff;color:#5275c8">R</div><div><div class="agent-name">Research AI</div><div class="agent-type">리서치 팀</div></div></div></td><td>시장 자료 분석</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:72%"></span></div><span class="progress-label">72%</span></div></td><td><span class="status running">실행 중</span></td></tr>
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#f0e7ff;color:#886bc5">W</div><div><div class="agent-name">Writer AI</div><div class="agent-type">콘텐츠 팀</div></div></div></td><td>블로그 콘텐츠 작성</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:88%;background:#ad91f3"></span></div><span class="progress-label">88%</span></div></td><td><span class="status review">검토 대기</span></td></tr>
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#ddf7ed;color:#288a69">O</div><div><div class="agent-name">Ops AI</div><div class="agent-type">운영 팀</div></div></div></td><td>CRM 데이터 동기화</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:45%"></span></div><span class="progress-label">45%</span></div></td><td><span class="status running">실행 중</span></td></tr>
+    <div class="panel"><div class="panel-head"><div><div class="panel-title">현재 배치된 Triad AI 직원</div><div class="panel-sub">역할별 담당 CLI와 진행 중인 파이프라인 작업입니다.</div></div><a href="agents.html" class="text-link">역할 & 직원 전체 보기 ↗</a></div><div class="table-wrap"><table class="mini-table"><thead><tr><th>역할 / AI 직원</th><th>담당 CLI 공급자</th><th>현재 파이프라인 작업</th><th>진행률</th><th>상태</th></tr></thead><tbody id="dashboardAgentTableBody">
+      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#fff0eb;color:#d95d39">H</div><div><div class="agent-name">HEAD Director AI</div><div class="agent-type">HEAD · 총괄 지휘</div></div></div></td><td><span class="cli-pill claude" id="tableCliHead">Claude Code (claude)</span></td><td id="tableTaskHead">ORDER 계획 및 최종 PASS/FAIL 판정</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%"></span></div><span class="progress-label">100%</span></div></td><td><span class="status running" id="tableStatusHead">준비 완료</span></td></tr>
+      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#eaf2ff;color:#2b6cb0">B</div><div><div class="agent-name">Builder Dev AI</div><div class="agent-type">BUILDER · 구현 코딩</div></div></div></td><td><span class="cli-pill antigravity" id="tableCliBuilder">Google Antigravity (agy)</span></td><td id="tableTaskBuilder">격리 Worktree 전체 파일 JSON 제안</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%;background:#6787e4"></span></div><span class="progress-label">100%</span></div></td><td><span class="status running" id="tableStatusBuilder">준비 완료</span></td></tr>
+      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#e4faf1;color:#15805c">R</div><div><div class="agent-name">Reviewer Audit AI</div><div class="agent-type">REVIEWER · 독립 검수</div></div></div></td><td><span class="cli-pill openai" id="tableCliReviewer">OpenAI Codex (codex)</span></td><td id="tableTaskReviewer">독립 코드 리뷰 및 테스트 증거 대조</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%"></span></div><span class="progress-label">100%</span></div></td><td><span class="status review" id="tableStatusReviewer">검수 대기</span></td></tr>
+      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#f3efff;color:#6b46c1">D</div><div><div class="agent-name">Scope Guard AI</div><div class="agent-type">DIRECTOR · 안전 게이트</div></div></div></td><td><span class="cli-pill">Director Core (Local)</span></td><td>허용 경로 · 파일 수 · Diff 상한 검증</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%;background:#9a83f7"></span></div><span class="progress-label">상시</span></div></td><td><span class="status running">보호 활성</span></td></tr>
       </tbody></table></div></div>
-    <div class="panel" id="usage"><div class="panel-head"><div><div class="panel-title">AI 실행 현황</div><div class="panel-sub">지난 7일 · 일별 완료 작업 수 (데모)</div></div><button class="btn small">최근 7일⌄</button></div><div class="chart-area"><div class="chart-y"><span>60</span><span>40</span><span>20</span><span>0</span></div><div class="chart-plot"><div class="bar-group"><span class="bar" style="height:45%"></span><span class="bar alt" style="height:35%"></span><span class="bar-label">목</span></div><div class="bar-group"><span class="bar" style="height:57%"></span><span class="bar alt" style="height:44%"></span><span class="bar-label">금</span></div><div class="bar-group"><span class="bar" style="height:48%"></span><span class="bar alt" style="height:39%"></span><span class="bar-label">토</span></div><div class="bar-group"><span class="bar" style="height:68%"></span><span class="bar alt" style="height:53%"></span><span class="bar-label">일</span></div><div class="bar-group"><span class="bar" style="height:60%"></span><span class="bar alt" style="height:50%"></span><span class="bar-label">월</span></div><div class="bar-group"><span class="bar" style="height:82%"></span><span class="bar alt" style="height:63%"></span><span class="bar-label">화</span></div><div class="bar-group"><span class="bar" style="height:90%"></span><span class="bar alt" style="height:72%"></span><span class="bar-label">수</span></div></div></div><div class="section-foot"><span>전체 284개 작업 완료</span><div class="legend"><span><i class="lg1"></i>완료</span><span><i class="lg2"></i>자동화</span></div></div></div>
+    <div class="panel" id="usage"><div class="panel-head"><div><div class="panel-title">Triad CLI 호출 & 토큰 현황</div><div class="panel-sub" id="usageSubTitle">구독 로그인 세션 전용 · 종량제 API 비용 $0</div></div><button class="btn small" type="button">구독 CLI 전용 ✓</button></div><div class="chart-area"><div class="chart-y"><span>60</span><span>40</span><span>20</span><span>0</span></div><div class="chart-plot"><div class="bar-group"><span class="bar" style="height:45%"></span><span class="bar alt" style="height:35%"></span><span class="bar-label">목</span></div><div class="bar-group"><span class="bar" style="height:57%"></span><span class="bar alt" style="height:44%"></span><span class="bar-label">금</span></div><div class="bar-group"><span class="bar" style="height:48%"></span><span class="bar alt" style="height:39%"></span><span class="bar-label">토</span></div><div class="bar-group"><span class="bar" style="height:68%"></span><span class="bar alt" style="height:53%"></span><span class="bar-label">일</span></div><div class="bar-group"><span class="bar" style="height:60%"></span><span class="bar alt" style="height:50%"></span><span class="bar-label">월</span></div><div class="bar-group"><span class="bar" style="height:82%"></span><span class="bar alt" style="height:63%"></span><span class="bar-label">화</span></div><div class="bar-group"><span class="bar" style="height:90%"></span><span class="bar alt" style="height:72%"></span><span class="bar-label">수</span></div></div></div><div class="section-foot"><span id="usageTotalSummary">전체 46회 CLI 호출 · ~34.4만 토큰 (구독 세션)</span><div class="legend"><span><i class="lg1"></i>BUILDER / REVIEWER</span><span><i class="lg2"></i>HEAD 판정 통과</span></div></div></div>
   </section>
 </div>
 </main>
 </div>
-<script src="app.js"></script>
+<script src="app.js?v=triad17"></script>
 </body></html>

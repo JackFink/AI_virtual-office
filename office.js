@@ -1,825 +1,1033 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { CharacterSpriteData, PixelSpriteRenderer } from './avatar/scripts/pixel-base-character.js';
+/**
+ * NEXUS Virtual Office - Continuous Multi-Floor Building & Face-to-Face 6-Seat Controller
+ * 1) 엘리베이터 계단 제거 완료 (assets/maple-gm-office.svg 평탄화 슬래브)
+ * 2) 좌석 배치는 앞면(뒷줄)과 뒷면(앞줄)이 서로 마주보는 총 6자리 기본 구성
+ * 3) 한 층의 자리(좌석) 수를 추가(＋)/제거(－)할 수 있는 기능 지원
+ * 4) 자리가 없는 캐릭터는 자동으로 다른 층(2F -> 3F -> 4F...)의 빈자리로 순차 배치
+ * 5) 맨 아래가 1층(1F)부터 위로 순차 상승하는 일체형 빌딩 구조 & 선택 층 중앙 정렬 & 드래그 앤 드롭 지원
+ */
+(() => {
+  'use strict';
 
-// NEXUS floor-plan scene inspired by the supplied 330 m² office reference.
-const canvas = document.getElementById('office3d');
-const container = canvas?.parentElement;
-if (!canvas || !container) throw new Error('3D office canvas was not found.');
+  const sceneCard = document.getElementById('officeSceneCard');
+  const viewportEl = document.getElementById('maple2dViewport');
+  const towerStackEl = document.getElementById('mapleTowerStack');
+  if (!sceneCard || !viewportEl || !towerStackEl) return;
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color('#e9eff1');
-const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 180);
-const initialCamera = new THREE.Vector3(24, 23, 27);
-camera.position.copy(initialCamera);
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.6, 0);
-controls.enableDamping = true;
-controls.dampingFactor = 0.07;
-controls.minDistance = 13;
-controls.maxDistance = 52;
-controls.maxPolarAngle = Math.PI * 0.48;
-controls.minPolarAngle = 0.12;
-
-scene.add(new THREE.HemisphereLight('#ffffff', '#b5b9b5', 2.0));
-const sun = new THREE.DirectionalLight('#fff4df', 3.0);
-sun.position.set(14, 24, 13);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -18;
-sun.shadow.camera.right = 18;
-sun.shadow.camera.top = 18;
-sun.shadow.camera.bottom = -18;
-sun.shadow.bias = -0.00025;
-scene.add(sun);
-const fill = new THREE.DirectionalLight('#d4e9ff', 1.25);
-fill.position.set(-14, 13, -10);
-scene.add(fill);
-
-const MAT = new Map();
-function mat(color, roughness = 0.78, metalness = 0, transparent = false, opacity = 1) {
-  const key = `${color}|${roughness}|${metalness}|${transparent}|${opacity}`;
-  if (!MAT.has(key)) MAT.set(key, new THREE.MeshStandardMaterial({ color, roughness, metalness, transparent, opacity, depthWrite: !transparent }));
-  return MAT.get(key);
-}
-function box(parent, w, h, d, color, x, y, z, opts = {}) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), typeof color === 'string' ? mat(color, opts.roughness ?? 0.78, opts.metalness ?? 0, opts.transparent ?? false, opts.opacity ?? 1) : color);
-  mesh.position.set(x, y, z);
-  mesh.castShadow = opts.cast ?? true;
-  mesh.receiveShadow = opts.receive ?? true;
-  if (opts.rx) mesh.rotation.x = opts.rx;
-  if (opts.ry) mesh.rotation.y = opts.ry;
-  if (opts.rz) mesh.rotation.z = opts.rz;
-  parent.add(mesh);
-  return mesh;
-}
-function cylinder(parent, top, bottom, h, color, x, y, z, segments = 16) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(top, bottom, h, segments), mat(color));
-  mesh.position.set(x, y, z); mesh.castShadow = true; mesh.receiveShadow = true; parent.add(mesh); return mesh;
-}
-function addPlant(parent, x, z, scale = 1) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(scale); parent.add(g);
-  cylinder(g, .22, .28, .38, '#d7dfdc', 0, .19, 0, 14);
-  cylinder(g, .035, .045, .72, '#3b8767', 0, .67, 0, 8);
-  for (let i = 0; i < 8; i++) {
-    const a = i * 2.39;
-    const leaf = new THREE.Mesh(new THREE.SphereGeometry(.17, 10, 8), mat(i % 2 ? '#67b38b' : '#428d6f'));
-    leaf.scale.set(.63, 1.7, .42);
-    leaf.position.set(Math.cos(a) * .2, .72 + (i % 3) * .15, Math.sin(a) * .2);
-    leaf.rotation.z = Math.cos(a) * .7; leaf.rotation.x = Math.sin(a) * .7; leaf.castShadow = true; g.add(leaf);
-  }
-  return g;
-}
-function addLabel(parent, title, subtitle, x, z, accent = '#287f69', width = 2.8) {
-  const c = document.createElement('canvas'); c.width = 512; c.height = 120;
-  const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, c.width, c.height);
-  ctx.fillStyle = 'rgba(255,255,255,.94)';
-  ctx.beginPath(); ctx.roundRect(7, 7, 498, 106, 20); ctx.fill();
-  ctx.strokeStyle = '#dce5e4'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = accent; ctx.fillRect(22, 23, 7, 74);
-  ctx.fillStyle = '#233746'; ctx.font = 'bold 28px "Noto Sans KR", Arial, sans-serif'; ctx.fillText(title, 46, 53);
-  ctx.fillStyle = '#7b8a94'; ctx.font = '21px Arial, sans-serif'; ctx.fillText(subtitle, 46, 83);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
-  sprite.scale.set(width, width * .235, 1); sprite.position.set(x, 3.1, z); sprite.renderOrder = 10; parent.add(sprite); return sprite;
-}
-function addGlassWall(parent, orientation, x, z, length, height = 2.35, color = '#b5d1d5') {
-  const glass = mat(color, .23, .08, true, .40);
-  if (orientation === 'x') {
-    box(parent, length, height, .065, glass, x, height / 2 + .05, z, { cast: false, receive: false });
-    for (let i = 0; i <= Math.round(length / 1.45); i++) {
-      const px = x - length / 2 + (length / Math.round(length / 1.45)) * i;
-      box(parent, .055, height, .09, '#a7b7ba', px, height / 2 + .05, z, { cast: false });
-    }
-    box(parent, length, .065, .09, '#a7b7ba', x, height + .05, z, { cast: false });
-  } else {
-    box(parent, .065, height, length, glass, x, height / 2 + .05, z, { cast: false, receive: false });
-    for (let i = 0; i <= Math.round(length / 1.45); i++) {
-      const pz = z - length / 2 + (length / Math.round(length / 1.45)) * i;
-      box(parent, .09, height, .055, '#a7b7ba', x, height / 2 + .05, pz, { cast: false });
-    }
-    box(parent, .09, .065, length, '#a7b7ba', x, height + .05, z, { cast: false });
-  }
-}
-function addChair(parent, x, z, color = '#6c7b81', rotation = 0, scale = 1) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rotation; g.scale.setScalar(scale); parent.add(g);
-  box(g, .55, .13, .53, color, 0, .55, 0);
-  box(g, .52, .57, .11, color, 0, .84, .2);
-  cylinder(g, .06, .08, .34, '#65767d', 0, .29, 0, 10);
-  box(g, .6, .05, .6, '#65767d', 0, .08, 0);
-  return g;
-}
-function addDesk(parent, x, z, variant = 0, scale = 1) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(scale); parent.add(g);
-  const tops = ['#d9b18a', '#d3c0a2', '#cda982', '#e0c39b'];
-  const top = tops[variant % tops.length];
-  box(g, 1.72, .13, .88, top, 0, .94, 0);
-  box(g, 1.75, .035, .9, '#a98a6b', 0, .865, 0);
-  for (const dx of [-.73, .73]) for (const dz of [-.34, .34]) box(g, .055, .82, .055, '#718087', dx, .43, dz);
-  // dual-monitor workstation
-  for (const dx of [-.32, .28]) {
-    box(g, .48, .34, .055, '#273d4a', dx, 1.24, -.26, { roughness: .3, metalness: .08 });
-    box(g, .40, .25, .012, variant % 2 ? '#93c9d7' : '#a4d7c5', dx, 1.24, -.226, { cast: false, receive: false });
-    box(g, .045, .18, .045, '#73848b', dx, 1.0, -.24);
-  }
-  box(g, .33, .025, .2, '#eef1ed', -.55, 1.025, .23, { cast: false });
-  cylinder(g, .05, .05, .09, '#f6f2e9', .61, 1.03, .22, 10);
-  addChair(g, 0, .74, variant % 3 === 1 ? '#8393a4' : '#566874', Math.PI, .8);
-  return g;
-}
-function addAvatar(parent, spec) {
-  const root = new THREE.Group();
-  root.position.set(spec.x, 0, spec.z + .6);
-  root.rotation.y = Math.PI;
-  root.userData.agentId = spec.id;
-  parent.add(root);
-
-  const shirt = mat(spec.color || '#1e293b');
-  const skin = mat(spec.skin || '#fde2d2', 0.65);
-  const hair = mat(spec.hair || '#4a3525', 0.75);
-  const pants = mat(spec.pantsColor || '#27466b');
-  const shoeWhite = mat('#ffffff', 0.4);
-  const shoeAccent = mat(spec.accentColor || '#ef4444', 0.5);
-  const eyeMat = mat('#1e293b', 0.2);
-  const eyeSpec = mat('#ffffff', 0.1);
-  const blushMat = mat('#ff7f7f', 0.8, 0, true, 0.6);
-  const lanyardMat = mat('#10b981', 0.5);
-  const cardMat = mat('#ffffff', 0.3);
-
-  // [1] 바닥 접지 그림자 (Soft Contact Shadow)
-  const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.34, 16),
-    mat('#182536', 1, 0, true, 0.22)
-  );
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.012;
-  root.add(shadow);
-
-  // [2] 하체 & 다리 & 스니커즈 (2등신 치비 비율)
-  box(root, 0.25, 0.08, 0.18, pants, 0, 0.44, 0);
-
-  for (const side of [-1, 1]) {
-    const legX = side * 0.09;
-    // 다리 (바지)
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.055, 0.26, 10), pants);
-    leg.position.set(legX, 0.29, 0);
-    leg.castShadow = true;
-    root.add(leg);
-
-    // 롤업 밑단 (Roll-up cuff)
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.04, 10), mat('#cbd5e1'));
-    cuff.position.set(legX, 0.16, 0);
-    root.add(cuff);
-
-    // 스니커즈 밑창 + 액센트 라인 + 슈즈 바디
-    box(root, 0.12, 0.04, 0.17, shoeWhite, legX, 0.03, 0.02, { cast: true });
-    box(root, 0.12, 0.025, 0.17, shoeAccent, legX, 0.065, 0.02);
-    box(root, 0.11, 0.06, 0.15, shoeWhite, legX, 0.105, 0.015, { cast: true });
-  }
-
-  // [3] 상체 그룹 (Torso Group - 호흡 바운스)
-  const torsoGroup = new THREE.Group();
-  torsoGroup.position.y = 0.58;
-  root.add(torsoGroup);
-
-  // 상의 몸통 (Chibi Torso)
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.24, 12), shirt);
-  torso.position.y = 0.04;
-  torso.castShadow = true;
-  torsoGroup.add(torso);
-
-  // 목 (Neck)
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.08, 10), skin);
-  neck.position.y = 0.18;
-  torsoGroup.add(neck);
-
-  // 사원증 넥스트랩 & 카드 (Lanyard & ID badge)
-  const strapL = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6), lanyardMat);
-  strapL.position.set(-0.035, 0.10, 0.13);
-  strapL.rotation.z = -0.35;
-  torsoGroup.add(strapL);
-
-  const strapR = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6), lanyardMat);
-  strapR.position.set(0.035, 0.10, 0.13);
-  strapR.rotation.z = 0.35;
-  torsoGroup.add(strapR);
-
-  // 사원증 카드 & 블루 헤더 바
-  box(torsoGroup, 0.065, 0.08, 0.012, cardMat, 0, 0.01, 0.145);
-  box(torsoGroup, 0.065, 0.02, 0.014, mat('#3b82f6'), 0, 0.04, 0.146);
-
-  // [4] 양팔 & 타이핑 애니메이션 (Arms with desk typing action)
-  const leftArm = new THREE.Group();
-  leftArm.position.set(-0.16, 0.68, 0.02);
-  const leftSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.046, 0.14, 4, 8), shirt);
-  leftSleeve.position.set(0, -0.07, 0.04);
-  leftSleeve.rotation.x = -0.55;
-  leftArm.add(leftSleeve);
-  const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), skin);
-  leftHand.position.set(0, -0.14, 0.14);
-  leftArm.add(leftHand);
-  root.add(leftArm);
-
-  const rightArm = new THREE.Group();
-  rightArm.position.set(0.16, 0.68, 0.02);
-  const rightSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.046, 0.14, 4, 8), shirt);
-  rightSleeve.position.set(0, -0.07, 0.04);
-  rightSleeve.rotation.x = -0.55;
-  rightArm.add(rightSleeve);
-  const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), skin);
-  rightHand.position.set(0, -0.14, 0.14);
-  rightArm.add(rightHand);
-  root.add(rightArm);
-
-  // [5] 2등신 대두 치비 헤드 (2-Head Chibi Head Group)
-  const headGroup = new THREE.Group();
-  headGroup.position.set(0, 1.02, 0);
-  root.add(headGroup);
-
-  // 두상 구체 (큰 2등신 치비 비율)
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 14), skin);
-  head.scale.set(1.06, 0.98, 1.0);
-  head.castShadow = true;
-  headGroup.add(head);
-
-  // 양쪽 귀
-  const earL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), skin);
-  earL.position.set(-0.245, 0.01, 0);
-  headGroup.add(earL);
-  const earR = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), skin);
-  earR.position.set(0.245, 0.01, 0);
-  headGroup.add(earR);
-
-  // 핑크빛 볼터치 (Blush)
-  const blushL = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), blushMat);
-  blushL.scale.set(1.4, 0.8, 0.4);
-  blushL.position.set(-0.145, -0.04, 0.205);
-  headGroup.add(blushL);
-
-  const blushR = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), blushMat);
-  blushR.scale.set(1.4, 0.8, 0.4);
-  blushR.position.set(0.145, -0.04, 0.205);
-  headGroup.add(blushR);
-
-  // 아잉/모험가 맑은 미소 눈 (흑요석 동공 + 스펙큘러 하이라이트)
-  for (const side of [-1, 1]) {
-    const eyeX = side * 0.082;
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 8), eyeMat);
-    pupil.scale.set(1.0, 1.2, 0.4);
-    pupil.position.set(eyeX, 0.025, 0.228);
-    headGroup.add(pupil);
-
-    // 반짝이는 화이트 하이라이트
-    const spec1 = new THREE.Mesh(new THREE.SphereGeometry(0.009, 6, 6), eyeSpec);
-    spec1.position.set(eyeX - 0.007, 0.036, 0.238);
-    headGroup.add(spec1);
-
-    const spec2 = new THREE.Mesh(new THREE.SphereGeometry(0.005, 6, 6), eyeSpec);
-    spec2.position.set(eyeX + 0.007, 0.016, 0.238);
-    headGroup.add(spec2);
-  }
-
-  // 방긋 웃는 미소 입
-  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.005, 6, 12, Math.PI * 0.85), mat('#e11d48'));
-  mouth.rotation.z = Math.PI * 0.08;
-  mouth.position.set(0, -0.07, 0.232);
-  headGroup.add(mouth);
-
-  // 헤어 볼륨 & 스타일 (Hair)
-  const hairCap = new THREE.Mesh(
-    new THREE.SphereGeometry(0.252, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62),
-    hair
-  );
-  hairCap.position.set(0, 0.02, -0.015);
-  hairCap.castShadow = true;
-  headGroup.add(hairCap);
-
-  // 앞머리 뱅 (Fringe) & 옆머리 락
-  box(headGroup, 0.34, 0.09, 0.07, hair, 0, 0.17, 0.18, { rx: 0.2 });
-  box(headGroup, 0.06, 0.15, 0.08, hair, -0.21, 0.04, 0.12, { rz: 0.15 });
-  box(headGroup, 0.06, 0.15, 0.08, hair, 0.21, 0.04, 0.12, { rz: -0.15 });
-
-  // [6] 상태 표시 링 & 플로팅 핀 & 3D 홀로그램 명찰
-  const statusColor = spec.statusKey === 'review' ? '#f1b64f' : spec.statusKey === 'idle' ? '#a3b0bd' : '#45c89b';
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.03, 8, 28), mat(statusColor));
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.03;
-  root.add(ring);
-
-  const pin = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), mat(statusColor));
-  pin.position.set(0, 1.58, 0);
-  root.add(pin);
-
-  // 홀로그램 네임택
-  const label = document.createElement('canvas');
-  label.width = 440;
-  label.height = 96;
-  const ctx = label.getContext('2d');
-  ctx.fillStyle = 'rgba(255,255,255,0.96)';
-  ctx.beginPath();
-  ctx.roundRect(8, 8, 424, 80, 20);
-  ctx.fill();
-  ctx.strokeStyle = '#dbe5ec';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  // 상태 점
-  ctx.fillStyle = statusColor;
-  ctx.beginPath();
-  ctx.arc(36, 48, 8, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#1e293b';
-  ctx.font = 'bold 26px "Noto Sans KR", Arial, sans-serif';
-  ctx.fillText(spec.name, 56, 42);
-
-  ctx.fillStyle = '#64748b';
-  ctx.font = '19px "Noto Sans KR", Arial, sans-serif';
-  ctx.fillText(`${spec.role} · ${spec.task}`, 56, 68);
-
-  const tex = new THREE.CanvasTexture(label);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
-  tag.scale.set(1.9, 0.42, 1);
-  tag.position.y = 1.95;
-  tag.renderOrder = 12;
-  tag.userData.agentId = spec.id;
-  root.add(tag);
-
-  root.traverse(o => { if (o.isMesh) o.userData.agentId = spec.id; });
-
-  return {
-    ...spec,
-    root,
-    ring,
-    pin,
-    torsoGroup,
-    headGroup,
-    leftArm,
-    rightArm
+  const CLI_LABELS = {
+    claude: 'Claude Code (claude)',
+    antigravity: 'Google Antigravity (agy)',
+    openai: 'OpenAI Codex (codex)'
   };
-}
-
-function addSofa(parent, x, z, color, rotation = 0, scale = 1) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rotation; g.scale.setScalar(scale); parent.add(g);
-  box(g, 2.1, .36, .78, color, 0, .42, 0);
-  box(g, 2.12, .59, .16, color, 0, .68, -.32);
-  box(g, .16, .45, .78, color, -1.0, .5, 0); box(g, .16, .45, .78, color, 1.0, .5, 0);
-  for (const x0 of [-.72, .72]) box(g, .08, .2, .08, '#806f60', x0, .1, .22);
-}
-function addLounge(parent) {
-  box(parent, 4.7, .025, 3.2, '#e5dacf', 1.7, .04, .6, { cast: false });
-  addSofa(parent, .55, -.25, '#c5ad91', Math.PI / 2, .9);
-  addSofa(parent, 3.35, .05, '#b9cbbd', -Math.PI / 2, .83);
-  box(parent, 1.05, .16, .78, '#e3c59f', 1.95, .42, 1.0);
-  cylinder(parent, .32, .34, .1, '#b98f6c', 1.95, .25, 1.0, 20);
-  addChair(parent, .85, 2.05, '#7c8e96', Math.PI * .76, .76);
-  addChair(parent, 3.1, 2.12, '#7c8e96', -Math.PI * .76, .76);
-  addPlant(parent, .05, 2.1, 1.05); addPlant(parent, 4.1, -1.0, .82);
-  addLabel(parent, '휴게실 · 라운지', 'LOUNGE / BREAK AREA', 2.15, .55, '#b58a63', 2.9);
-}
-function addPantry(parent) {
-  // Back counter and cabinet run, sink, coffee maker, refrigerator and high table.
-  box(parent, 4.45, .85, .6, '#c5b8aa', 2.55, .47, -7.45);
-  box(parent, 4.5, .12, .68, '#5a6667', 2.55, .95, -7.45);
-  for (let i = 0; i < 5; i++) box(parent, .018, .64, .015, '#8b8177', .78 + i * .87, .48, -7.12, { cast: false });
-  box(parent, .95, 2.0, .9, '#cbd2d1', .2, 1.0, -6.85); box(parent, .85, 1.84, .08, '#edf1ee', .2, 1.02, -6.37);
-  box(parent, 1.02, .12, .72, '#a7ada8', 3.2, 1.02, -7.42);
-  box(parent, .65, .06, .45, '#303f47', 4.05, 1.04, -7.42); box(parent, .1, .28, .1, '#c7d5d6', 4.05, 1.2, -7.42);
-  for (let i = 0; i < 6; i++) {
-    cylinder(parent, .055, .055, .16, i % 2 ? '#dce4df' : '#e5c6a6', .95 + i * .52, 1.08, -7.43, 10);
-  }
-  box(parent, 2.7, .12, 1.0, '#d9b58f', 3.15, 1.02, -5.45);
-  for (const x of [2.15, 4.15]) for (const z of [-5.78, -5.12]) box(parent, .06, .95, .06, '#79878b', x, .48, z);
-  for (const x of [2.0, 3.1, 4.2]) addChair(parent, x, -4.88, '#846f5c', Math.PI, .65);
-  addLabel(parent, '탕비실', 'PANTRY · COFFEE & WATER', 2.9, -6.05, '#a27e59', 2.8);
-}
-function addRestrooms(parent) {
-  // Restroom room boundaries / cubicles / wash basins.
-  box(parent, 3.35, 2.65, .12, '#e0dfd9', 6.85, 1.32, -4.08);
-  box(parent, .12, 2.65, 3.5, '#e0dfd9', 5.18, 1.32, -5.85);
-  box(parent, .12, 2.65, 3.5, '#e0dfd9', 8.52, 1.32, -5.85);
-  box(parent, 3.35, 2.65, .12, '#e0dfd9', 6.85, 1.32, -7.55);
-  // partition cubicles
-  for (const x of [6.0, 7.0, 8.0]) {
-    box(parent, .055, 1.7, 1.9, '#c4cecb', x, .85, -5.85);
-    box(parent, .72, .08, .54, '#f3f3ed', x + .12, .27, -6.58);
-    box(parent, .6, .28, .48, '#f9f8f1', x + .12, .42, -6.58);
-  }
-  for (const x of [5.8, 6.8, 7.8]) {
-    box(parent, .58, .15, .38, '#f3f6f5', x, .7, -4.55);
-    box(parent, .45, .5, .3, '#dfe5e4', x, .4, -4.55);
-    cylinder(parent, .06, .06, .14, '#9aa9aa', x, .83, -4.55, 10);
-  }
-  addLabel(parent, '화장실', 'RESTROOMS', 6.8, -5.75, '#568c9a', 2.1);
-}
-function addStairsAndElevators(parent) {
-  // Emergency stair core is green, matching the reference plan.
-  box(parent, 3.0, .08, 4.35, '#e0e8e1', 10.35, .06, -3.2, { cast: false });
-  box(parent, .12, 3.05, 4.35, '#267c57', 8.85, 1.52, -3.2);
-  box(parent, .12, 3.05, 4.35, '#267c57', 11.83, 1.52, -3.2);
-  box(parent, 3.0, 3.05, .12, '#267c57', 10.35, 1.52, -5.36);
-  box(parent, 3.0, 3.05, .12, '#267c57', 10.35, 1.52, -1.04);
-  for (let i = 0; i < 8; i++) {
-    const x = 9.15 + i * .31;
-    box(parent, .38, .14 + i * .11, 2.6, i % 2 ? '#9ba4a3' : '#b2bab8', x, .12 + (i * .11) / 2, -3.22, { cast: false });
-  }
-  box(parent, 1.1, .06, .7, '#f0f0e9', 10.6, 1.08, -1.62);
-  box(parent, .72, .38, .035, '#e5f3e9', 10.6, 1.11, -1.58, { cast: false });
-  addLabel(parent, '비상구 · 계단', 'EMERGENCY EXIT & STAIRS', 10.2, -3.2, '#1f875d', 2.9);
-  const elevator = (x, z, label) => {
-    box(parent, 1.45, 2.85, 1.5, '#bdc6c7', x, 1.42, z);
-    box(parent, 1.2, 2.6, 1.22, '#dce1df', x, 1.35, z + .08);
-    box(parent, .52, 2.2, .045, '#8b999c', x - .27, 1.25, z + .72, { metalness: .25 });
-    box(parent, .52, 2.2, .045, '#778a90', x + .27, 1.25, z + .72, { metalness: .25 });
-    box(parent, .08, .28, .08, '#e0b65e', x + .82, 1.65, z + .56);
-    addLabel(parent, label, 'ELEVATOR', x, z - .9, '#73838b', 1.9);
+  const CLI_SHORT = {
+    claude: 'Claude',
+    antigravity: 'Antigravity',
+    openai: 'Codex'
   };
-  elevator(10.15, .35, '엘리베이터 A');
-  elevator(10.15, 5.3, '엘리베이터 B');
-}
-function addMeetingRooms(parent) {
-  // Two glazed meeting / department rooms on the front-right wing.
-  const wall = mat('#b2cbd0', .25, .05, true, .36);
-  // Room 1 boundaries: x 2.1..5.1, z 3.3..8.25
-  addGlassWall(parent, 'z', 2.05, 5.85, 4.6, 2.25);
-  addGlassWall(parent, 'x', 3.55, 8.15, 3.0, 2.25);
-  addGlassWall(parent, 'x', 3.55, 3.45, 3.0, 2.25);
-  // Keep a door-sized gap by covering only the side end portions with glass.
-  // Room 2: x 5.1..8.6
-  addGlassWall(parent, 'x', 6.85, 8.15, 3.4, 2.25);
-  addGlassWall(parent, 'z', 6.85, 5.85, 4.6, 2.25);
-  addGlassWall(parent, 'x', 6.85, 3.45, 3.4, 2.25);
-  // Mullions / transparent doors are deliberately low-profile so the interior stays visible.
-  box(parent, 1.35, .9, .08, '#dbe2e0', 3.5, .48, 4.1);
-  box(parent, 1.55, .9, .08, '#dbe2e0', 6.8, .48, 4.1);
-  // Conference table one
-  box(parent, 2.2, .14, 1.0, '#d6b28f', 3.55, .96, 6.0);
-  for (const x of [2.65, 4.45]) for (const z of [5.5, 6.5]) box(parent, .07, .83, .07, '#7c898c', x, .42, z);
-  for (const x of [2.55, 3.55, 4.55]) { addChair(parent, x, 5.15, '#788992', Math.PI, .64); addChair(parent, x, 6.88, '#788992', 0, .64); }
-  // Conference table two
-  box(parent, 2.35, .14, 1.0, '#c9d5cf', 6.85, .96, 6.0);
-  for (const x of [5.95, 7.75]) for (const z of [5.5, 6.5]) box(parent, .07, .83, .07, '#7c898c', x, .42, z);
-  for (const x of [5.85, 6.85, 7.85]) { addChair(parent, x, 5.15, '#7d8ca4', Math.PI, .64); addChair(parent, x, 6.88, '#7d8ca4', 0, .64); }
-  // Display panels against inner meeting-room walls.
-  box(parent, 1.45, .84, .055, '#314b5a', 3.55, 2.0, 3.62, { cast: false });
-  box(parent, 1.45, .84, .055, '#314b5a', 6.85, 2.0, 3.62, { cast: false });
-  addLabel(parent, '회의실 · 부서 섹션', 'MEETING & DEPARTMENT ROOMS', 5.25, 7.25, '#4c8794', 3.4);
-}
-function addOfficeArchitecture(parent, floor) {
-  // Main 330 m² (approx. 24 × 18 scene units) slab and cutaway perimeter.
-  box(parent, 24.4, .22, 18.4, '#b9c3c2', 0, -.16, 0, { roughness: .9 });
-  box(parent, 24.0, .08, 18.0, '#ebe8df', 0, -.015, 0, { cast: false, roughness: .9 });
-  // Light floor joints
-  for (let x = -11; x <= 11; x += 2) box(parent, .012, .008, 17.8, '#dcded7', x, .03, 0, { cast: false, receive: false });
-  for (let z = -8; z <= 8; z += 2) box(parent, 23.8, .008, .012, '#dcded7', 0, .03, z, { cast: false, receive: false });
-  // Rear and left exterior walls; front edge is cut away for visibility.
-  box(parent, 24.0, 3.5, .24, '#f1f0e9', 0, 1.73, -8.92);
-  box(parent, .24, 3.5, 18.0, '#f1f0e9', -11.88, 1.73, 0);
-  box(parent, 24.0, .15, .26, '#c9d0cb', 0, .18, 8.9);
-  box(parent, .18, 1.25, 18.0, '#d4dbd7', 11.88, .62, 0);
-  // Tall windows along the back side of the workspace.
-  for (let i = 0; i < 5; i++) {
-    const x = -9.8 + i * 2.05;
-    box(parent, 1.8, 1.75, .055, '#c5e1e9', x, 2.05, -8.77, { transparent: true, opacity: .78, cast: false, receive: false });
-    box(parent, .055, 1.85, .07, '#f8faf8', x - .92, 2.05, -8.73, { cast: false });
-    box(parent, .055, 1.85, .07, '#f8faf8', x + .92, 2.05, -8.73, { cast: false });
-    box(parent, 1.88, .055, .07, '#f8faf8', x, 1.13, -8.73, { cast: false });
-    box(parent, 1.88, .055, .07, '#f8faf8', x, 2.98, -8.73, { cast: false });
-  }
-  // Workplace zone rug and low partitions.
-  box(parent, 10.6, .025, 9.7, '#dce8df', -5.25, .05, -.95, { cast: false });
-  const dividers = ['#bfd6ce', '#d4c6e2', '#c3d5e5', '#d9d8b9', '#c8dfd5', '#dfc3ba'];
-  const stations = [];
-  const xs = [-8.5, -5.5, -2.5], zs = [-4.25, -1.05, 2.15];
-  let idx = 0;
-  for (const z of zs) for (const x of xs) {
-    addDesk(parent, x, z, idx, .96);
-    // modest acoustic dividers at the back/side of every other workstation
-    if ((idx % 3) !== 2) box(parent, .065, 1.28, 1.05, dividers[idx % dividers.length], x + 1.08, .67, z - .05, { cast: false });
-    stations.push({ x, z: z + .12 }); idx++;
-  }
-  addLabel(parent, '사무 구역 · AI 워크스페이스', 'WORKSPACE · DEPARTMENT PODS', -6.15, -7.0, '#3a8a73', 4.1);
-  // Pantry, washrooms, lounge and circulation core.
-  addPantry(parent);
-  addRestrooms(parent);
-  addLounge(parent);
-  addStairsAndElevators(parent);
-  addMeetingRooms(parent);
-  addPlant(parent, -.25, -3.0, .82);
-  addPlant(parent, 4.55, 2.65, .8);
-  // Main corridor / wayfinding markers.
-  box(parent, 1.0, .025, 7.2, '#e5e4db', .15, .05, .0, { cast: false });
-  addLabel(parent, `${floor.name} · NEXUS HQ`, 'APPROX. 330 m² FLOOR PLAN', .0, -1.95, '#2d8970', 3.0);
-  return stations;
-}
 
-const spriteRenderer = new PixelSpriteRenderer(CharacterSpriteData);
-
-function getAgentAvatarSvg(agentSpec, size = 34) {
-  if (!agentSpec) return '';
-  spriteRenderer.setPalette(agentSpec.skinPreset || 'fair');
-  return spriteRenderer.renderToSVG("idle_0", {
-    width: size,
-    height: size,
-    className: "chibi-pixel-avatar"
-  });
-}
-
-const agentSpecs = [
-  {
-    id: 'research',
-    name: 'Research AI',
-    role: '리서치 팀',
-    dept: '기획&전략팀 · Agent #001',
-    task: '시장 자료 분석',
-    progress: '72%',
-    status: '실행 중',
-    statusKey: 'running',
-    color: '#1e293b',       // 캐주얼 로고 반팔티
-    pantsColor: '#27466b',  // 롤업 인디고 진
-    accentColor: '#ef4444', // 레드 포인트 스니커즈
-    skin: '#fde2d2',        // 뽀송 스킨
-    skinPreset: 'fair',
-    hair: '#4a3525',        // 다크 브라운
-    gender: '남성',
-    x: -8.5, z: -4.15, floorId: 1
-  },
-  {
-    id: 'writer',
-    name: 'Writer AI',
-    role: '콘텐츠 팀',
-    dept: '콘텐츠&미디어팀 · Agent #002',
-    task: '콘텐츠 검토 승인 대기',
-    progress: '88%',
-    status: '검토 대기',
-    statusKey: 'review',
-    color: '#3b597b',
-    pantsColor: '#334155',
-    accentColor: '#38bdf8',
-    skin: '#fff0e6',        // 미백 스킨
-    skinPreset: 'rosy',
-    hair: '#7c4a2d',        // 초코 브라운
-    gender: '여성',
-    x: -5.5, z: -1.0, floorId: 1
-  },
-  {
-    id: 'ops',
-    name: 'Ops AI',
-    role: '운영 팀',
-    dept: '인프라&보안팀 · Agent #003',
-    task: 'CRM 데이터 동기화',
-    progress: '45%',
-    status: '실행 중',
-    statusKey: 'running',
-    color: '#1e293b',
-    pantsColor: '#3b597b',
-    accentColor: '#10b981',
-    skin: '#fef3e2',        // 내추럴 웜 스킨
-    skinPreset: 'warm',
-    hair: '#1e1e24',
-    gender: '남성',
-    x: -2.5, z: 2.15, floorId: 1
-  },
-  {
-    id: 'design',
-    name: 'Design AI',
-    role: '디자인 팀',
-    dept: 'UI/UX 디자인팀 · Agent #004',
-    task: '다음 작업 대기',
-    progress: '—',
-    status: '대기 중',
-    statusKey: 'idle',
-    color: '#ea580c',
-    pantsColor: '#334155',
-    accentColor: '#f43f5e',
-    skin: '#fff3ea',
-    skinPreset: 'fair',
-    hair: '#b45309',
-    gender: '여성',
-    x: -8.5, z: 2.15, floorId: 1
-  },
-  {
-    id: 'data',
-    name: 'Data AI',
-    role: '데이터 팀',
-    dept: '데이터엔지니어링 · Agent #007',
-    task: '데이터셋 정제',
-    progress: '61%',
-    status: '실행 중',
-    statusKey: 'running',
-    color: '#0f172a',
-    pantsColor: '#1e293b',
-    accentColor: '#3b82f6',
-    skin: '#eaf4fc',        // 사이보그 쿨스킨
-    skinPreset: 'cyborg',
-    hair: '#334155',
-    gender: '남성',
-    x: -5.5, z: -4.25, floorId: 1
+  const ROLE_STORAGE_KEY = 'nexus-triad-roles-v1';
+  function loadLocalRoles() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(ROLE_STORAGE_KEY) || 'null');
+      if (parsed && parsed.head && parsed.builder && parsed.reviewer) return parsed;
+    } catch (_) {}
+    return { head: 'claude', builder: 'antigravity', reviewer: 'openai' };
   }
-];
-const panels = {
-  research: { initial: 'R', bg: '#e2edff', fg: '#5275c8', sub: '기획&전략팀 · Agent #001', status: '실행 중', statusClass: 'running', task: '시장 자료 분석', progress: '72%', time: '04:32' },
-  writer: { initial: 'W', bg: '#f0e7ff', fg: '#886bc5', sub: '콘텐츠 팀 · Agent #002', status: '검토 대기', statusClass: 'review', task: '콘텐츠 검토 승인 대기', progress: '88%', time: '06:18' },
-  ops: { initial: 'O', bg: '#ddf7ed', fg: '#288a69', sub: '운영 팀 · Agent #003', status: '실행 중', statusClass: 'running', task: 'CRM 데이터 동기화', progress: '45%', time: '02:51' },
-  design: { initial: 'D', bg: '#ffe9dc', fg: '#bb7950', sub: '디자인 팀 · Agent #004', status: '대기 중', statusClass: 'idle', task: '다음 작업 대기', progress: '—', time: '대기 중' },
-  data: { initial: 'D', bg: '#dff6f7', fg: '#308c91', sub: '데이터 팀 · Agent #007', status: '실행 중', statusClass: 'running', task: '데이터셋 정제', progress: '61%', time: '03:14' }
-};
+  let currentRoles = loadLocalRoles();
 
-const STORAGE_KEY = 'nexus-office-floors-v2';
-function loadFloors() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if (Array.isArray(parsed) && parsed.length && parsed.every(f => Number.isInteger(f.id) && typeof f.name === 'string')) return parsed;
-  } catch (_) { /* first visit or blocked storage */ }
-  return [{ id: 1, name: '1층', description: '본사 · 기본 레이아웃' }];
-}
-let floors = loadFloors();
-let activeFloorId = floors[0]?.id ?? 1;
-let officeRoot = null;
-let activeAgents = [];
-let paused = false;
-const raycaster = new THREE.Raycaster();
-const pointer = new THREE.Vector2();
-const floorSwitcher = document.getElementById('floorSwitcher');
-const floorBadge = document.getElementById('activeFloorName');
-const floorCount = document.getElementById('floorCount');
-const teamList = document.getElementById('teamList');
-const selectedAgentPanel = document.getElementById('selectedAgent');
+  // ==========================================================================
+  // [1] 앞면(뒷줄)과 뒷면(앞줄)이 마주보는 좌석 카탈로그 (기본 6석 + 확장 최대 10석)
+  // ==========================================================================
+  const MASTER_SEAT_CATALOG = [
+    // --- 아일랜드 테이블 #1 (좌측 마주보는 2자리) ---
+    { xPct: 31.5, yPct: 79.0, facing: 'front', flip: false, podGroup: 1, label: '1번석 · 좌측 뒷줄 (앞면)' },
+    { xPct: 31.5, yPct: 86.2, facing: 'back',  flip: false, podGroup: 1, label: '2번석 · 좌측 앞줄 (뒷면·마주보기)' },
 
-function saveFloors() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(floors)); } catch (_) { /* allow current-session use when storage unavailable */ }
-}
-function activeFloor() { return floors.find(f => f.id === activeFloorId) || floors[0]; }
-function renderFloorSwitcher() {
-  if (!floorSwitcher) return;
-  floorSwitcher.innerHTML = floors.map(f => `<button class="floor-chip${f.id === activeFloorId ? ' active' : ''}" type="button" data-floor-id="${f.id}" aria-pressed="${f.id === activeFloorId}"><span>F${String(f.id).padStart(2, '0')}</span><strong>${f.name}</strong></button>`).join('') + '<button class="floor-chip add-floor-chip" id="addFloor" type="button">＋ 층 추가</button>';
-  floorSwitcher.querySelectorAll('[data-floor-id]').forEach(button => button.addEventListener('click', () => {
-    activeFloorId = Number(button.dataset.floorId);
-    buildOffice(); renderFloorSwitcher(); renderFloorAgents();
-    const note = document.getElementById('floorActionFeedback');
-    if (note) note.textContent = `${activeFloor().name}을 선택했습니다. 기본 330m² 레이아웃입니다.`;
-    camera.position.copy(initialCamera); controls.target.set(0, .6, 0); controls.update();
-  }));
-  floorSwitcher.querySelector('#addFloor')?.addEventListener('click', addFloor);
-  if (floorBadge) floorBadge.textContent = `${activeFloor().name} / 약 330 m²`;
-  if (floorCount) floorCount.textContent = String(floors.length).padStart(2, '0');
-  const sub = document.getElementById('floorSummary');
-  if (sub) sub.textContent = `${activeFloor().name} · ${activeFloor().description || '기본 레이아웃'}`;
-}
-function addFloor() {
-  const nextId = Math.max(0, ...floors.map(f => f.id)) + 1;
-  const floor = { id: nextId, name: `${nextId}층`, description: '신규 층 · 기본 레이아웃' };
-  floors.push(floor); activeFloorId = nextId; saveFloors();
-  renderFloorSwitcher(); buildOffice(); renderFloorAgents();
-  camera.position.copy(initialCamera); controls.target.set(0, .6, 0); controls.update();
-  const note = document.getElementById('floorActionFeedback');
-  if (note) note.textContent = `${floor.name}이 추가되었습니다. 새 층에 기본 사무실 레이아웃을 생성했습니다. 직원은 별도 배치가 필요합니다.`;
-}
-function renderFloorAgents() {
-  const assigned = agentSpecs.filter(a => a.floorId === activeFloorId);
-  const running = assigned.filter(a => a.statusKey === 'running').length;
-  const review = assigned.filter(a => a.statusKey === 'review').length;
-  const activeCount = document.getElementById('floorActiveCount');
-  const reviewCount = document.getElementById('floorReviewCount');
-  if (activeCount) activeCount.textContent = String(running).padStart(2, '0');
-  if (reviewCount) reviewCount.textContent = String(review).padStart(2, '0');
-  if (teamList) {
-    if (!assigned.length) {
-      teamList.innerHTML = '<div class="floor-empty"><strong>이 층에 배치된 AI 직원이 없습니다.</strong><span>직원 관리에서 직원 배치 기능을 추가할 수 있습니다.</span></div>';
-    } else {
-      teamList.innerHTML = assigned.map((a, idx) => {
-        const avatarSvg = getAgentAvatarSvg(a, 34);
-        return `<button type="button" class="team-row${idx === 0 ? ' selected' : ''}" data-agent="${a.id}">
-          <span class="agent-avatar" title="${a.name}">${avatarSvg}</span>
-          <span class="team-row-main"><strong>${a.name}</strong><small>${a.task} · ${a.progress}</small></span>
-          <span class="mini-online" style="background:${a.statusKey === 'review' ? '#f4bf60' : a.statusKey === 'idle' ? '#a5b2c2' : '#5ecda9'}"></span>
-        </button>`;
-      }).join('');
-      teamList.querySelectorAll('.team-row').forEach(row => row.addEventListener('click', () => selectAgent(row.dataset.agent, true)));
-    }
-  }
-  if (!assigned.length) {
-    if (selectedAgentPanel) selectedAgentPanel.innerHTML = '<div class="floor-empty selected-empty"><strong>직원 배치 대기</strong><span>현재는 샘플 층 생성 기능만 포함되어 있습니다. 직원의 층간 이동/배치 API는 후속 구현 범위입니다.</span></div>';
-  } else {
-    selectAgent(assigned[0].id, false);
-  }
-}
-function selectAgent(id, moveCamera = false) {
-  const info = panels[id];
-  const spec = agentSpecs.find(a => a.id === id);
-  if (!info || !spec || spec.floorId !== activeFloorId) return;
-  teamList?.querySelectorAll('.team-row').forEach(el => el.classList.toggle('selected', el.dataset.agent === id));
-  if (selectedAgentPanel) {
-    const avatarSvg = getAgentAvatarSvg(spec, 52);
-    selectedAgentPanel.innerHTML = `
-      <div class="selected-identity">
-        <div class="agent-avatar">${avatarSvg}</div>
-        <div>
-          <strong>${spec.name}</strong>
-          <small>${spec.dept || info.sub}</small>
+    // --- 아일랜드 테이블 #2 (중앙 마주보는 2자리) ---
+    { xPct: 55.0, yPct: 79.0, facing: 'front', flip: false, podGroup: 2, label: '3번석 · 중앙 뒷줄 (앞면)' },
+    { xPct: 55.0, yPct: 86.2, facing: 'back',  flip: true,  podGroup: 2, label: '4번석 · 중앙 앞줄 (뒷면·마주보기)' },
+
+    // --- 아일랜드 테이블 #3 (우측 마주보는 2자리) => 여기까지 기본 6자리! ---
+    { xPct: 78.5, yPct: 79.0, facing: 'front', flip: true,  podGroup: 3, label: '5번석 · 우측 뒷줄 (앞면)' },
+    { xPct: 78.5, yPct: 86.2, facing: 'back',  flip: true,  podGroup: 3, label: '6번석 · 우측 앞줄 (뒷면·마주보기)' },
+
+    // --- 좌석 추가(＋) 시 확장 가능한 서브 마주보기 좌석 (7~10번석) ---
+    { xPct: 43.2, yPct: 79.0, facing: 'front', flip: false, podGroup: 4, label: '7번석 · 서브A 뒷줄 (앞면)' },
+    { xPct: 43.2, yPct: 86.2, facing: 'back',  flip: false, podGroup: 4, label: '8번석 · 서브A 앞줄 (뒷면·마주보기)' },
+    { xPct: 66.8, yPct: 79.0, facing: 'front', flip: true,  podGroup: 5, label: '9번석 · 서브B 뒷줄 (앞면)' },
+    { xPct: 66.8, yPct: 86.2, facing: 'back',  flip: true,  podGroup: 5, label: '10번석 · 서브B 앞줄 (뒷면·마주보기)' }
+  ];
+
+  const DEFAULT_SEATS_PER_FLOOR = 6;
+  const MIN_SEATS_PER_FLOOR = 1;
+  const MAX_SEATS_PER_FLOOR = MASTER_SEAT_CATALOG.length; // 10
+
+  function renderSeatPodSvg(slot, seatIdx) {
+    if (slot.facing === 'front') {
+      return `
+        <div class="maple-seat-pod facing-front" style="left:${slot.xPct}%;top:${slot.yPct + 3.8}%">
+          <svg viewBox="0 0 120 82">
+            <rect x="41" y="4" width="38" height="32" rx="6" fill="#495057" stroke="#212529" stroke-width="2.2"/>
+            <rect x="8" y="34" width="104" height="40" rx="2" fill="#d4a373" stroke="#2b2d38" stroke-width="2.2"/>
+            <rect x="4" y="30" width="112" height="8" rx="2" fill="#e6ccb2" stroke="#2b2d38" stroke-width="2.2"/>
+            <rect x="20" y="16" width="34" height="20" rx="2" fill="#3b4252" stroke="#1e2028" stroke-width="2"/>
+            <rect x="23" y="19" width="28" height="14" fill="#74c0fc"/>
+            <rect x="66" y="16" width="34" height="20" rx="2" fill="#3b4252" stroke="#1e2028" stroke-width="2"/>
+            <rect x="69" y="19" width="28" height="14" fill="#63e6be"/>
+            <text x="104" y="68" text-anchor="end" font-size="9" font-weight="800" fill="#5c3c24">#${seatIdx + 1}</text>
+          </svg>
         </div>
+      `;
+    }
+    return `
+      <div class="maple-seat-pod facing-back" style="left:${slot.xPct}%;top:${slot.yPct + 2.2}%">
+        <svg viewBox="0 0 120 82">
+          <line x1="60" y1="48" x2="60" y2="72" stroke="#212529" stroke-width="4.5"/>
+          <line x1="40" y1="72" x2="80" y2="72" stroke="#212529" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="42" cy="76" r="3" fill="#1e2028"/>
+          <circle cx="60" cy="76" r="3" fill="#1e2028"/>
+          <circle cx="78" cy="76" r="3" fill="#1e2028"/>
+          <rect x="36" y="42" width="48" height="9" rx="4" fill="#343a40" stroke="#212529" stroke-width="2"/>
+          <rect x="40" y="12" width="40" height="34" rx="6" fill="#495057" stroke="#212529" stroke-width="2.2"/>
+          <rect x="46" y="17" width="28" height="22" rx="3" fill="#5c646d"/>
+          <text x="60" y="31" text-anchor="middle" font-size="8.5" font-weight="800" fill="#dee2e6">#${seatIdx + 1}</text>
+        </svg>
       </div>
-      <div class="detail-line"><span>캐릭터 체형</span><strong>2등신 메이플 치비 (${spec.gender || '남성'})</strong></div>
-      <div class="detail-line"><span>상태</span><strong><span class="status ${info.statusClass}">${info.status}</span></strong></div>
-      <div class="detail-line"><span>현재 작업</span><strong>${info.task}</strong></div>
-      <div class="detail-line"><span>진행률</span><strong>${info.progress}</strong></div>
-      <div class="detail-line"><span>실행 시간</span><strong>${info.time}</strong></div>
-      <a class="btn small mint" href="agents.html#characters" style="width:100%;justify-content:center;margin-top:12px">🎨 캐릭터 스튜디오에서 의상 변경 ↗</a>
     `;
   }
-  if (moveCamera) {
-    const selected = activeAgents.find(a => a.id === id);
-    if (selected) controls.target.set(selected.root.position.x, .8, selected.root.position.z);
+
+  // ==========================================================================
+  // [2] 층(Floors) & 층별 좌석 수(seatCount) & 자동 오토배치(Overflow) 관리
+  // ==========================================================================
+  const FLOORS_STORAGE_KEY = 'nexus-office-floors-v6';
+  const PLACEMENT_STORAGE_KEY = 'nexus-gm-office-svg-placements-v6';
+
+  function loadFloors() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(FLOORS_STORAGE_KEY) || 'null');
+      if (Array.isArray(parsed) && parsed.length && parsed.every(f => Number.isInteger(f.id))) {
+        return parsed.map(f => ({
+          ...f,
+          seatCount: Math.max(MIN_SEATS_PER_FLOOR, Math.min(MAX_SEATS_PER_FLOOR, Number(f.seatCount) || DEFAULT_SEATS_PER_FLOOR))
+        }));
+      }
+    } catch (_) {}
+    // 초기 캐릭터가 5명이므로 1층(6석) + 2층(6석, 확장 대비) 기본 제공
+    return [
+      { id: 1, name: '1층', description: 'GM 본관 · 마주보는 6석', seatCount: 6 },
+      { id: 2, name: '2층', description: '개발 스튜디오 · 마주보는 6석', seatCount: 6 }
+    ];
   }
-}
-function buildOffice() {
-  if (officeRoot) { scene.remove(officeRoot); disposeGroup(officeRoot); }
-  activeAgents = [];
-  const floor = activeFloor();
-  officeRoot = new THREE.Group(); officeRoot.name = `office-floor-${floor.id}`; scene.add(officeRoot);
-  const stations = addOfficeArchitecture(officeRoot, floor);
-  // Extra avatars are placed only on the first floor until users assign agents to new floors.
-  const assigned = agentSpecs.filter(a => a.floorId === floor.id);
-  assigned.forEach(spec => activeAgents.push(addAvatar(officeRoot, spec)));
-  const floorName = document.getElementById('officeSceneLabel');
-  if (floorName) floorName.textContent = `${floor.name.toUpperCase()} · 330 m²`;
-  const floorTitle = document.getElementById('floorSceneCaption');
-  if (floorTitle) floorTitle.textContent = `${floor.name} · ${assigned.length ? `${assigned.length}명 배치` : '직원 배치 대기'}`;
-}
-function disposeGroup(group) {
-  group.traverse(obj => {
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      materials.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+  let floors = loadFloors();
+  let activeFloorId = 1;
+
+  function saveFloors() {
+    try { localStorage.setItem(FLOORS_STORAGE_KEY, JSON.stringify(floors)); } catch (_) {}
+  }
+
+  function getFloorSeats(floorId) {
+    const fl = floors.find(f => f.id === floorId);
+    const count = fl ? fl.seatCount : DEFAULT_SEATS_PER_FLOOR;
+    return MASTER_SEAT_CATALOG.slice(0, count);
+  }
+
+  function getActiveCharIds() {
+    const studioList = Array.isArray(window.modularAgents) && window.modularAgents.length
+      ? window.modularAgents
+      : [];
+    if (studioList.length) return studioList.map(a => a.id);
+    return ['01', '02', '03', '04', '05'];
+  }
+
+  function loadSavedPlacements() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(PLACEMENT_STORAGE_KEY) || 'null');
+      if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 1) return parsed;
+    } catch (_) {}
+    const def = {};
+    const cids = getActiveCharIds();
+    cids.forEach((idStr, idx) => {
+      const floorId = Math.floor(idx / DEFAULT_SEATS_PER_FLOOR) + 1;
+      const seatIndex = idx % DEFAULT_SEATS_PER_FLOOR;
+      def[idStr] = { floorId, seatIndex };
+    });
+    return def;
+  }
+  let charPlacements = loadSavedPlacements();
+
+  function savePlacements() {
+    try { localStorage.setItem(PLACEMENT_STORAGE_KEY, JSON.stringify(charPlacements)); } catch (_) {}
+  }
+
+  function rebalanceOverflowCharacters(preferredCharId = null) {
+    floors.sort((a, b) => a.id - b.id);
+    const occupied = new Set();
+    const displacedCharIds = [];
+
+    const allCharIds = getActiveCharIds();
+    if (preferredCharId && allCharIds.includes(preferredCharId)) {
+      allCharIds.splice(allCharIds.indexOf(preferredCharId), 1);
+      allCharIds.unshift(preferredCharId);
+    }
+
+    for (const cid of allCharIds) {
+      const p = charPlacements[cid];
+      const fl = floors.find(f => f.id === p?.floorId);
+      const maxSeats = fl ? fl.seatCount : 0;
+      if (!fl || typeof p.seatIndex !== 'number' || p.seatIndex < 0 || p.seatIndex >= maxSeats) {
+        displacedCharIds.push(cid);
+        continue;
+      }
+      const key = `${fl.id}:${p.seatIndex}`;
+      if (occupied.has(key)) {
+        displacedCharIds.push(cid);
+      } else {
+        occupied.add(key);
+      }
+    }
+
+    const movedLog = [];
+    for (const cid of displacedCharIds) {
+      let placed = false;
+      for (const fl of floors) {
+        for (let s = 0; s < fl.seatCount; s++) {
+          const key = `${fl.id}:${s}`;
+          if (!occupied.has(key)) {
+            occupied.add(key);
+            charPlacements[cid] = { floorId: fl.id, seatIndex: s };
+            movedLog.push(`#${cid}→${fl.id}층(${s + 1}번석)`);
+            placed = true;
+            break;
+          }
+        }
+        if (placed) break;
+      }
+      if (!placed) {
+        const nextId = Math.max(0, ...floors.map(f => f.id)) + 1;
+        const newFl = {
+          id: nextId,
+          name: `${nextId}층`,
+          description: `자동 확장 오피스 · 마주보는 ${DEFAULT_SEATS_PER_FLOOR}석`,
+          seatCount: DEFAULT_SEATS_PER_FLOOR
+        };
+        floors.push(newFl);
+        occupied.add(`${nextId}:0`);
+        charPlacements[cid] = { floorId: nextId, seatIndex: 0 };
+        movedLog.push(`#${cid}→${nextId}층(1번석 신설)`);
+      }
+    }
+
+    saveFloors();
+    savePlacements();
+    return movedLog;
+  }
+
+  rebalanceOverflowCharacters();
+
+  function findNearestSeatOnFloor(floorId, xPct, yPct) {
+    const seats = getFloorSeats(floorId);
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    seats.forEach((s, idx) => {
+      const dx = s.xPct - xPct;
+      const dy = (s.yPct - yPct) * 1.4;
+      const d = Math.hypot(dx, dy);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = idx;
+      }
+    });
+    return { index: bestIdx, dist: bestDist, slot: seats[bestIdx] || MASTER_SEAT_CATALOG[0] };
+  }
+
+  function getAgentAvatarSvg(studioAgent, view = 'front') {
+    if (studioAgent && window.CharacterEngine && typeof window.CharacterEngine.render === 'function') {
+      const pixelAgent = {
+        ...studioAgent,
+        parts: {
+          ...(studioAgent.parts || {}),
+          base: 'BASE_PIXEL',
+          hair: (!studioAgent.parts?.hair || studioAgent.parts.hair === 'H00') ? 'H02' : studioAgent.parts.hair
+        }
+      };
+      return window.CharacterEngine.render(pixelAgent, { view });
+    }
+    return '';
+  }
+
+  function buildAgentSpecsFromStudio() {
+    const studioList = Array.isArray(window.modularAgents) && window.modularAgents.length
+      ? window.modularAgents
+      : [];
+
+    const specs = [];
+    studioList.forEach((sa, idx) => {
+      const saved = charPlacements[sa.id] || { floorId: 1, seatIndex: 0 };
+      const floorSeats = getFloorSeats(saved.floorId);
+      const seatIdx = Math.min(Math.max(0, saved.seatIndex ?? 0), Math.max(0, floorSeats.length - 1));
+      const slot = floorSeats[seatIdx] || MASTER_SEAT_CATALOG[0];
+
+      const triadRole = sa.triadRole || (idx % 3 === 0 ? 'HEAD' : idx % 3 === 1 ? 'BUILDER' : 'REVIEWER');
+      const cliKey = sa.cliProvider || (triadRole === 'HEAD' ? currentRoles.head : triadRole === 'BUILDER' ? currentRoles.builder : currentRoles.reviewer);
+      const statusKey = triadRole === 'REVIEWER' ? 'review' : 'running';
+
+      specs.push({
+        id: sa.id === '01' ? 'head' : sa.id === '05' ? 'builder' : sa.id === '13' ? 'reviewer' : sa.id === '06' ? 'director' : `char_${sa.id}`,
+        charId: sa.id,
+        studioAgent: sa,
+        triadRole,
+        name: sa.name,
+        role: `${triadRole} · ${CLI_SHORT[cliKey] || cliKey}`,
+        dept: `${sa.floor} · ${triadRole} (${CLI_LABELS[cliKey] || cliKey})`,
+        cliKey,
+        task: `${slot.label} · ${triadRole} 업무 수행 중`,
+        statusKey,
+        xPct: slot.xPct,
+        yPct: slot.yPct,
+        facing: slot.facing || 'front',
+        flip: slot.flip,
+        seatIndex: seatIdx,
+        seatLabel: slot.label,
+        floorId: saved.floorId || 1
+      });
+    });
+    return specs;
+  }
+
+  let agentSpecs = buildAgentSpecsFromStudio();
+  let selectedAgentId = agentSpecs[0]?.id || 'head';
+
+  let paused = false;
+  let currentZoom = 1;
+  let thinkingAgentId = null;
+  let officeBubbleOpen = true;
+  const agentChatState = {};
+
+  const floorSwitcher = document.getElementById('floorSwitcher');
+  const teamList = document.getElementById('teamList');
+  const selectedAgentPanel = document.getElementById('selectedAgent');
+  const summonCharSelect = document.getElementById('summonCharSelect');
+  const btnSummonChar = document.getElementById('btnSummonChar');
+  const btnRemoveFloorSeat = document.getElementById('btnRemoveFloorSeat');
+  const btnAddFloorSeat = document.getElementById('btnAddFloorSeat');
+  const floorSeatCapacityLabel = document.getElementById('floorSeatCapacityLabel');
+
+  const speechBubbleEl = document.getElementById('officeSpeechBubble');
+  const bubbleRolePillEl = document.getElementById('bubbleRolePill');
+  const bubbleAgentNameEl = document.getElementById('bubbleAgentName');
+  const bubbleMessageTextEl = document.getElementById('bubbleMessageText');
+  const bubbleAskFormEl = document.getElementById('bubbleAskForm');
+  const bubbleAskInputEl = document.getElementById('bubbleAskInput');
+  const bubbleAskSendEl = document.getElementById('bubbleAskSend');
+  const bubbleCloseBtnEl = document.getElementById('bubbleCloseBtn');
+
+  function activeFloor() {
+    return floors.find(f => f.id === activeFloorId) || floors[0];
+  }
+
+  function adjustFloorSeatCount(floorId, delta) {
+    const fl = floors.find(f => f.id === floorId);
+    if (!fl) return;
+    const prevCount = fl.seatCount;
+    const nextCount = Math.max(MIN_SEATS_PER_FLOOR, Math.min(MAX_SEATS_PER_FLOOR, prevCount + delta));
+    const note = document.getElementById('floorActionFeedback');
+
+    if (nextCount === prevCount) {
+      if (note) {
+        note.textContent = delta > 0
+          ? `⚠️ 한 층에는 최대 ${MAX_SEATS_PER_FLOOR}석(마주보는 5쌍)까지 배치할 수 있습니다.`
+          : `⚠️ 한 층에는 최소 ${MIN_SEATS_PER_FLOOR}석 이상이 필요합니다.`;
+      }
+      return;
+    }
+
+    fl.seatCount = nextCount;
+    fl.description = `GM 오피스 · 마주보는 ${nextCount}석`;
+    const movedLog = rebalanceOverflowCharacters();
+    agentSpecs = buildAgentSpecsFromStudio();
+    renderFloorSwitcher();
+    buildOffice();
+    renderFloorAgents();
+
+    if (note) {
+      if (movedLog.length) {
+        note.textContent = `🪑 ${fl.name} 좌석을 ${prevCount}석 → ${nextCount}석으로 변경했습니다. 자리가 부족해진 직원(${movedLog.join(', ')})을 다른 층 빈자리로 자동 이동했습니다!`;
+      } else {
+        note.textContent = `🪑 ${fl.name} 좌석을 ${prevCount}석 → ${nextCount}석으로 변경했습니다.`;
+      }
+    }
+  }
+
+  btnRemoveFloorSeat?.addEventListener('click', () => adjustFloorSeatCount(activeFloorId, -1));
+  btnAddFloorSeat?.addEventListener('click', () => adjustFloorSeatCount(activeFloorId, +1));
+
+  function centerSelectedFloorInView(smooth = true) {
+    const targetSection = towerStackEl.querySelector(`.maple-floor-section[data-floor-id="${activeFloorId}"]`);
+    if (!targetSection || !viewportEl) return;
+    const viewH = viewportEl.clientHeight;
+    const secTop = targetSection.offsetTop * currentZoom;
+    const secH = targetSection.offsetHeight * currentZoom;
+    const targetScrollTop = Math.max(0, secTop - (viewH - secH) / 2);
+    viewportEl.scrollTo({
+      top: targetScrollTop,
+      behavior: smooth ? 'smooth' : 'auto'
+    });
+    setTimeout(updateSpeechBubblePosition, smooth ? 280 : 30);
+  }
+
+  function buildOffice() {
+    agentSpecs = buildAgentSpecsFromStudio();
+
+    const floorsTopToBottom = [...floors].sort((a, b) => b.id - a.id);
+
+    const roofHtml = `
+      <div class="maple-building-roof">
+        <span>🏢 NEXUS GM TOWER · CONTINUOUS BUILDING (NO STAIRS)</span>
+        <span>ROOFTOP · 총 ${floors.length}개 층 (맨 아래 1F → 위로 순차 상승)</span>
+      </div>
+    `;
+
+    const floorsHtml = floorsTopToBottom.map(fl => {
+      const assigned = agentSpecs.filter(a => a.floorId === fl.id);
+      const isAct = fl.id === activeFloorId;
+      const floorSeats = getFloorSeats(fl.id);
+
+      const podsHtml = floorSeats.map((s, sIdx) => renderSeatPodSvg(s, sIdx)).join('');
+      const pinsHtml = floorSeats.map((s, sIdx) => `
+        <div class="maple-2d-slot-pin" data-seat-idx="${sIdx}" style="left:${s.xPct}%;top:${s.yPct}%" title="${s.label}"></div>
+      `).join('');
+
+      const actorsHtml = assigned.map(spec => {
+        const viewMode = spec.facing === 'back' ? 'back' : 'front';
+        const svg = getAgentAvatarSvg(spec.studioAgent, viewMode);
+        const cliShort = CLI_SHORT[spec.cliKey] || spec.cliKey;
+        const isSel = spec.id === selectedAgentId;
+        const isThink = spec.id === thinkingAgentId;
+        const rowClass = spec.facing === 'back' ? ' is-front-row' : ' is-back-row';
+        const bulbIcon = isThink ? '💭' : spec.triadRole === 'HEAD' ? '💡' : spec.triadRole === 'BUILDER' ? '🔨' : '🔍';
+        const dirBadge = spec.facing === 'back' ? '뒷면(마주보기)' : '앞면';
+
+        return `
+          <div class="maple-2d-actor${rowClass}${isSel ? ' is-selected' : ''}${isThink ? ' is-thinking' : ''}${spec.flip ? ' flip-x' : ''}"
+               data-agent-id="${spec.id}"
+               data-char-id="${spec.charId}"
+               data-floor-id="${fl.id}"
+               style="left:${spec.xPct}%;top:${spec.yPct}%;${paused ? 'animation-play-state:paused' : ''}"
+               title="#${spec.charId} ${spec.name} · ${spec.seatLabel} [${dirBadge}] (드래그하여 자리 이동)">
+            <div class="maple-2d-quest-bulb">${bulbIcon}</div>
+            <div class="maple-2d-sprite" style="${paused ? 'animation:none' : ''}">${svg}</div>
+            <div class="maple-2d-nametag">
+              <span class="maple-2d-name-line">${spec.name}</span>
+              <span class="maple-2d-guild-line role-${spec.triadRole}">«#${spec.seatIndex + 1} ${spec.triadRole} · ${cliShort}»</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="maple-floor-section${isAct ? ' is-active-floor' : ''}" data-floor-id="${fl.id}">
+          <div class="maple-floor-seat-controls" data-seat-ctrl-floor="${fl.id}">
+            <span>🪑 ${fl.name} 좌석: <strong>${assigned.length}/${fl.seatCount}석</strong></span>
+            <button type="button" class="maple-seat-ctrl-btn" data-seat-action="remove" data-floor="${fl.id}" title="${fl.name} 좌석 1개 제거 (초과 인원은 다른 층 빈자리로 자동 이동)">－</button>
+            <button type="button" class="maple-seat-ctrl-btn" data-seat-action="add" data-floor="${fl.id}" title="${fl.name} 좌석 1개 추가">＋</button>
+          </div>
+          <div class="maple-floor-badge" data-floor-badge="${fl.id}">
+            <span>F${String(fl.id).padStart(2, '0')} · ${fl.name}</span>
+            <em>(마주보는 ${fl.seatCount}석 · 클릭 시 중앙 정렬)</em>
+          </div>
+          <img src="assets/maple-gm-office.svg?v=triad16" alt="${fl.name} GM Office SVG 배경" class="maple-2d-bg">
+          <div class="maple-2d-layer" data-layer-floor="${fl.id}">
+            ${podsHtml}
+            ${pinsHtml}
+            ${actorsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const baseHtml = `
+      <div class="maple-building-base">
+        <span>GROUND LEVEL · 1F MAIN FLOOR (맨 아래 1층 → 위로 2층 · 3층 · 4층 순차 상승)</span>
+        <span>▲ 계단 없는 평탄화 엘리베이터 & 마주보는 6인 좌석</span>
+      </div>
+    `;
+
+    towerStackEl.innerHTML = roofHtml + floorsHtml + baseHtml;
+
+    towerStackEl.querySelectorAll('.maple-seat-ctrl-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const fid = Number(btn.dataset.floor);
+        const delta = btn.dataset.seatAction === 'add' ? 1 : -1;
+        activeFloorId = fid;
+        adjustFloorSeatCount(fid, delta);
+      });
+    });
+
+    towerStackEl.querySelectorAll('.maple-floor-section').forEach(secEl => {
+      secEl.addEventListener('click', (e) => {
+        if (e.target.closest('.maple-2d-actor') || e.target.closest('.maple-floor-seat-controls')) return;
+        const fid = Number(secEl.dataset.floorId);
+        if (fid && fid !== activeFloorId) {
+          activeFloorId = fid;
+          renderFloorSwitcher();
+          buildOffice();
+          renderFloorAgents();
+          centerSelectedFloorInView(true);
+        }
+      });
+    });
+
+    bindActorDragAndClick();
+
+    const fl = activeFloor();
+    const activeAssigned = agentSpecs.filter(a => a.floorId === activeFloorId);
+    const floorName = document.getElementById('officeSceneLabel');
+    if (floorName && fl) {
+      floorName.textContent = `일체형 빌딩 (${floors.length}개 층) · 중앙: ${fl.name} (${activeAssigned.length}/${fl.seatCount}석 착석)`;
+    }
+    if (floorSeatCapacityLabel && fl) {
+      floorSeatCapacityLabel.textContent = `${fl.seatCount}석`;
+    }
+    updateSpeechBubblePosition();
+  }
+
+  function bindActorDragAndClick() {
+    towerStackEl.querySelectorAll('.maple-2d-actor').forEach(actorEl => {
+      actorEl.addEventListener('pointerdown', onActorPointerDown);
+    });
+  }
+
+  function onActorPointerDown(e) {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    e.stopPropagation();
+
+    const actorEl = e.currentTarget;
+    const agentId = actorEl.dataset.agentId;
+    const charId = actorEl.dataset.charId;
+    const originFloorId = Number(actorEl.dataset.floorId);
+    const originSeatIdx = charPlacements[charId]?.seatIndex ?? 0;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let isDragging = false;
+    let currentTargetFloorSection = actorEl.closest('.maple-floor-section');
+
+    actorEl.setPointerCapture(e.pointerId);
+
+    const onPointerMove = (moveEv) => {
+      const dx = moveEv.clientX - startX;
+      const dy = moveEv.clientY - startY;
+      if (!isDragging && Math.hypot(dx, dy) > 5) {
+        isDragging = true;
+        actorEl.classList.add('is-dragging');
+        towerStackEl.classList.add('is-dragging');
+        speechBubbleEl?.classList.add('is-hidden');
+      }
+      if (!isDragging) return;
+
+      const floorSections = Array.from(towerStackEl.querySelectorAll('.maple-floor-section'));
+      let hoveredSection = currentTargetFloorSection;
+      for (const sec of floorSections) {
+        const r = sec.getBoundingClientRect();
+        if (moveEv.clientY >= r.top && moveEv.clientY <= r.bottom) {
+          hoveredSection = sec;
+          break;
+        }
+      }
+
+      floorSections.forEach(s => s.classList.toggle('is-drop-target', s === hoveredSection));
+      if (hoveredSection && hoveredSection !== currentTargetFloorSection) {
+        currentTargetFloorSection = hoveredSection;
+        const targetLayer = hoveredSection.querySelector('.maple-2d-layer');
+        if (targetLayer && actorEl.parentElement !== targetLayer) {
+          targetLayer.appendChild(actorEl);
+        }
+      }
+
+      if (currentTargetFloorSection) {
+        const targetFloorId = Number(currentTargetFloorSection.dataset.floorId) || activeFloorId;
+        const rect = currentTargetFloorSection.getBoundingClientRect();
+        const rawXPct = ((moveEv.clientX - rect.left) / rect.width) * 100;
+        const rawYPct = ((moveEv.clientY - rect.top) / rect.height) * 100;
+        const clampedX = Math.max(5, Math.min(95, rawXPct));
+        const clampedY = Math.max(15, Math.min(92, rawYPct));
+
+        const nearest = findNearestSeatOnFloor(targetFloorId, clampedX, clampedY);
+        currentTargetFloorSection.querySelectorAll('.maple-2d-slot-pin').forEach((pin, idx) => {
+          pin.classList.toggle('is-snap-hover', idx === nearest.index);
+        });
+
+        actorEl.style.left = `${nearest.slot.xPct}%`;
+        actorEl.style.top = `${nearest.slot.yPct}%`;
+      }
+    };
+
+    const onPointerUp = (upEv) => {
+      actorEl.removeEventListener('pointermove', onPointerMove);
+      actorEl.removeEventListener('pointerup', onPointerUp);
+      actorEl.removeEventListener('pointercancel', onPointerUp);
+      try { actorEl.releasePointerCapture(upEv.pointerId); } catch (_) {}
+
+      towerStackEl.classList.remove('is-dragging');
+      towerStackEl.querySelectorAll('.maple-floor-section').forEach(s => s.classList.remove('is-drop-target'));
+      towerStackEl.querySelectorAll('.maple-2d-slot-pin').forEach(p => p.classList.remove('is-snap-hover'));
+      actorEl.classList.remove('is-dragging');
+
+      if (!isDragging) {
+        const clickedFloorId = Number(actorEl.dataset.floorId);
+        if (clickedFloorId && clickedFloorId !== activeFloorId) {
+          activeFloorId = clickedFloorId;
+          renderFloorSwitcher();
+          buildOffice();
+          renderFloorAgents();
+          centerSelectedFloorInView(true);
+        }
+        selectAgent(agentId, true);
+        return;
+      }
+
+      if (currentTargetFloorSection && charId) {
+        const newFloorId = Number(currentTargetFloorSection.dataset.floorId) || activeFloorId;
+        const rect = currentTargetFloorSection.getBoundingClientRect();
+        const rawXPct = ((upEv.clientX - rect.left) / rect.width) * 100;
+        const rawYPct = ((upEv.clientY - rect.top) / rect.height) * 100;
+        const nearest = findNearestSeatOnFloor(newFloorId, rawXPct, rawYPct);
+
+        const existingOccupant = Object.entries(charPlacements).find(
+          ([otherCid, pos]) => otherCid !== charId && pos.floorId === newFloorId && pos.seatIndex === nearest.index
+        );
+
+        charPlacements[charId] = { floorId: newFloorId, seatIndex: nearest.index };
+        if (existingOccupant) {
+          const [otherCid] = existingOccupant;
+          charPlacements[otherCid] = { floorId: originFloorId, seatIndex: originSeatIdx };
+        }
+
+        rebalanceOverflowCharacters(charId);
+
+        const floorChanged = newFloorId !== activeFloorId;
+        activeFloorId = newFloorId;
+        selectedAgentId = agentId;
+
+        renderFloorSwitcher();
+        buildOffice();
+        renderFloorAgents();
+        selectAgent(agentId, false);
+        if (floorChanged) centerSelectedFloorInView(true);
+
+        const note = document.getElementById('floorActionFeedback');
+        const spec = agentSpecs.find(a => a.id === agentId);
+        if (note && spec) {
+          const dirText = spec.facing === 'back' ? '뒷면 마주보기' : '앞면';
+          note.textContent = `✋ #${charId} ${spec.name} 캐릭터를 ${newFloorId}층 [${spec.seatLabel} · ${dirText}] 좌석에 배치했습니다!`;
+        }
+      }
+    };
+
+    actorEl.addEventListener('pointermove', onPointerMove);
+    actorEl.addEventListener('pointerup', onPointerUp);
+    actorEl.addEventListener('pointercancel', onPointerUp);
+  }
+
+  function updateSpeechBubblePosition() {
+    if (!speechBubbleEl || !officeBubbleOpen) return;
+    const actorEl = towerStackEl.querySelector(`.maple-2d-actor[data-agent-id="${selectedAgentId}"]`);
+    if (!actorEl) {
+      speechBubbleEl.classList.add('is-hidden');
+      return;
+    }
+    const cardRect = sceneCard.getBoundingClientRect();
+    const actorRect = actorEl.getBoundingClientRect();
+    if (!cardRect.width || !actorRect.width) return;
+
+    const rawX = (actorRect.left + actorRect.width / 2) - cardRect.left;
+    const rawY = actorRect.top - cardRect.top - 4;
+
+    const clampedX = Math.max(158, Math.min(cardRect.width - 158, rawX));
+    const clampedY = Math.max(135, Math.min(cardRect.height - 25, rawY));
+
+    speechBubbleEl.classList.remove('is-hidden');
+    speechBubbleEl.style.left = `${clampedX.toFixed(1)}px`;
+    speechBubbleEl.style.top = `${clampedY.toFixed(1)}px`;
+  }
+
+  window.addEventListener('resize', updateSpeechBubblePosition);
+  viewportEl.addEventListener('scroll', updateSpeechBubblePosition, { passive: true });
+
+  function syncSpeechBubbleContent(id) {
+    const spec = agentSpecs.find(a => a.id === id);
+    if (!spec || !speechBubbleEl) return;
+    const cliShort = CLI_SHORT[spec.cliKey] || spec.cliKey;
+    if (bubbleRolePillEl) bubbleRolePillEl.textContent = `${spec.triadRole} · ${cliShort}`;
+    if (bubbleAgentNameEl) bubbleAgentNameEl.textContent = `#${spec.charId} ${spec.name}`;
+    const defaultMsg = `🏢 안녕하세요! ${spec.floorId}층 [${spec.seatLabel}]에 착석한 ${spec.name}(${spec.triadRole} · ${cliShort})입니다. 무엇이든 물어보세요!`;
+    const msg = agentChatState[id] || defaultMsg;
+    if (bubbleMessageTextEl) bubbleMessageTextEl.textContent = msg;
+    if (bubbleAskInputEl) bubbleAskInputEl.placeholder = `${spec.name}에게 질문하기...`;
+
+    const sideReplyEl = document.getElementById('sideAskReply');
+    if (sideReplyEl) sideReplyEl.textContent = msg;
+  }
+
+  async function officeApiFetch(path, options = {}) {
+    if (window.location.protocol !== 'file:') {
+      try {
+        const res = await fetch(path, options);
+        if (res.status !== 404 && res.status !== 405 && res.status !== 501) return res;
+      } catch (_) {}
+    }
+    return fetch(`http://127.0.0.1:8080${path}`, options);
+  }
+
+  async function askOfficeAgentQuestion(id, question) {
+    const spec = agentSpecs.find(a => a.id === id);
+    if (!spec || !question.trim()) return;
+    const q = question.trim();
+
+    officeBubbleOpen = true;
+    speechBubbleEl?.classList.remove('is-hidden');
+    speechBubbleEl?.classList.add('thinking');
+    thinkingAgentId = id;
+    buildOffice();
+
+    agentChatState[id] = `💭 "${q}" 질문을 읽고 답변을 작성하고 있습니다...`;
+    syncSpeechBubbleContent(id);
+
+    if (bubbleAskSendEl) { bubbleAskSendEl.disabled = true; bubbleAskSendEl.textContent = '생각 중...'; }
+    const sideBtn = document.getElementById('sideAskSendBtn');
+    if (sideBtn) { sideBtn.disabled = true; sideBtn.textContent = '생각 중...'; }
+
+    try {
+      const res = await officeApiFetch('/ops/cli-ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cli: (spec.triadRole || 'head').toLowerCase(),
+          agent_name: spec.name,
+          custom_cli: spec.cliKey,
+          system_prompt: spec.studioAgent?.systemPrompt || '',
+          question: q
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        agentChatState[id] = `💬 ${data.answer || '답변 완료'} (${data.seconds || 1}초)`;
+      } else {
+        agentChatState[id] = `💬 [${spec.name}] '${q}' 질문을 확인했습니다!`;
+      }
+    } catch (_) {
+      agentChatState[id] = `💬 [${spec.name}] '${q}' 질문을 확인했습니다!`;
+    } finally {
+      thinkingAgentId = null;
+      speechBubbleEl?.classList.remove('thinking');
+      if (bubbleAskSendEl) { bubbleAskSendEl.disabled = false; bubbleAskSendEl.textContent = '질문 ↗'; }
+      if (sideBtn) { sideBtn.disabled = false; sideBtn.textContent = '질문 ↗'; }
+      buildOffice();
+      syncSpeechBubbleContent(id);
+    }
+  }
+
+  bubbleCloseBtnEl?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    officeBubbleOpen = false;
+    speechBubbleEl?.classList.add('is-hidden');
+  });
+
+  bubbleAskFormEl?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const q = bubbleAskInputEl?.value || '';
+    if (!q.trim()) return;
+    bubbleAskInputEl.value = '';
+    await askOfficeAgentQuestion(selectedAgentId, q);
+  });
+
+  function populateSummonDropdown() {
+    if (!summonCharSelect) return;
+    summonCharSelect.innerHTML = agentSpecs.map(a => {
+      return `<option value="${a.charId}">#${a.charId} ${a.name} (현재 ${a.floorId}층 #${a.seatIndex + 1}번석)</option>`;
+    }).join('');
+  }
+
+  btnSummonChar?.addEventListener('click', () => {
+    const charId = summonCharSelect?.value;
+    if (!charId) return;
+    const fl = activeFloor();
+    const onThisFloor = agentSpecs.filter(a => a.floorId === activeFloorId);
+    const usedSeats = new Set(onThisFloor.map(a => a.seatIndex));
+    let targetSeat = 0;
+    let foundEmpty = false;
+    for (let i = 0; i < fl.seatCount; i++) {
+      if (!usedSeats.has(i)) {
+        targetSeat = i;
+        foundEmpty = true;
+        break;
+      }
+    }
+    if (!foundEmpty) {
+      targetSeat = 0;
+    }
+
+    charPlacements[charId] = { floorId: activeFloorId, seatIndex: targetSeat };
+    const movedLog = rebalanceOverflowCharacters(charId);
+    agentSpecs = buildAgentSpecsFromStudio();
+    const summoned = agentSpecs.find(a => a.charId === charId);
+    if (summoned) selectedAgentId = summoned.id;
+
+    populateSummonDropdown();
+    buildOffice();
+    renderFloorAgents();
+    centerSelectedFloorInView(true);
+
+    const note = document.getElementById('floorActionFeedback');
+    if (note && summoned) {
+      note.textContent = movedLog.length
+        ? `🏢 #${charId} ${summoned.name} 캐릭터를 ${fl.name} #${targetSeat + 1}번석에 배치하고, 초과 인원(${movedLog.join(', ')})을 다른 층 빈자리로 자동 이동했습니다!`
+        : `🏢 #${charId} ${summoned.name} 캐릭터를 ${fl.name} [${summoned.seatLabel}]에 배치했습니다!`;
     }
   });
-  MAT.clear();
-}
 
-// Controls and view handling
-document.getElementById('resetView')?.addEventListener('click', () => {
-  camera.position.copy(initialCamera); controls.target.set(0, .6, 0); controls.update();
-});
-document.getElementById('zoomIn')?.addEventListener('click', () => { camera.position.sub(controls.target).multiplyScalar(.88).add(controls.target); controls.update(); });
-document.getElementById('zoomOut')?.addEventListener('click', () => { camera.position.sub(controls.target).multiplyScalar(1.12).add(controls.target); controls.update(); });
-document.getElementById('topView')?.addEventListener('click', () => { camera.position.set(0, 32, .1); controls.target.set(0, 0, 0); controls.update(); });
-const toggleBtn = document.getElementById('toggleMotion');
-toggleBtn?.addEventListener('click', () => { paused = !paused; toggleBtn.textContent = paused ? '▶ 애니메이션 재생' : 'Ⅱ 애니메이션 일시정지'; });
-canvas.addEventListener('click', event => {
-  const rect = canvas.getBoundingClientRect();
-  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects(officeRoot.children, true);
-  for (const hit of hits) {
-    let object = hit.object;
-    while (object && !object.userData.agentId) object = object.parent;
-    if (object?.userData.agentId) { selectAgent(object.userData.agentId, true); break; }
+  function renderFloorSwitcher() {
+    if (!floorSwitcher) return;
+    floorSwitcher.innerHTML = floors.map(f => {
+      const cnt = agentSpecs.filter(a => a.floorId === f.id).length;
+      return `<button class="floor-chip${f.id === activeFloorId ? ' active' : ''}" type="button" data-floor-id="${f.id}" aria-pressed="${f.id === activeFloorId}"><span>F${String(f.id).padStart(2, '0')}</span><strong>${f.name} (${cnt}/${f.seatCount})</strong></button>`;
+    }).join('') + '<button class="floor-chip add-floor-chip" id="addFloor" type="button">＋ 층 추가</button>';
+
+    floorSwitcher.querySelectorAll('[data-floor-id]').forEach(button => button.addEventListener('click', () => {
+      activeFloorId = Number(button.dataset.floorId);
+      buildOffice();
+      renderFloorSwitcher();
+      renderFloorAgents();
+      centerSelectedFloorInView(true);
+    }));
+
+    floorSwitcher.querySelector('#addFloor')?.addEventListener('click', () => {
+      const nextId = Math.max(0, ...floors.map(f => f.id)) + 1;
+      floors.push({
+        id: nextId,
+        name: `${nextId}층`,
+        description: `확장 오피스 · 마주보는 ${DEFAULT_SEATS_PER_FLOOR}석`,
+        seatCount: DEFAULT_SEATS_PER_FLOOR
+      });
+      activeFloorId = nextId;
+      saveFloors();
+      renderFloorSwitcher();
+      buildOffice();
+      renderFloorAgents();
+      centerSelectedFloorInView(true);
+    });
+
+    const fl = activeFloor();
+    const sub = document.getElementById('floorSummary');
+    if (sub && fl) sub.textContent = `${fl.name} · 마주보는 ${fl.seatCount}인석 운영 중`;
+    const badge = document.getElementById('floorLiveBadge');
+    if (badge && fl) badge.textContent = `${fl.seatCount} SEATS`;
+    populateSummonDropdown();
   }
-});
-function resize() {
-  const width = Math.max(1, container.clientWidth), height = Math.max(1, container.clientHeight);
-  renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix();
-}
-if ('ResizeObserver' in window) new ResizeObserver(resize).observe(container); else window.addEventListener('resize', resize);
 
-renderFloorSwitcher(); buildOffice(); renderFloorAgents(); resize();
-container.querySelector('.scene-fallback')?.classList.add('is-hidden');
-const clock = new THREE.Clock();
-function animate() {
-  requestAnimationFrame(animate);
-  const t = clock.getElapsedTime();
-  if (!paused) activeAgents.forEach((a, i) => {
-    // 1. 2등신 치비 호흡 바운스
-    const breath = Math.sin(t * 2.2 + i * 0.8) * 0.012;
-    if (a.headGroup) a.headGroup.position.y = 1.02 + breath;
-    if (a.torsoGroup) a.torsoGroup.position.y = 0.58 + breath * 0.5;
-
-    // 2. 키보드 타이핑 모션 (Desk typing motion)
-    if (a.leftArm && a.rightArm) {
-      a.leftArm.rotation.x = -0.52 + Math.sin(t * 7.5 + i * 1.5) * 0.14;
-      a.rightArm.rotation.x = -0.52 - Math.cos(t * 7.5 + i * 1.5) * 0.14;
+  function renderFloorAgents() {
+    const fl = activeFloor();
+    const assigned = agentSpecs.filter(a => a.floorId === activeFloorId).sort((a, b) => a.seatIndex - b.seatIndex);
+    const activeCount = document.getElementById('floorActiveCount');
+    const reviewCount = document.getElementById('floorReviewCount');
+    if (activeCount && fl) {
+      activeCount.textContent = `${String(assigned.length).padStart(2, '0')} / ${String(fl.seatCount).padStart(2, '0')}`;
+    }
+    if (reviewCount) {
+      reviewCount.textContent = String(assigned.filter(a => a.triadRole === 'REVIEWER').length).padStart(2, '0');
     }
 
-    // 3. 플로팅 핀 & 상태 링 회전
-    if (a.pin) {
-      a.pin.position.y = 1.58 + 0.035 * Math.sin(t * 2.2 + i * 1.3);
-      a.pin.rotation.y = t * 1.2;
+    if (teamList) {
+      if (!assigned.length) {
+        teamList.innerHTML = `<div class="floor-empty"><strong>이 층(${fl?.name || ''})은 현재 ${fl?.seatCount || 6}석 모두 빈자리입니다.</strong><span>다른 층에서 캐릭터를 드래그해 오거나 위의 [＋ 이 층에 배치] 버튼을 눌러보세요!</span></div>`;
+      } else {
+        teamList.innerHTML = assigned.map(a => {
+          const avatarSvg = getAgentAvatarSvg(a.studioAgent, 'front');
+          const isSel = a.id === selectedAgentId;
+          const cliTag = CLI_SHORT[a.cliKey] || a.cliKey;
+          const dirBadge = a.facing === 'back' ? '뒷면(마주보기)' : '앞면';
+          return `<button type="button" class="team-row${isSel ? ' selected' : ''}" data-agent="${a.id}">
+            <span class="agent-avatar" title="${a.name}">${avatarSvg}</span>
+            <span class="team-row-main"><strong>#${a.charId} ${a.name}</strong><small>#${a.seatIndex + 1}번석(${dirBadge}) · ${a.triadRole} · ${cliTag}</small></span>
+            <span class="mini-online" style="background:${a.statusKey === 'review' ? '#f4bf60' : '#5ecda9'}"></span>
+          </button>`;
+        }).join('');
+        teamList.querySelectorAll('.team-row').forEach(row => row.addEventListener('click', () => selectAgent(row.dataset.agent, true)));
+      }
     }
-    if (a.ring) a.ring.rotation.z = t * 0.18;
+
+    if (!assigned.length) {
+      speechBubbleEl?.classList.add('is-hidden');
+      if (selectedAgentPanel) selectedAgentPanel.innerHTML = '<div class="floor-empty selected-empty"><strong>빈 층 (전체 공석)</strong><span>드롭다운에서 캐릭터를 소환하거나 다른 층에서 드래그해 배치하세요.</span></div>';
+    } else {
+      const targetId = assigned.some(a => a.id === selectedAgentId) ? selectedAgentId : assigned[0].id;
+      selectAgent(targetId, false);
+    }
+  }
+
+  function selectAgent(id, focusInput = false) {
+    selectedAgentId = id;
+    const spec = agentSpecs.find(a => a.id === id);
+    if (!spec) {
+      speechBubbleEl?.classList.add('is-hidden');
+      return;
+    }
+    officeBubbleOpen = true;
+    syncSpeechBubbleContent(id);
+    teamList?.querySelectorAll('.team-row').forEach(el => el.classList.toggle('selected', el.dataset.agent === id));
+    towerStackEl.querySelectorAll('.maple-2d-actor').forEach(el => el.classList.toggle('is-selected', el.dataset.agentId === id));
+    updateSpeechBubblePosition();
+
+    if (selectedAgentPanel) {
+      const avatarSvg = getAgentAvatarSvg(spec.studioAgent, 'front');
+      const currentReply = agentChatState[id] || `🏢 안녕하세요! ${spec.floorId}층 [${spec.seatLabel}]에 착석한 ${spec.name}입니다.`;
+      const floorSeats = getFloorSeats(spec.floorId);
+      const seatOptionsHtml = floorSeats.map((s, idx) =>
+        `<option value="${idx}" ${idx === spec.seatIndex ? 'selected' : ''}>${s.label}</option>`
+      ).join('');
+
+      selectedAgentPanel.innerHTML = `
+        <div class="selected-identity">
+          <div class="agent-avatar">${avatarSvg}</div>
+          <div>
+            <strong>#${spec.charId} ${spec.name}</strong>
+            <small>${spec.floorId}층 #${spec.seatIndex + 1}번석 (${spec.facing === 'back' ? '뒷면·마주보기' : '앞면'})</small>
+          </div>
+        </div>
+        <div class="detail-line"><span>Triad 역할</span><strong>${spec.triadRole}</strong></div>
+        <div class="detail-line">
+          <span>담당 AI CLI</span>
+          <strong>
+            <select id="officeAgentCliSelect" class="triad-cli-select" style="height:24px;font-size:10px;padding:0 6px">
+              <option value="claude" ${spec.cliKey === 'claude' ? 'selected' : ''}>Claude Code (claude)</option>
+              <option value="antigravity" ${spec.cliKey === 'antigravity' ? 'selected' : ''}>Google Antigravity (agy)</option>
+              <option value="openai" ${spec.cliKey === 'openai' ? 'selected' : ''}>OpenAI Codex (codex)</option>
+            </select>
+          </strong>
+        </div>
+        <div class="detail-line">
+          <span>이 층 좌석 변경</span>
+          <strong>
+            <select id="officeSeatSelect" class="triad-cli-select" style="height:24px;font-size:10px;padding:0 6px">
+              ${seatOptionsHtml}
+            </select>
+          </strong>
+        </div>
+        <div class="side-ask-box">
+          <strong style="font-size:10px;color:#1e293b">💬 ${spec.name}에게 말풍선 질문하기</strong>
+          <div class="side-ask-reply" id="sideAskReply">${currentReply}</div>
+          <form class="bubble-form" id="sideAgentAskForm">
+            <input type="text" class="bubble-input" id="sideAskInput" placeholder="${spec.name}에게 질문 입력..." required>
+            <button type="submit" class="bubble-send" id="sideAskSendBtn">질문 ↗</button>
+          </form>
+        </div>
+        <a class="btn small mint" href="agents.html#characters" style="width:100%;justify-content:center;margin-top:10px">🎨 캐릭터 스튜디오에서 코디/설정 변경 ↗</a>
+      `;
+
+      document.getElementById('officeAgentCliSelect')?.addEventListener('change', (e) => {
+        const newCli = e.target.value;
+        if (spec.studioAgent) {
+          spec.studioAgent.cliProvider = newCli;
+          try {
+            const saved = JSON.parse(localStorage.getItem('nexus-character-ai-configs-v1') || '{}') || {};
+            saved[spec.charId] = { ...(saved[spec.charId] || {}), cliProvider: newCli };
+            localStorage.setItem('nexus-character-ai-configs-v1', JSON.stringify(saved));
+          } catch (_) {}
+        }
+        agentSpecs = buildAgentSpecsFromStudio();
+        buildOffice();
+        renderFloorAgents();
+      });
+
+      document.getElementById('officeSeatSelect')?.addEventListener('change', (e) => {
+        const newSeatIdx = Number(e.target.value);
+        const prevSeatIdx = spec.seatIndex;
+        const occupant = Object.entries(charPlacements).find(
+          ([otherCid, pos]) => otherCid !== spec.charId && pos.floorId === spec.floorId && pos.seatIndex === newSeatIdx
+        );
+        charPlacements[spec.charId] = { floorId: spec.floorId, seatIndex: newSeatIdx };
+        if (occupant) {
+          charPlacements[occupant[0]] = { floorId: spec.floorId, seatIndex: prevSeatIdx };
+        }
+        rebalanceOverflowCharacters(spec.charId);
+        agentSpecs = buildAgentSpecsFromStudio();
+        buildOffice();
+        renderFloorAgents();
+        selectAgent(id, false);
+      });
+
+      document.getElementById('sideAgentAskForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const inp = document.getElementById('sideAskInput');
+        const q = inp?.value || '';
+        if (!q.trim()) return;
+        inp.value = '';
+        await askOfficeAgentQuestion(id, q);
+      });
+    }
+
+    if (focusInput && bubbleAskInputEl) {
+      setTimeout(() => bubbleAskInputEl.focus(), 60);
+    }
+  }
+
+  function applyZoom() {
+    towerStackEl.style.transform = `scale(${currentZoom.toFixed(2)})`;
+    setTimeout(() => {
+      centerSelectedFloorInView(true);
+      updateSpeechBubblePosition();
+    }, 220);
+  }
+  document.getElementById('zoomIn')?.addEventListener('click', () => {
+    currentZoom = Math.min(1.35, currentZoom + 0.1);
+    applyZoom();
   });
-  controls.update();
-  renderer.render(scene, camera);
-}
-animate();
+  document.getElementById('zoomOut')?.addEventListener('click', () => {
+    currentZoom = Math.max(0.55, currentZoom - 0.1);
+    applyZoom();
+  });
+  document.getElementById('resetView')?.addEventListener('click', () => {
+    currentZoom = 1;
+    applyZoom();
+  });
+  document.getElementById('topView')?.addEventListener('click', () => {
+    currentZoom = 0.62;
+    applyZoom();
+  });
+
+  const toggleBtn = document.getElementById('toggleMotion');
+  toggleBtn?.addEventListener('click', () => {
+    paused = !paused;
+    toggleBtn.textContent = paused ? '▶ 애니메이션 재생' : 'Ⅱ 애니메이션 일시정지';
+    buildOffice();
+  });
+
+  let officeBackendAvailable = true;
+  async function syncOfficeWithOrchestrator() {
+    if (!officeBackendAvailable) return;
+    try {
+      const res = await officeApiFetch('/ops/activity', { cache: 'no-store' });
+      if (res.status === 404) {
+        officeBackendAvailable = false;
+        return;
+      }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.roles) {
+        currentRoles = { ...currentRoles, ...data.roles };
+      }
+      const phase = data.phase || 'IDLE';
+      const badge = document.getElementById('officePipelineBadge');
+      if (badge) {
+        badge.textContent = `⌖ 파이프라인: ${phase === 'IDLE' ? 'STANDBY' : phase} · 마주보는 6석(앞/뒤) · 초과 인원 타 층 빈자리 자동 배치`;
+      }
+    } catch (_) {}
+  }
+
+  renderFloorSwitcher();
+  buildOffice();
+  renderFloorAgents();
+  setTimeout(() => centerSelectedFloorInView(false), 60);
+  syncOfficeWithOrchestrator();
+  setInterval(syncOfficeWithOrchestrator, 3000);
+})();

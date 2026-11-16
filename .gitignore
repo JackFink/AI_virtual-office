@@ -25,3 +25,8 @@ desktop.ini
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# Python & Local Runtime State
+__pycache__/
+*.pyc
+data/login_helper_*.cmd

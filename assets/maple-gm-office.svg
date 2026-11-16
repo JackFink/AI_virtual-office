@@ -1,0 +1,242 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 152 1280 464" width="100%" height="100%" preserveAspectRatio="none">
+  <defs>
+    <!-- Sky & Cityscape Gradients -->
+    <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a88f2"/>
+      <stop offset="55%" stop-color="#6eb5ff"/>
+      <stop offset="100%" stop-color="#bfe3ff"/>
+    </linearGradient>
+    <linearGradient id="glassReflect" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#a5d8ff" stop-opacity="0.18"/>
+    </linearGradient>
+    <linearGradient id="wallRightGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e3d5dc"/>
+      <stop offset="100%" stop-color="#c9b8c4"/>
+    </linearGradient>
+    <linearGradient id="portalGlow" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#7dd3fc" stop-opacity="0.95"/>
+      <stop offset="30%" stop-color="#38bdf8" stop-opacity="0.65"/>
+      <stop offset="75%" stop-color="#818cf8" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="lampGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff9db" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#fff9db" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="beamSteel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c7d8c"/>
+      <stop offset="50%" stop-color="#5a5b6b"/>
+      <stop offset="100%" stop-color="#414250"/>
+    </linearGradient>
+
+    <!-- Reusable Plant Component -->
+    <g id="officePlant">
+      <rect x="-20" y="-56" width="40" height="56" rx="3" fill="#e9ecef" stroke="#2b2d38" stroke-width="2.5"/>
+      <rect x="-20" y="-56" width="12" height="56" fill="#f8f9fa"/>
+      <rect x="-23" y="-62" width="46" height="8" rx="2" fill="#dee2e6" stroke="#2b2d38" stroke-width="2.5"/>
+      <path d="M0,-62 L0,-92" stroke="#5c3c24" stroke-width="4" stroke-linecap="round"/>
+      <ellipse cx="-16" cy="-76" rx="15" ry="9" transform="rotate(-25 -16 -76)" fill="#51cf66" stroke="#1e3a20" stroke-width="2.2"/>
+      <ellipse cx="16" cy="-76" rx="15" ry="9" transform="rotate(25 16 -76)" fill="#40c057" stroke="#1e3a20" stroke-width="2.2"/>
+      <ellipse cx="-12" cy="-94" rx="14" ry="8" transform="rotate(-18 -12 -94)" fill="#69db7c" stroke="#1e3a20" stroke-width="2.2"/>
+      <ellipse cx="13" cy="-94" rx="14" ry="8" transform="rotate(18 13 -94)" fill="#51cf66" stroke="#1e3a20" stroke-width="2.2"/>
+      <ellipse cx="0" cy="-105" rx="11" ry="15" fill="#8ce99a" stroke="#1e3a20" stroke-width="2.2"/>
+    </g>
+
+    <!-- Ceiling Fluorescent Light -->
+    <g id="ceilingLight">
+      <line x1="-55" y1="0" x2="-55" y2="24" stroke="#343a40" stroke-width="3"/>
+      <line x1="55" y1="0" x2="55" y2="24" stroke="#343a40" stroke-width="3"/>
+      <rect x="-78" y="22" width="156" height="12" rx="4" fill="#adb5bd" stroke="#2b2d38" stroke-width="2.5"/>
+      <rect x="-70" y="32" width="140" height="7" rx="3" fill="#fff9db" stroke="#f59f00" stroke-width="1.5"/>
+      <polygon points="-75,39 75,39 115,150 -115,150" fill="url(#lampGlow)" pointer-events="none"/>
+    </g>
+  </defs>
+
+  <!-- ==================================================================== -->
+  <!-- [1] SKY, CLOUDS & DISTANT CITYSCAPE THROUGH FLOOR WINDOWS            -->
+  <!-- ==================================================================== -->
+  <rect x="0" y="152" width="1280" height="464" fill="url(#skyGrad)"/>
+
+  <g fill="#ffffff" opacity="0.88">
+    <circle cx="245" cy="285" r="44"/>
+    <circle cx="290" cy="270" r="56"/>
+    <circle cx="342" cy="286" r="42"/>
+    <circle cx="540" cy="262" r="38"/>
+    <circle cx="585" cy="248" r="52"/>
+    <circle cx="635" cy="268" r="40"/>
+    <circle cx="690" cy="252" r="62"/>
+    <circle cx="750" cy="272" r="45"/>
+  </g>
+
+  <g fill="#74a9e8" opacity="0.72">
+    <rect x="210" y="290" width="88" height="260"/>
+    <rect x="315" y="340" width="70" height="210"/>
+    <rect x="410" y="320" width="92" height="230"/>
+    <rect x="520" y="370" width="68" height="180"/>
+    <rect x="615" y="305" width="85" height="245"/>
+    <rect x="720" y="350" width="75" height="200"/>
+    <rect x="820" y="280" width="95" height="270"/>
+  </g>
+  <g fill="#bfe3ff" opacity="0.55">
+    <rect x="225" y="310" width="14" height="180" stroke="#74a9e8" stroke-width="4" stroke-dasharray="8 6"/>
+    <rect x="255" y="310" width="14" height="180" stroke="#74a9e8" stroke-width="4" stroke-dasharray="8 6"/>
+    <rect x="430" y="340" width="16" height="160" stroke="#74a9e8" stroke-width="4" stroke-dasharray="8 6"/>
+    <rect x="465" y="340" width="16" height="160" stroke="#74a9e8" stroke-width="4" stroke-dasharray="8 6"/>
+    <rect x="635" y="325" width="16" height="170" stroke="#74a9e8" stroke-width="4" stroke-dasharray="8 6"/>
+    <rect x="670" y="325" width="16" height="170" stroke="#74a9e8" stroke-width="4" stroke-dasharray="8 6"/>
+  </g>
+
+  <!-- ==================================================================== -->
+  <!-- [2] CONTINUOUS BUILDING STRUCTURE & WINDOWS (Y: 152 ~ 536)           -->
+  <!-- ==================================================================== -->
+  <rect x="0" y="152" width="1280" height="64" fill="#b8b0bc" stroke="#2b2d38" stroke-width="2.5"/>
+
+  <!-- Left Elevator Shaft Wall (X: 0 ~ 196, Y: 152 ~ 536 — Flush with Main Floor at Y=536) -->
+  <rect x="0" y="152" width="196" height="384" fill="#c7bac2" stroke="#2b2d38" stroke-width="2.5"/>
+  <line x1="145" y1="152" x2="145" y2="536" stroke="#9e9099" stroke-width="2"/>
+
+  <!-- Right Exterior Wall (Clean Wall — No MapleStory Logo) -->
+  <rect x="955" y="216" width="325" height="320" fill="url(#wallRightGrad)" stroke="#2b2d38" stroke-width="2.5"/>
+
+  <!-- Framed Certificate Next to Bookshelf -->
+  <rect x="982" y="362" width="38" height="48" rx="2" fill="#f8f9fa" stroke="#7c5836" stroke-width="3"/>
+  <rect x="988" y="368" width="26" height="12" fill="#74c0fc"/>
+  <line x1="988" y1="386" x2="1014" y2="386" stroke="#adb5bd" stroke-width="2"/>
+  <line x1="988" y1="393" x2="1010" y2="393" stroke="#adb5bd" stroke-width="2"/>
+  <line x1="988" y1="400" x2="1014" y2="400" stroke="#63e6be" stroke-width="3"/>
+
+  <!-- Large Panorama Windows (X: 196 ~ 955, Y: 216 ~ 536) -->
+  <g>
+    <rect x="196" y="216" width="759" height="320" fill="url(#glassReflect)" stroke="#2b2d38" stroke-width="3"/>
+    <rect x="196" y="216" width="16" height="320" fill="#5c6470" stroke="#2b2d38" stroke-width="2.5"/>
+    <rect x="442" y="216" width="16" height="320" fill="#5c6470" stroke="#2b2d38" stroke-width="2.5"/>
+    <rect x="692" y="216" width="16" height="320" fill="#5c6470" stroke="#2b2d38" stroke-width="2.5"/>
+    <rect x="940" y="216" width="16" height="320" fill="#5c6470" stroke="#2b2d38" stroke-width="2.5"/>
+  </g>
+
+  <!-- Hanging Fluorescent Ceiling Lights -->
+  <use href="#ceilingLight" transform="translate(75, 140) scale(0.85)"/>
+  <use href="#ceilingLight" transform="translate(350, 140) scale(0.88)"/>
+  <use href="#ceilingLight" transform="translate(710, 140) scale(0.88)"/>
+  <use href="#ceilingLight" transform="translate(1025, 140) scale(0.88)"/>
+  <use href="#ceilingLight" transform="translate(505, 192) scale(0.95)"/>
+  <use href="#ceilingLight" transform="translate(885, 192) scale(0.95)"/>
+
+  <!-- "GM Office ->" Hanging Sign -->
+  <g transform="translate(136, 192)">
+    <rect x="0" y="0" width="116" height="66" rx="6" fill="#434c5e" stroke="#1e222a" stroke-width="3"/>
+    <rect x="4" y="4" width="108" height="58" rx="4" fill="none" stroke="#677691" stroke-width="1.5"/>
+    <text x="14" y="29" font-family="'DM Sans', sans-serif" font-size="21" font-weight="800" fill="#ffffff">GM</text>
+    <text x="14" y="53" font-family="'DM Sans', sans-serif" font-size="20" font-weight="800" fill="#ffffff">Office →</text>
+  </g>
+
+  <!-- ==================================================================== -->
+  <!-- [3] WARP PORTAL ELEVATOR (STAIRS REMOVED — FLUSH LEVEL AT Y: 536)    -->
+  <!-- ==================================================================== -->
+  <rect x="0" y="298" width="128" height="238" fill="#9e96a1" stroke="#2b2d38" stroke-width="3"/>
+  <rect x="10" y="316" width="96" height="220" fill="#6c6874" stroke="#2b2d38" stroke-width="2.5"/>
+  <line x1="58" y1="316" x2="58" y2="536" stroke="#3b3842" stroke-width="3"/>
+  <rect x="38" y="303" width="40" height="9" rx="2" fill="#2b2d38"/>
+  <rect x="44" y="305" width="28" height="5" rx="1" fill="#ffd43b"/>
+  <rect x="142" y="402" width="28" height="54" rx="4" fill="#8d8894" stroke="#2b2d38" stroke-width="2.5"/>
+  <polygon points="156,412 149,424 163,424" fill="#63e6be"/>
+  <polygon points="156,446 149,434 163,434" fill="#adb5bd"/>
+
+  <!-- Glowing Blue Warp Portal at Flush Elevator Base (Y: 532) -->
+  <ellipse cx="58" cy="532" rx="48" ry="12" fill="#e0f2fe"/>
+  <rect x="14" y="395" width="88" height="138" fill="url(#portalGlow)"/>
+  <ellipse cx="58" cy="532" rx="38" ry="7" fill="#ffffff"/>
+
+  <!-- ==================================================================== -->
+  <!-- [4] WALL BOARDS, PLANTS, BOOKSHELF, COPIER & WATER COOLER            -->
+  <!--     (Desks & Chairs are rendered dynamically per Seat Slot!)         -->
+  <!-- ==================================================================== -->
+  <!-- Cork Bulletin Board -->
+  <g transform="translate(384, 336)">
+    <rect x="0" y="0" width="128" height="92" rx="4" fill="#d9a066" stroke="#2b2d38" stroke-width="3"/>
+    <rect x="6" y="6" width="116" height="80" fill="#b87d4b" stroke="#5c3c24" stroke-width="2"/>
+    <rect x="16" y="14" width="22" height="22" fill="#ffd43b" stroke="#2b2d38" stroke-width="1.5"/>
+    <rect x="44" y="18" width="28" height="32" fill="#f8f9fa" stroke="#2b2d38" stroke-width="1.5"/>
+    <rect x="82" y="14" width="24" height="24" fill="#63e6be" stroke="#2b2d38" stroke-width="1.5"/>
+    <rect x="20" y="44" width="24" height="24" fill="#f8f9fa" stroke="#2b2d38" stroke-width="1.5"/>
+    <rect x="80" y="42" width="26" height="26" fill="#ff8787" stroke="#2b2d38" stroke-width="1.5"/>
+  </g>
+
+  <!-- Slime Whiteboard -->
+  <g transform="translate(705, 342)">
+    <rect x="0" y="0" width="142" height="88" rx="5" fill="#dee2e6" stroke="#2b2d38" stroke-width="3"/>
+    <rect x="7" y="7" width="128" height="72" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+    <path d="M26,62 C22,40 36,28 50,28 C52,20 57,16 55,12 C60,14 60,22 58,28 C72,30 82,42 78,62 C72,68 32,68 26,62 Z" fill="#e2e8f0" stroke="#475569" stroke-width="2.2"/>
+    <circle cx="43" cy="46" r="2.2" fill="#334155"/>
+    <circle cx="61" cy="46" r="2.2" fill="#334155"/>
+    <path d="M49,52 Q52,56 55,52" fill="none" stroke="#334155" stroke-width="2" stroke-linecap="round"/>
+    <rect x="92" y="50" width="9" height="18" fill="#94a3b8" stroke="#475569" stroke-width="1.5"/>
+    <rect x="105" y="38" width="9" height="30" fill="#94a3b8" stroke="#475569" stroke-width="1.5"/>
+    <rect x="118" y="26" width="9" height="42" fill="#74c0fc" stroke="#475569" stroke-width="1.5"/>
+    <polyline points="88,28 100,20 114,22 125,12" fill="none" stroke="#475569" stroke-width="2"/>
+  </g>
+
+  <use href="#officePlant" transform="translate(215, 536)"/>
+
+  <!-- BOOKSHELF, COPIER & WATER COOLER -->
+  <g transform="translate(1034, 352)">
+    <rect x="0" y="0" width="122" height="184" rx="3" fill="#d8c3a5" stroke="#2b2d38" stroke-width="2.5"/>
+    <rect x="8" y="8" width="106" height="38" fill="#6b5344" stroke="#2b2d38" stroke-width="2"/>
+    <rect x="8" y="54" width="106" height="38" fill="#6b5344" stroke="#2b2d38" stroke-width="2"/>
+    <g stroke="#2b2d38" stroke-width="1.8">
+      <rect x="12" y="14" width="11" height="32" fill="#51cf66"/>
+      <rect x="23" y="14" width="11" height="32" fill="#ffd43b"/>
+      <rect x="34" y="14" width="11" height="32" fill="#339af0"/>
+      <rect x="45" y="14" width="11" height="32" fill="#ff6b6b"/>
+      <rect x="56" y="14" width="11" height="32" fill="#f8f9fa"/>
+      <rect x="67" y="14" width="11" height="32" fill="#339af0"/>
+      <rect x="78" y="14" width="11" height="32" fill="#51cf66"/>
+      <rect x="89" y="14" width="11" height="32" fill="#ffd43b"/>
+      <rect x="12" y="60" width="11" height="32" fill="#ff922b"/>
+      <rect x="23" y="60" width="11" height="32" fill="#51cf66"/>
+      <rect x="34" y="60" width="11" height="32" fill="#339af0"/>
+      <rect x="45" y="60" width="11" height="32" fill="#ffd43b"/>
+      <rect x="56" y="60" width="11" height="32" fill="#845ef7"/>
+      <rect x="67" y="60" width="11" height="32" fill="#f8f9fa"/>
+      <rect x="78" y="60" width="11" height="32" fill="#ff6b6b"/>
+    </g>
+    <rect x="28" y="96" width="84" height="88" rx="2" fill="#f3d9b1" stroke="#2b2d38" stroke-width="2.5"/>
+    <line x1="28" y1="125" x2="112" y2="125" stroke="#2b2d38" stroke-width="2"/>
+    <line x1="28" y1="154" x2="112" y2="154" stroke="#2b2d38" stroke-width="2"/>
+  </g>
+
+  <g transform="translate(1145, 536)">
+    <rect x="0" y="-92" width="88" height="92" rx="3" fill="#dee2e6" stroke="#2b2d38" stroke-width="2.5"/>
+    <line x1="0" y1="-62" x2="88" y2="-62" stroke="#2b2d38" stroke-width="2"/>
+    <line x1="0" y1="-32" x2="88" y2="-32" stroke="#2b2d38" stroke-width="2"/>
+    <rect x="6" y="-122" width="76" height="24" rx="3" fill="#adb5bd" stroke="#2b2d38" stroke-width="2.5"/>
+    <rect x="24" y="-148" width="40" height="26" rx="3" fill="#ced4da" stroke="#2b2d38" stroke-width="2.5"/>
+    <rect x="30" y="-142" width="28" height="14" fill="#495057"/>
+  </g>
+
+  <g transform="translate(1233, 536)">
+    <rect x="0" y="-82" width="44" height="82" rx="3" fill="#e9ecef" stroke="#2b2d38" stroke-width="2.5"/>
+    <rect x="8" y="-68" width="28" height="24" fill="#ced4da" stroke="#495057" stroke-width="1.5"/>
+    <rect x="14" y="-62" width="5" height="8" fill="#fa5252"/>
+    <rect x="25" y="-62" width="5" height="8" fill="#339af0"/>
+    <rect x="4" y="-138" width="36" height="52" rx="8" fill="#74c0fc" fill-opacity="0.82" stroke="#1c7ed6" stroke-width="2.5"/>
+    <line x1="4" y1="-120" x2="40" y2="-120" stroke="#339af0" stroke-width="2"/>
+    <line x1="4" y1="-102" x2="40" y2="-102" stroke="#339af0" stroke-width="2"/>
+  </g>
+
+  <!-- ==================================================================== -->
+  <!-- [5] FULL-WIDTH CONTINUOUS FLOOR SLAB & STEEL GIRDER (X: 0 ~ 1280)    -->
+  <!--     No stairs! Elevator and office floor are on one flat slab!       -->
+  <!-- ==================================================================== -->
+  <rect x="0" y="536" width="1280" height="18" fill="#d8ccd0" stroke="#2b2d38" stroke-width="2.5"/>
+  <rect x="0" y="554" width="1280" height="62" fill="url(#beamSteel)" stroke="#23242d" stroke-width="3"/>
+  <g stroke="#2b2d38" stroke-width="2.5">
+    <line x1="196" y1="554" x2="196" y2="616"/>
+    <line x1="435" y1="554" x2="435" y2="616"/>
+    <line x1="690" y1="554" x2="690" y2="616"/>
+    <line x1="948" y1="554" x2="948" y2="616"/>
+    <line x1="1205" y1="554" x2="1205" y2="616"/>
+  </g>
+</svg>

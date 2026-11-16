@@ -1,20 +1,65 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · 3D Virtual Office</title><link rel="stylesheet" href="styles.css">
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · GM Office 멀티플로어 SVG 가상 오피스</title><link rel="stylesheet" href="styles.css?v=triad16"></head>
 <body data-page="office">
 <div class="app">
 <aside class="sidebar">
-  <a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI WORKSPACE</div></div></a>
-  <div class="nav-label">WORKSPACE</div><nav class="nav-group"><a class="nav-link" href="index.html"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a><a class="nav-link active" href="office.html" aria-current="page"><span class="nav-icon">⬡</span><span class="nav-text">3D 가상 오피스</span><span class="nav-pill">LIVE</span></a><a class="nav-link" href="agents.html"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a><a class="nav-link" href="agents.html#activity"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a></nav>
+  <a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI DEV DIRECTOR</div></div></a>
+  <div class="nav-label">WORKSPACE</div><nav class="nav-group"><a class="nav-link" href="index.html"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a><a class="nav-link active" href="office.html" aria-current="page"><span class="nav-icon">⬡</span><span class="nav-text">가상 오피스 (GM SVG)</span><span class="nav-pill">SVG</span></a><a class="nav-link" href="agents.html"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a><a class="nav-link" href="agents.html#activity"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a></nav>
   <div class="nav-label" style="margin-top:30px">MANAGEMENT</div><nav class="nav-group"><a class="nav-link" href="agents.html#activity"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a><a class="nav-link" href="index.html#usage"><span class="nav-icon">▤</span><span class="nav-text">사용량 & 비용</span></a></nav>
-  <div class="sidebar-bottom"><div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Workspace status</div><div class="workspace-caption">모든 시스템이 정상적으로<br>작동하고 있습니다.</div><div class="usage"><span>AI 사용량</span><strong>63%</strong></div><div class="usage-track"><span></span></div></div><div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Owner · Pro plan</div></div><span class="profile-more">···</span></div></div>
+  <div class="sidebar-bottom"><div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption">Claude · Codex · Antigravity<br>HEAD / BUILDER / REVIEWER</div><div class="usage"><span>미션 단계 예산</span><strong>5 / 6</strong></div><div class="usage-track"><span style="width:83%"></span></div></div><div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div></div>
 </aside>
-<main class="main"><header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>3D 가상 오피스</strong></div><div class="top-actions"><div class="system-pill"><span class="system-dot"></span> 시뮬레이션 실행 중</div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
-<div class="content office-content"><div class="office-toolbar"><div class="office-title"><div class="eyebrow">NEXUS HQ · MULTI-FLOOR OFFICE</div><h1>3D 가상 오피스</h1><p>약 100평(330m²) 기준 사무실 평면을 3D 공간으로 둘러보고, 층을 추가해 확장할 수 있습니다.</p></div><div class="office-tools"><a href="index.html" class="btn">← 대시보드</a><button class="btn" id="resetView">◎ 시점 초기화</button><button class="btn mint" id="toggleMotion">Ⅱ 애니메이션 일시정지</button></div></div>
-<div class="office-layout"><section class="scene-card"><div class="scene-fallback" aria-hidden="true"><img src="assets/office-reference.jpg" alt="첨부한 100평 사무실 배치 참고 이미지"></div><canvas id="office3d" aria-label="3D 가상 오피스 장면"></canvas><div class="scene-top"><div class="scene-label"><span class="system-dot"></span><b id="officeSceneLabel">1층 · 330 m²</b></div><div class="scene-label">⌖ 드래그 회전 · 휠 확대 · 터치 지원</div></div><div class="floor-switcher" id="floorSwitcher" role="group" aria-label="층 선택"><button class="floor-chip active" type="button"><span>F01</span><strong>1층</strong></button><button class="floor-chip add-floor-chip" id="addFloor" type="button">＋ 층 추가</button></div><div class="scene-legend"><div class="legend-title">EMPLOYEE STATUS</div><div class="legend-row"><span class="legend-dot" style="background:#55d6a6"></span>작업 중</div><div class="legend-row"><span class="legend-dot" style="background:#f2ba60"></span>검토 대기</div><div class="legend-row"><span class="legend-dot" style="background:#a5b2c2"></span>대기 중</div></div><div class="scene-hint"><span class="keycap">드래그</span> 회전 <span class="keycap">휠</span> 줌 <span style="color:#c3cbd3">·</span> AI 직원을 클릭해 상세 정보 확인</div><div class="scene-controls"><button id="zoomIn" title="확대">＋</button><button id="zoomOut" title="축소">−</button><button id="topView" title="위에서 보기">⌃</button></div></section>
-<aside class="office-side"><section class="side-panel"><div class="panel-head"><div><div class="panel-title">선택 층 현황</div><div class="panel-sub" id="floorSummary">1층 · 본사 기본 레이아웃</div></div><span class="status running">LIVE DEMO</span></div><div class="team-stat"><div class="team-stat-box"><strong id="floorActiveCount">04</strong><small>작업 중</small></div><div class="team-stat-box"><strong id="floorReviewCount">01</strong><small>검토 대기</small></div></div><div class="floor-meta"><span class="floor-meta-label">전체 층수</span><strong id="floorCount">01</strong><span>개 층</span><small id="floorActionFeedback">층 추가를 눌러 사무실을 확장할 수 있습니다.</small></div><div class="team-list" id="teamList"><div class="team-row selected" data-agent="research"><div class="agent-avatar" style="background:#e2edff;color:#5275c8">R</div><div class="team-row-main"><strong>Research AI</strong><small>시장 자료 분석 중 · 72%</small></div><span class="mini-online"></span></div><div class="team-row" data-agent="writer"><div class="agent-avatar" style="background:#f0e7ff;color:#886bc5">W</div><div class="team-row-main"><strong>Writer AI</strong><small>콘텐츠 검토 대기</small></div><span class="mini-online" style="background:#f4bf60"></span></div><div class="team-row" data-agent="ops"><div class="agent-avatar" style="background:#ddf7ed;color:#288a69">O</div><div class="team-row-main"><strong>Ops AI</strong><small>CRM 동기화 · 45%</small></div><span class="mini-online"></span></div><div class="team-row" data-agent="design"><div class="agent-avatar" style="background:#ffe9dc;color:#bb7950">D</div><div class="team-row-main"><strong>Design AI</strong><small>대기 중 · 다음 작업 대기</small></div><span class="mini-online" style="background:#a5b2c2"></span></div></div></section>
-<section class="side-panel"><div class="panel-head"><div><div class="panel-title">선택한 AI 직원</div><div class="panel-sub">캐릭터를 선택하거나 목록을 눌러보세요.</div></div></div><div class="selected-card" id="selectedAgent"><div class="selected-identity"><div class="agent-avatar" style="background:#e2edff;color:#5275c8">R</div><div><strong>Research AI</strong><small>리서치 팀 · Agent #001</small></div></div><div class="detail-line"><span>상태</span><strong><span class="status running">실행 중</span></strong></div><div class="detail-line"><span>현재 작업</span><strong>시장 자료 분석</strong></div><div class="detail-line"><span>진행률</span><strong>72%</strong></div><div class="detail-line"><span>실행 시간</span><strong>04:32</strong></div><a class="btn small" href="agents.html" style="width:100%;justify-content:center;margin-top:12px">직원 상세 관리 ↗</a></div></section><div class="scene-notice"><strong>✦ 공간 구성 안내</strong>첨부한 약 330m² 사무실 배치를 기준으로 업무 공간, 탕비실, 화장실, 라운지, 유리 회의실, 엘리베이터와 비상계단을 구성했습니다. 층 추가는 데모 기능이며, 현재 각 층에는 같은 기본 평면을 복제합니다.</div></aside></div></div>
+<main class="main"><header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>GM Office 일체형 빌딩 · 마주보는 6인 좌석 & 자동 빈자리 배치</strong></div><div class="top-actions"><div class="system-pill" id="officeSystemPill"><span class="system-dot"></span> <span id="officeSystemText">GM Office 일체형 타워 실행 중</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
+<div class="content office-content"><div class="office-toolbar"><div class="office-title"><div class="eyebrow">NEXUS GM OFFICE · FACE-TO-FACE 6 SEATS & AUTO OVERFLOW</div><h1>🏢 GM 오피스 일체형 타워 (마주보는 6석)</h1><p>엘리베이터 계단을 제거하고, 각 층은 앞면·뒷면이 마주보는 기본 6석(좌석 추가/제거 가능)으로 구성되며 자리가 부족한 캐릭터는 다음 층 빈자리로 자동 배치됩니다.</p></div><div class="office-tools"><a href="agents.html#characters" class="btn">♟ 캐릭터 스튜디오</a><button class="btn" id="resetView">◎ 선택 층 중앙 정렬</button><button class="btn mint" id="toggleMotion">Ⅱ 애니메이션 일시정지</button></div></div>
+<div class="office-layout"><section class="scene-card" id="officeSceneCard">
+  <!-- 모든 층이 하나로 이어진 일체형 빌딩 뷰포트 -->
+  <div class="maple-2d-viewport" id="maple2dViewport">
+    <div class="maple-tower-stack" id="mapleTowerStack"></div>
+  </div>
+  <!-- 호환용 캔버스 (숨김 처리 - 3D 보류) -->
+  <canvas id="office3d" style="display:none" aria-hidden="true"></canvas>
+
+  <!-- 캐릭터 머리 위 말풍선 질문창 -->
+  <div class="office-speech-bubble" id="officeSpeechBubble" role="dialog" aria-label="선택한 AI 직원 말풍선 질문창">
+    <div class="bubble-head">
+      <div class="bubble-who"><span class="bubble-role-pill" id="bubbleRolePill">HEAD</span><strong id="bubbleAgentName">HEAD Director AI</strong></div>
+      <button type="button" class="bubble-close" id="bubbleCloseBtn" title="말풍선 접기">✕</button>
+    </div>
+    <div class="bubble-message" id="bubbleMessageText">안녕하세요! 캐릭터를 클릭해 질문하거나 마우스로 드래그해 원하는 층/좌석에 놓아보세요.</div>
+    <form class="bubble-form" id="bubbleAskForm">
+      <input type="text" class="bubble-input" id="bubbleAskInput" placeholder="이 직원에게 간단 질문하기..." required>
+      <button type="submit" class="bubble-send" id="bubbleAskSend">질문 ↗</button>
+    </form>
+  </div>
+
+  <div class="scene-top"><div class="scene-label"><span class="system-dot"></span><b id="officeSceneLabel">전층 빌딩 보기 · 1층 중앙 포커스</b></div><div class="scene-label" id="officePipelineBadge">⌖ 마주보는 6석(앞면 3 + 뒷면 3) · 정원 초과 시 다음 층 빈자리 자동 배치</div></div>
+  <div class="floor-switcher" id="floorSwitcher" role="group" aria-label="층 선택"><button class="floor-chip active" type="button"><span>F01</span><strong>1층</strong></button><button class="floor-chip add-floor-chip" id="addFloor" type="button">＋ 층 추가</button></div>
+  <div class="scene-legend"><div class="legend-title">GM OFFICE FACE-TO-FACE</div><div class="legend-row"><span class="legend-dot" style="background:#ffd43b"></span>뒷줄 좌석 (앞면 보기)</div><div class="legend-row"><span class="legend-dot" style="background:#74c0fc"></span>앞줄 좌석 (뒷면 마주보기)</div><div class="legend-row"><span class="legend-dot" style="background:#63e6be"></span>초과 인원 다음 층 자동배치</div></div>
+  <div class="scene-hint"><span class="keycap">드래그</span> 좌석/층 이동 (점유 좌석과 자동 자리교체) <span class="keycap">클릭</span> 말풍선 질문 <span style="color:#c3cbd3">·</span> 각 층 좌측 상단에서 좌석 수(＋/－) 조절</div>
+  <div class="scene-controls"><button id="zoomIn" title="확대">＋</button><button id="zoomOut" title="축소">−</button><button id="topView" title="전체 빌딩 한눈에 보기">⊡</button></div>
+</section>
+<aside class="office-side"><section class="side-panel"><div class="panel-head"><div><div class="panel-title">선택 층 좌석 & 캐릭터 현황</div><div class="panel-sub" id="floorSummary">1층 · 마주보는 6인석</div></div><span class="status running" id="floorLiveBadge">6 SEATS</span></div><div class="team-stat"><div class="team-stat-box"><strong id="floorActiveCount">06 / 06</strong><small>착석 인원 / 층 좌석 수</small></div><div class="team-stat-box"><strong id="floorReviewCount">02</strong><small>독립 검수(REVIEWER)</small></div></div><div class="floor-meta">
+  <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
+    <span class="floor-meta-label">이 층 좌석(자리) 수 설정</span>
+    <div style="display:inline-flex;align-items:center;gap:4px">
+      <button type="button" class="btn small" id="btnRemoveFloorSeat" style="padding:3px 7px;font-size:10px" title="이 층 좌석 1개 제거 (남는 인원은 다른 층 빈자리로 이동)">－ 좌석 제거</button>
+      <strong id="floorSeatCapacityLabel" style="font-size:13px;margin:0 4px;color:#0f6848">6석</strong>
+      <button type="button" class="btn small" id="btnAddFloorSeat" style="padding:3px 7px;font-size:10px" title="이 층에 좌석 1개 추가">＋ 좌석 추가</button>
+    </div>
+  </div>
+  <div style="display:flex;gap:5px;width:100%;margin-top:8px">
+    <select id="summonCharSelect" class="studio-ai-select" style="flex:1;height:26px;font-size:9.5px" aria-label="소환할 캐릭터 선택"></select>
+    <button type="button" class="btn small primary" id="btnSummonChar" style="padding:4px 8px;font-size:9.5px">＋ 이 층에 배치</button>
+  </div>
+  <small id="floorActionFeedback">기본 6자리(앞면 3 + 뒷면 3 마주보기)로 운영되며, 자리가 부족한 캐릭터는 자동으로 다른 층의 빈자리로 배치됩니다.</small>
+</div><div class="team-list" id="teamList" style="max-height:240px;overflow-y:auto"></div></section>
+<section class="side-panel"><div class="panel-head"><div><div class="panel-title">선택한 AI 직원 · 역할 정보</div><div class="panel-sub">드래그 앤 드롭 또는 드롭다운으로 좌석을 변경하세요.</div></div></div><div class="selected-card" id="selectedAgent"></div></section><div class="scene-notice"><strong>🏢 마주보는 6석 & 자동 빈자리 배치</strong>엘리베이터 계단이 제거되어 전 층 바닥이 평탄하게 이어집니다. 각 층은 앞면(뒷줄)과 뒷면(앞줄)이 마주보는 6석 구조이며, 층마다 좌석을 추가/제거할 수 있습니다.</div></aside></div></div>
 </main></div>
-<script type="module" src="office.js?v=chibi2"></script>
+<script src="avatar/scripts/pixel-character.js?v=1007"></script>
+<script src="avatar/scripts/pixel-chibi-base.js?v=1007"></script>
+<script src="avatar/scripts/pixel-chibi-parts.js?v=1007"></script>
+<script src="avatar/scripts/avatar-loader.js?v=1007"></script>
+<script src="avatar/scripts/default-character.js?v=1007"></script>
+<script src="app.js?v=triad17"></script>
+<script src="office.js?v=triad17"></script>
 </body></html>

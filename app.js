@@ -394,10 +394,41 @@
       }
     },
 
-    // 레이어 순서대로 SVG 합성 렌더링 (maples.im 스타일 스탠스 및 레이어 숨김 지원)
+    // 레이어 순서대로 SVG 합성 렌더링 (maples.im 스타일 스탠스, 뒷모습 view='back', 레이어 숨김 지원)
     render(agent, options = {}) {
-      const { hiddenLayers = {} } = options;
+      const { hiddenLayers = {}, view = 'front' } = options;
       const { skin = '#f8cfbe', hairColor = '#2d2926', eyeColor = '#1e293b', parts = {} } = agent;
+
+      // [0] 뒷모습(Back View) 렌더링: 마주보는 앞줄 좌석 착석 시 후면 헤어 + 후면 의상 표시
+      if (view === 'back') {
+        const pParts = typeof window !== 'undefined' ? window.PixelChibiParts : null;
+        const pBase = !hiddenLayers.base && window.AgentChibiBase ? window.AgentChibiBase.render(skin, { raw: true }) : '';
+        const pBottom = (!hiddenLayers.bottom && pParts) ? pParts.render('bottom', parts.bottom) : '';
+        const pOutfit = (!hiddenLayers.outfit && pParts) ? pParts.render('outfit', parts.outfit) : '';
+        const pHair = (!hiddenLayers.hair && pParts) ? pParts.render('hair', parts.hair, hairColor) : '';
+
+        return `
+          <svg viewBox="0 0 64 78" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="pixel-chibi-svg is-back-view">
+            <ellipse cx="32" cy="73" rx="16" ry="3" fill="rgba(24,37,54,0.14)"/>
+            <g class="layer-pixel-chibi-composite" transform="translate(10.5, 4.5)" shape-rendering="crispEdges">
+              ${pBase}
+              ${pBottom}
+              ${pOutfit}
+              <!-- 등판 칼라 & 재킷 뒷면 솔기 디테일 (앞면 넥타이/셔츠 가림) -->
+              <rect x="13" y="37" width="17" height="3" fill="#1e293b"/>
+              <rect x="14" y="40" width="15" height="12" fill="${hairColor === '#1e1e24' ? '#27384e' : '#334155'}"/>
+              <rect x="21" y="40" width="1" height="12" fill="rgba(0,0,0,0.28)"/>
+              ${pHair}
+              <!-- 뒤통수 전체를 덮는 풍성한 픽셀 후면 헤어 캡 (얼굴/눈 완전 가림) -->
+              <rect x="7" y="6" width="29" height="23" fill="${hairColor}"/>
+              <rect x="5" y="10" width="33" height="18" fill="${hairColor}"/>
+              <rect x="8" y="28" width="27" height="5" fill="${hairColor}"/>
+              <rect x="9" y="8" width="25" height="3" fill="rgba(255,255,255,0.16)"/>
+              <rect x="7" y="26" width="29" height="4" fill="rgba(0,0,0,0.22)"/>
+            </g>
+          </svg>
+        `.trim();
+      }
 
       // [1] 정밀 픽셀 치비 바디(BASE_PIXEL): 43x68 정밀 픽셀 파츠 시스템(PixelChibiParts)으로 100% 도트 아트 합성
       if (parts.base === 'BASE_PIXEL' && typeof window !== 'undefined' && window.PixelChibiParts) {
@@ -494,30 +525,89 @@
   };
 
   // ==========================================================================
-  // [2] 20종 에이전트 프리셋 (1F~10F 부서 매핑 & 기본 베이스 포함)
+  // [2] 에이전트 프리셋 (초기 활성 캐릭터는 5명으로 설정 · 필요 시 최대 20종까지 추가 가능)
   // ==========================================================================
-  const modularAgents = [
-    { id: '01', name: '전략기획 AI', floor: '1F', dept: '기획&전략팀', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H00', face: 'F07', outfit: 'O01', bottom: 'B01', acc: 'A03' } },
-    { id: '02', name: '데이터전략 AI', floor: '1F', dept: '기획&전략팀', gender: '남성', skin: '#ebb99a', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_M', hair: 'H04', face: 'F02', outfit: 'O01', bottom: 'B01', acc: 'A01' } },
-    { id: '03', name: '인사채용 AI', floor: '2F', dept: '인사&경영지원', gender: '남성', skin: '#fde2d2', hairColor: '#7c4a2d', eyeColor: '#1e293b', parts: { base: 'BASE_M', hair: 'H02', face: 'F04', outfit: 'O03', bottom: 'B01', acc: 'A03' } },
-    { id: '04', name: '조직문화 AI', floor: '2F', dept: '인사&경영지원', gender: '여성', skin: '#fff0e6', hairColor: '#f472b6', eyeColor: '#059669', parts: { base: 'BASE_F', hair: 'H05', face: 'F01', outfit: 'O03', bottom: 'B03', acc: 'A06' } },
-    { id: '05', name: '풀스택개발 AI', floor: '3F', dept: '개발&엔지니어링', gender: '여성', skin: '#f8cfbe', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_F', hair: 'H03', face: 'F02', outfit: 'O02', bottom: 'B02', acc: 'A04' } },
-    { id: '06', name: '인프라보안 AI', floor: '3F', dept: '개발&엔지니어링', gender: '남성', skin: '#e3e8ee', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_M', hair: 'H02', face: 'F06', outfit: 'O02', bottom: 'B02', acc: 'A01' } },
-    { id: '07', name: '브랜드디자인 AI', floor: '4F', dept: '디자인&콘텐츠', gender: '남성', skin: '#fde2d2', hairColor: '#d4a359', eyeColor: '#059669', parts: { base: 'BASE_M', hair: 'H07', face: 'F03', outfit: 'O05', bottom: 'B02', acc: 'A07' } },
-    { id: '08', name: 'UI/UX모션 AI', floor: '4F', dept: '디자인&콘텐츠', gender: '여성', skin: '#fff0e6', hairColor: '#d4a359', eyeColor: '#9333ea', parts: { base: 'BASE_F', hair: 'H01', face: 'F01', outfit: 'O05', bottom: 'B03', acc: 'A03' } },
-    { id: '09', name: '퍼포먼스마케팅 AI', floor: '5F', dept: '마케팅&홍보', gender: '여성', skin: '#f8cfbe', hairColor: '#7c4a2d', eyeColor: '#dc2626', parts: { base: 'BASE_F', hair: 'H03', face: 'F03', outfit: 'O03', bottom: 'B01', acc: 'A03' } },
-    { id: '10', name: '미디어PR AI', floor: '5F', dept: '마케팅&홍보', gender: '남성', skin: '#ebb99a', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_M', hair: 'H04', face: 'F01', outfit: 'O07', bottom: 'B02', acc: 'A06' } },
-    { id: '11', name: 'B2B세일즈 AI', floor: '6F', dept: '영업&파트너십', gender: '남성', skin: '#cf9571', hairColor: '#1e1e24', eyeColor: '#d97706', parts: { base: 'BASE_M', hair: 'H04', face: 'F03', outfit: 'O01', bottom: 'B01', acc: 'A05' } },
-    { id: '12', name: '파트너십매니저 AI', floor: '6F', dept: '영업&파트너십', gender: '여성', skin: '#cf9571', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_F', hair: 'H01', face: 'F01', outfit: 'O01', bottom: 'B03', acc: 'A03' } },
-    { id: '13', name: '재무회계 AI', floor: '7F', dept: '재무&회계', gender: '여성', skin: '#fde2d2', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_F', hair: 'H05', face: 'F02', outfit: 'O01', bottom: 'B03', acc: 'A01' } },
-    { id: '14', name: '리스크감사 AI', floor: '7F', dept: '재무&회계', gender: '남성', skin: '#e3e8ee', hairColor: '#94a3b8', eyeColor: '#1e293b', parts: { base: 'BASE_M', hair: 'H06', face: 'F06', outfit: 'O01', bottom: 'B01', acc: 'A01' } },
-    { id: '15', name: '고객지원CS AI', floor: '8F', dept: '고객지원 CS', gender: '남성', skin: '#fde2d2', hairColor: '#4a3525', eyeColor: '#1e293b', parts: { base: 'BASE_M', hair: 'H02', face: 'F04', outfit: 'O03', bottom: 'B01', acc: 'A02' } },
-    { id: '16', name: 'VOC품질관리 AI', floor: '8F', dept: '고객지원 CS', gender: '여성', skin: '#fff0e6', hairColor: '#7c4a2d', eyeColor: '#059669', parts: { base: 'BASE_F', hair: 'H05', face: 'F01', outfit: 'O03', bottom: 'B03', acc: 'A02' } },
-    { id: '17', name: '선행연구R&D AI', floor: '9F', dept: '연구&R&D', gender: '여성', skin: '#f8cfbe', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_F', hair: 'H01', face: 'F02', outfit: 'O04', bottom: 'B01', acc: 'A03' } },
-    { id: '18', name: 'AI모델아키텍트', floor: '9F', dept: '연구&R&D', gender: '남성', skin: '#ebb99a', hairColor: '#94a3b8', eyeColor: '#1e293b', parts: { base: 'BASE_M', hair: 'H08', face: 'F04', outfit: 'O04', bottom: 'B01', acc: 'A04' } },
-    { id: '19', name: '글로벌비즈 AI', floor: '10F', dept: '글로벌 사업', gender: '남성', skin: '#cf9571', hairColor: '#1e1e24', eyeColor: '#d97706', parts: { base: 'BASE_M', hair: 'H04', face: 'F03', outfit: 'O06', bottom: 'B04', acc: 'A05' } },
-    { id: '20', name: '해외현지화 AI', floor: '10F', dept: '글로벌 사업', gender: '여성', skin: '#cf9571', hairColor: '#3b82f6', eyeColor: '#1e293b', parts: { base: 'BASE_F', hair: 'H03', face: 'F01', outfit: 'O06', bottom: 'B02', acc: 'A04' } }
+  const ALL_AGENT_PRESETS = [
+    { id: '01', name: 'HEAD Director AI', triadRole: 'HEAD', floor: '1F', dept: 'HEAD · 총괄 지휘 (Claude Code)', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F07', outfit: 'O01', bottom: 'B01', acc: 'A03' } },
+    { id: '02', name: 'ORDER Planner AI', triadRole: 'HEAD', floor: '1F', dept: 'HEAD · ORDER 명세 수립', gender: '픽셀 치비', skin: '#ebb99a', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H04', face: 'F02', outfit: 'O01', bottom: 'B01', acc: 'A01' } },
+    { id: '03', name: 'Builder Dev AI', triadRole: 'BUILDER', floor: '1F', dept: 'BUILDER · 구현 (Antigravity)', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H03', face: 'F02', outfit: 'O02', bottom: 'B02', acc: 'A04' } },
+    { id: '04', name: 'Reviewer Audit AI', triadRole: 'REVIEWER', floor: '1F', dept: 'REVIEWER · 독립 검수 (Codex)', gender: '픽셀 치비', skin: '#fde2d2', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H05', face: 'F02', outfit: 'O01', bottom: 'B03', acc: 'A01' } },
+    { id: '05', name: 'Scope Guard AI', triadRole: 'REVIEWER', floor: '1F', dept: 'DIRECTOR · 경로/Diff 상한 검증', gender: '픽셀 치비', skin: '#e3e8ee', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F06', outfit: 'O02', bottom: 'B02', acc: 'A01' } },
+    { id: '06', name: 'HEAD Proxy Autopilot', triadRole: 'HEAD', floor: '2F', dept: 'HEAD · 자율 프록시 제어', gender: '픽셀 치비', skin: '#fde2d2', hairColor: '#7c4a2d', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F04', outfit: 'O03', bottom: 'B01', acc: 'A03' } },
+    { id: '07', name: 'UI/UX Builder AI', triadRole: 'BUILDER', floor: '2F', dept: 'BUILDER · 프런트엔드 구현', gender: '픽셀 치비', skin: '#fde2d2', hairColor: '#d4a359', eyeColor: '#059669', parts: { base: 'BASE_PIXEL', hair: 'H07', face: 'F03', outfit: 'O05', bottom: 'B02', acc: 'A07' } },
+    { id: '08', name: '3D Scene Builder AI', triadRole: 'BUILDER', floor: '2F', dept: 'BUILDER · Three.js 3D 구현', gender: '픽셀 치비', skin: '#fff0e6', hairColor: '#d4a359', eyeColor: '#9333ea', parts: { base: 'BASE_PIXEL', hair: 'H01', face: 'F01', outfit: 'O05', bottom: 'B03', acc: 'A03' } },
+    { id: '09', name: 'Worktree Sandbox AI', triadRole: 'BUILDER', floor: '2F', dept: 'BUILDER · 격리 Git Worktree', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#7c4a2d', eyeColor: '#dc2626', parts: { base: 'BASE_PIXEL', hair: 'H03', face: 'F03', outfit: 'O03', bottom: 'B01', acc: 'A03' } },
+    { id: '10', name: 'JSON Proposal AI', triadRole: 'BUILDER', floor: '2F', dept: 'BUILDER · 전체 파일 JSON 제안', gender: '픽셀 치비', skin: '#ebb99a', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H04', face: 'F01', outfit: 'O07', bottom: 'B02', acc: 'A06' } },
+    { id: '11', name: 'Solomon Bridge AI', triadRole: 'HEAD', floor: '3F', dept: 'HEAD · 외부 브리지 연동', gender: '픽셀 치비', skin: '#cf9571', hairColor: '#1e1e24', eyeColor: '#d97706', parts: { base: 'BASE_PIXEL', hair: 'H04', face: 'F03', outfit: 'O01', bottom: 'B01', acc: 'A05' } },
+    { id: '12', name: 'Provider Failover AI', triadRole: 'HEAD', floor: '3F', dept: 'HEAD · 다중 CLI 장애 조치', gender: '픽셀 치비', skin: '#cf9571', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H01', face: 'F01', outfit: 'O01', bottom: 'B03', acc: 'A03' } },
+    { id: '13', name: 'Mission Coordinator', triadRole: 'HEAD', floor: '3F', dept: 'HEAD · 마일스톤 관리', gender: '픽셀 치비', skin: '#fff0e6', hairColor: '#f472b6', eyeColor: '#059669', parts: { base: 'BASE_PIXEL', hair: 'H05', face: 'F01', outfit: 'O03', bottom: 'B03', acc: 'A06' } },
+    { id: '14', name: 'Fail-Closed Gate AI', triadRole: 'REVIEWER', floor: '3F', dept: 'REVIEWER · P0/P1 결함 감사', gender: '픽셀 치비', skin: '#e3e8ee', hairColor: '#94a3b8', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H06', face: 'F06', outfit: 'O01', bottom: 'B01', acc: 'A01' } },
+    { id: '15', name: 'Test Verifier AI', triadRole: 'REVIEWER', floor: '3F', dept: 'REVIEWER · pytest 격리 검증', gender: '픽셀 치비', skin: '#fde2d2', hairColor: '#4a3525', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F04', outfit: 'O03', bottom: 'B01', acc: 'A02' } },
+    { id: '16', name: 'Provenance Logger AI', triadRole: 'REVIEWER', floor: '4F', dept: 'REVIEWER · 실행 증거 기록', gender: '픽셀 치비', skin: '#fff0e6', hairColor: '#7c4a2d', eyeColor: '#059669', parts: { base: 'BASE_PIXEL', hair: 'H05', face: 'F01', outfit: 'O03', bottom: 'B03', acc: 'A02' } },
+    { id: '17', name: 'Triad Research AI', triadRole: 'REVIEWER', floor: '4F', dept: 'TRIAD · 3-CLI 독립 연구/비판', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H01', face: 'F02', outfit: 'O04', bottom: 'B01', acc: 'A03' } },
+    { id: '18', name: 'Hypothesis Synth AI', triadRole: 'HEAD', floor: '4F', dept: 'TRIAD · 종합 가설 설계', gender: '픽셀 치비', skin: '#ebb99a', hairColor: '#94a3b8', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H08', face: 'F04', outfit: 'O04', bottom: 'B01', acc: 'A04' } },
+    { id: '19', name: 'Delivery Merger AI', triadRole: 'BUILDER', floor: '4F', dept: 'BUILDER · 무충돌 자동 반영', gender: '픽셀 치비', skin: '#cf9571', hairColor: '#1e1e24', eyeColor: '#d97706', parts: { base: 'BASE_PIXEL', hair: 'H04', face: 'F03', outfit: 'O06', bottom: 'B04', acc: 'A05' } },
+    { id: '20', name: 'Sanitized Env Guard', triadRole: 'REVIEWER', floor: '4F', dept: 'DIRECTOR · API 키 차단 감시', gender: '픽셀 치비', skin: '#cf9571', hairColor: '#3b82f6', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H03', face: 'F01', outfit: 'O06', bottom: 'B02', acc: 'A04' } }
   ];
+
+  const ACTIVE_AGENT_COUNT_KEY = 'nexus-active-agent-count-v1';
+  const INITIAL_AGENT_COUNT = 5;
+  let activeAgentCount = INITIAL_AGENT_COUNT;
+  try {
+    const savedCnt = parseInt(localStorage.getItem(ACTIVE_AGENT_COUNT_KEY) || '', 10);
+    if (!isNaN(savedCnt) && savedCnt >= 1 && savedCnt <= ALL_AGENT_PRESETS.length) {
+      activeAgentCount = savedCnt;
+    }
+  } catch (_) {}
+
+  const modularAgents = ALL_AGENT_PRESETS.slice(0, activeAgentCount);
+  window.CharacterEngine = CharacterEngine;
+  window.ALL_AGENT_PRESETS = ALL_AGENT_PRESETS;
+  window.modularAgents = modularAgents;
+
+  // Initialize default AI CLI & configuration fields on all 20 modularAgents
+  const CHAR_AI_STORAGE_KEY = 'nexus-character-ai-configs-v1';
+  const CLI_BADGE_LABELS = {
+    claude: 'Claude Code',
+    antigravity: 'Antigravity',
+    openai: 'OpenAI Codex'
+  };
+  let savedCharAiConfigs = {};
+  try {
+    savedCharAiConfigs = JSON.parse(localStorage.getItem(CHAR_AI_STORAGE_KEY) || '{}') || {};
+  } catch (_) {}
+
+  ALL_AGENT_PRESETS.forEach(a => {
+    const defCli = a.triadRole === 'HEAD' ? 'claude' : a.triadRole === 'BUILDER' ? 'antigravity' : 'openai';
+    const defSandbox = a.triadRole === 'BUILDER' ? 'proposal' : 'read-only';
+    const defTimeout = a.triadRole === 'BUILDER' ? '600' : '300';
+    const saved = savedCharAiConfigs[a.id] || {};
+    a.name = saved.name || a.name;
+    a.floor = saved.floor || a.floor;
+    a.triadRole = saved.triadRole || a.triadRole || 'HEAD';
+    a.cliProvider = saved.cliProvider || defCli;
+    a.sandboxMode = saved.sandboxMode || defSandbox;
+    a.timeoutSec = String(saved.timeoutSec || defTimeout);
+    a.systemPrompt = saved.systemPrompt || `당신은 ${a.floor} 소속 '${a.name}' (${a.triadRole} 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.`;
+  });
+
+  function persistCharacterAiConfig(agent) {
+    if (!agent) return;
+    savedCharAiConfigs[agent.id] = {
+      id: agent.id,
+      name: agent.name,
+      floor: agent.floor,
+      dept: agent.dept,
+      triadRole: agent.triadRole,
+      cliProvider: agent.cliProvider,
+      sandboxMode: agent.sandboxMode,
+      timeoutSec: agent.timeoutSec,
+      systemPrompt: agent.systemPrompt
+    };
+    try {
+      localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
+    } catch (_) {}
+  }
 
   function formatPartCode(parts) {
     return `${parts.base}/${parts.hair}/${parts.face}/${parts.outfit}/${parts.bottom}/${parts.acc}`;
@@ -547,6 +637,21 @@
     const btnExportPng = document.getElementById('btnExportPng');
     const layerListEl = document.getElementById('equippedLayerList');
 
+    // AI CLI Studio Controls
+    const studioQuickRole = document.getElementById('studioQuickRole');
+    const studioQuickCli = document.getElementById('studioQuickCli');
+    const studioAiNameInput = document.getElementById('studioAiNameInput');
+    const studioAiFloorSelect = document.getElementById('studioAiFloorSelect');
+    const studioAiSandboxSelect = document.getElementById('studioAiSandboxSelect');
+    const studioAiTimeoutSelect = document.getElementById('studioAiTimeoutSelect');
+    const studioAiPromptInput = document.getElementById('studioAiPromptInput');
+    const btnSaveCharAiConfig = document.getElementById('btnSaveCharAiConfig');
+    const btnApplyCharToGlobalRole = document.getElementById('btnApplyCharToGlobalRole');
+    const studioCharAskForm = document.getElementById('studioCharAskForm');
+    const studioCharAskInput = document.getElementById('studioCharAskInput');
+    const studioCharAskBtn = document.getElementById('studioCharAskBtn');
+    const studioCharAskReply = document.getElementById('studioCharAskReply');
+
     let selectedId = '01';
     let isFlipped = false;
     let currentZoom = 1;
@@ -570,20 +675,29 @@
       const filterVal = floorFilter?.value || 'all';
       gridEl.innerHTML = '';
 
+      const totalBadge = document.getElementById('studioTotalBadge');
+      if (totalBadge) totalBadge.innerHTML = `<span class="character-total-dot"></span> ${String(modularAgents.length).padStart(2, '0')} AGENTS`;
+      const libCount = document.getElementById('studioLibraryCount');
+      if (libCount) libCount.textContent = `${modularAgents.length} AGENTS`;
+      const statReg = document.getElementById('statRegisteredAgents');
+      if (statReg) statReg.textContent = String(modularAgents.length).padStart(2, '0');
+
       modularAgents
-        .filter(a => filterVal === 'all' || a.floor === filterVal)
+        .filter(a => filterVal === 'all' || a.floor === filterVal || a.triadRole === filterVal)
         .forEach(agent => {
           const card = document.createElement('div');
           card.className = `char-card${agent.id === selectedId ? ' active' : ''}`;
           card.dataset.id = agent.id;
+          const cliKey = agent.cliProvider || 'claude';
+          const cliLabel = CLI_BADGE_LABELS[cliKey] || cliKey;
           card.innerHTML = `
             <div class="char-card-top">
-              <span>#${agent.id}</span>
+              <span>#${agent.id} · ${agent.triadRole || 'AGENT'}</span>
               <span class="char-floor-tag">${agent.floor}</span>
             </div>
             <div class="char-svg-wrap">${CharacterEngine.render(agent)}</div>
             <div class="char-card-name">${agent.name}</div>
-            <div class="char-card-dept">${agent.dept}</div>
+            <span class="char-cli-badge ${cliKey}">${cliLabel}</span>
             <div class="char-card-code">${formatPartCode(agent.parts)}</div>
           `;
           card.addEventListener('click', () => {
@@ -595,6 +709,21 @@
         });
     }
 
+    document.getElementById('btnAddStudioCharacter')?.addEventListener('click', () => {
+      if (modularAgents.length >= ALL_AGENT_PRESETS.length) {
+        alert(`최대 ${ALL_AGENT_PRESETS.length}명까지 직원을 추가할 수 있습니다.`);
+        return;
+      }
+      const nextAgent = ALL_AGENT_PRESETS[modularAgents.length];
+      modularAgents.push(nextAgent);
+      selectedId = nextAgent.id;
+      try {
+        localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length));
+      } catch (_) {}
+      renderDirectory();
+      updateCustomizer();
+    });
+
     function updateCustomizer() {
       const agent = modularAgents.find(a => a.id === selectedId) || modularAgents[0];
       if (!agent || !stageEl) return;
@@ -604,11 +733,25 @@
       stageEl.className = `customizer-stage stance-${currentStance}${isFlipped ? ' flip-x' : ''}`;
       stageEl.style.transform = `scale(${currentZoom})`;
 
+      const cliLabel = CLI_BADGE_LABELS[agent.cliProvider] || agent.cliProvider;
       if (nameEl) nameEl.textContent = `Agent #${agent.id} · ${agent.name}`;
-      const genderLabel = agent.parts.base === 'BASE_PIXEL' ? '픽셀 베이스' : (agent.parts.base === 'BASE_M' ? '남성' : '여성');
-      if (deptEl) deptEl.textContent = `${agent.floor} ${agent.dept} · ${genderLabel}`;
-      if (pillEl) pillEl.textContent = formatPartCode(agent.parts);
+      if (deptEl) deptEl.textContent = `${agent.floor} · ${agent.triadRole} (${cliLabel})`;
+      if (pillEl) pillEl.textContent = `${agent.triadRole}/${cliLabel} · ${formatPartCode(agent.parts)}`;
       if (badgeEl) badgeEl.textContent = `#${agent.id}`;
+
+      // 1-2. AI CLI & 설정 탭 동기화
+      if (studioQuickRole) studioQuickRole.value = agent.triadRole || 'HEAD';
+      if (studioQuickCli) studioQuickCli.value = agent.cliProvider || 'claude';
+      if (studioAiNameInput && document.activeElement !== studioAiNameInput) studioAiNameInput.value = agent.name || '';
+      if (studioAiFloorSelect) studioAiFloorSelect.value = agent.floor || '1F';
+      if (studioAiSandboxSelect) studioAiSandboxSelect.value = agent.sandboxMode || 'read-only';
+      if (studioAiTimeoutSelect) studioAiTimeoutSelect.value = String(agent.timeoutSec || '300');
+      if (studioAiPromptInput && document.activeElement !== studioAiPromptInput) studioAiPromptInput.value = agent.systemPrompt || '';
+      if (studioCharAskInput) studioCharAskInput.placeholder = `${agent.name} (${cliLabel})에게 시험 질문하기...`;
+
+      document.querySelectorAll('#studioCliCardGroup .studio-cli-card').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.cliVal === agent.cliProvider);
+      });
 
       // 2. 파츠 선택 카드 활성화 상태 동기화
       document.querySelectorAll('.maples-item-card').forEach(card => {
@@ -633,17 +776,25 @@
       // 4. 장착 레이어 스택 렌더링 (maples.im Signature Layer Stack)
       renderLayerStack(agent);
 
-      // 5. maples.im 호환 JSON 프리셋 코드 생성
+      // 5. maples.im + AI CLI 통합 JSON 프리셋 코드 생성
       if (codeOutputEl) {
         const presetObj = {
-          app: "maples-virtual-office",
-          version: "2.0",
+          app: "maples-virtual-office-triad",
+          version: "3.0",
           character: {
             id: `AGENT_${agent.id}`,
             name: agent.name,
             floor: agent.floor,
             dept: agent.dept,
             gender: agent.parts.base === 'BASE_PIXEL' ? '픽셀 베이스' : (agent.parts.base === 'BASE_M' ? '남성' : '여성'),
+            aiConfig: {
+              triadRole: agent.triadRole,
+              cliProvider: agent.cliProvider,
+              cliLabel: cliLabel,
+              sandboxMode: agent.sandboxMode,
+              timeoutSec: Number(agent.timeoutSec || 300),
+              systemPrompt: agent.systemPrompt
+            },
             skin: agent.skin,
             hairColor: agent.hairColor,
             eyeColor: agent.eyeColor,
@@ -655,6 +806,116 @@
         codeOutputEl.textContent = JSON.stringify(presetObj, null, 2);
       }
     }
+
+    // [이벤트] 캐릭터 스튜디오 AI CLI & 역할 설정 바인딩
+    function updateSelectedAgentAiField(updater) {
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (!agent) return;
+      updater(agent);
+      agent.dept = `${agent.triadRole} · ${CLI_BADGE_LABELS[agent.cliProvider] || agent.cliProvider}`;
+      persistCharacterAiConfig(agent);
+      renderDirectory();
+      updateCustomizer();
+    }
+
+    studioQuickRole?.addEventListener('change', (e) => {
+      updateSelectedAgentAiField(a => { a.triadRole = e.target.value; });
+    });
+    studioQuickCli?.addEventListener('change', (e) => {
+      updateSelectedAgentAiField(a => { a.cliProvider = e.target.value; });
+    });
+    document.querySelectorAll('#studioCliCardGroup .studio-cli-card').forEach(btn => {
+      btn.addEventListener('click', () => {
+        updateSelectedAgentAiField(a => { a.cliProvider = btn.dataset.cliVal; });
+      });
+    });
+    studioAiNameInput?.addEventListener('input', (e) => {
+      updateSelectedAgentAiField(a => { a.name = e.target.value.trim() || a.name; });
+    });
+    studioAiFloorSelect?.addEventListener('change', (e) => {
+      updateSelectedAgentAiField(a => { a.floor = e.target.value; });
+    });
+    studioAiSandboxSelect?.addEventListener('change', (e) => {
+      updateSelectedAgentAiField(a => { a.sandboxMode = e.target.value; });
+    });
+    studioAiTimeoutSelect?.addEventListener('change', (e) => {
+      updateSelectedAgentAiField(a => { a.timeoutSec = e.target.value; });
+    });
+    studioAiPromptInput?.addEventListener('input', (e) => {
+      updateSelectedAgentAiField(a => { a.systemPrompt = e.target.value; });
+    });
+
+    btnSaveCharAiConfig?.addEventListener('click', async () => {
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (!agent) return;
+      persistCharacterAiConfig(agent);
+      const orig = btnSaveCharAiConfig.textContent;
+      btnSaveCharAiConfig.textContent = '✓ 저장 완료 (오피스 연동됨)';
+      try {
+        await fetch('/ops/character-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ configs: savedCharAiConfigs })
+        });
+      } catch (_) {}
+      setTimeout(() => { btnSaveCharAiConfig.textContent = orig; }, 1500);
+    });
+
+    btnApplyCharToGlobalRole?.addEventListener('click', () => {
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (!agent) return;
+      const roleKey = (agent.triadRole || 'HEAD').toLowerCase();
+      if (!['head', 'builder', 'reviewer'].includes(roleKey)) {
+        alert('전역 오케스트레이터 역할 반영은 HEAD, BUILDER, REVIEWER 역할일 때 적용됩니다.');
+        return;
+      }
+      const sel = document.querySelector(`[data-role-select="${roleKey}"]`);
+      if (sel) {
+        sel.value = agent.cliProvider;
+        sel.dispatchEvent(new Event('change'));
+      }
+      const orig = btnApplyCharToGlobalRole.textContent;
+      btnApplyCharToGlobalRole.textContent = `✓ 전역 ${agent.triadRole}=${CLI_BADGE_LABELS[agent.cliProvider]} 반영됨`;
+      setTimeout(() => { btnApplyCharToGlobalRole.textContent = orig; }, 1600);
+    });
+
+    studioCharAskForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const agent = modularAgents.find(a => a.id === selectedId);
+      const q = (studioCharAskInput?.value || '').trim();
+      if (!agent || !q) return;
+      studioCharAskInput.value = '';
+      if (studioCharAskBtn) { studioCharAskBtn.disabled = true; studioCharAskBtn.textContent = '응답 중...'; }
+      if (studioCharAskReply) {
+        studioCharAskReply.style.display = 'block';
+        studioCharAskReply.textContent = `💭 [${agent.name} · ${CLI_BADGE_LABELS[agent.cliProvider]}] 질문에 대한 답변을 생성하고 있습니다...`;
+      }
+      try {
+        const res = await fetch('/ops/cli-ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cli: (agent.triadRole || 'head').toLowerCase(),
+            agent_name: agent.name,
+            custom_cli: agent.cliProvider,
+            system_prompt: agent.systemPrompt,
+            question: q
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (studioCharAskReply) {
+            studioCharAskReply.textContent = `💬 [${data.label || agent.name}] ${data.answer || ''} (${data.seconds || 1}초)`;
+          }
+        }
+      } catch (_) {
+        if (studioCharAskReply) {
+          studioCharAskReply.textContent = `💬 [${agent.name} · ${CLI_BADGE_LABELS[agent.cliProvider]}] '${q}' 질문을 확인했습니다!`;
+        }
+      } finally {
+        if (studioCharAskBtn) { studioCharAskBtn.disabled = false; studioCharAskBtn.textContent = '💬 시험 질문 ↗'; }
+      }
+    });
 
     function renderLayerStack(agent) {
       if (!layerListEl) return;
@@ -983,126 +1244,103 @@
     updateF07Badge();
 
     // ========================================================================
-    // [자동 파츠 디스커버리 & 실시간 감시 시스템]
-    // avatar/data/parts/ 하위 폴더에 신규 JSON 파일(예: F10.json, F11.json)이 생성되면
-    // HTML 수정 없이도 자동으로 UI 버튼을 생성하고 렌더러에 즉시 등록합니다.
+    // [매니페스트 기반 파츠 디스커버리 (404 없는 클린 로더)]
+    // avatar/data/parts/manifest.json에 등록된 실제 존재 파일만 로드합니다.
     // ========================================================================
     const scannedCache = new Map();
 
-    async function probeCategoryParts(category, prefix, maxProbeOffset = 10) {
+    async function loadPartFromManifest(category, id) {
       const grid = document.querySelector(`.maples-item-grid[data-part="${category}"]`);
       if (!grid) return;
+      const prefix = id.slice(0, 1);
+      const num = parseInt(id.slice(1), 10);
+      const url = `avatar/data/parts/${category}/${id}.json`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const text = await res.text();
+        if (text === scannedCache.get(id)) return;
+        scannedCache.set(id, text);
 
-      const existingCards = [...grid.querySelectorAll('.maples-item-card')];
-      let maxNum = 0;
-      existingCards.forEach(c => {
-        const val = c.dataset.val || '';
-        if (val.startsWith(prefix)) {
-          const num = parseInt(val.slice(prefix.length), 10);
-          if (!isNaN(num) && num > maxNum) maxNum = num;
+        let data;
+        try { data = JSON.parse(text); } catch (e) { return; }
+
+        if (window.PixelChibiParts?.registerPart) {
+          window.PixelChibiParts.registerPart(category, id, data);
         }
-      });
 
-      const targetMax = Math.max(maxNum + maxProbeOffset, 15);
-      const probePromises = [];
+        let btn = grid.querySelector(`button[data-val="${id}"]`);
+        const title = data.meta?.title || data.meta?.name || `${id} 신규 파츠`;
+        const pixelsCount = data.meta?.totalPixels || (Array.isArray(data.pixels) ? data.pixels.length : '');
+        const pxLabel = pixelsCount ? ` (${pixelsCount}px)` : '';
 
-      for (let i = 0; i <= targetMax; i++) {
-        const id = prefix + String(i).padStart(2, '0');
-        probePromises.push((async () => {
-          const url = `avatar/data/parts/${category}/${id}.json?_t=${Date.now()}`;
-          try {
-            const res = await fetch(url, { cache: 'no-store' });
-            if (!res.ok) return;
-            const text = await res.text();
-            const prevText = scannedCache.get(id);
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'maples-item-card auto-added-part';
+          btn.dataset.val = id;
+          btn.innerHTML = `<span class="item-code">${id}</span><span class="item-title">${title}${pxLabel}</span>`;
+          btn.title = `자동 등록된 신규 에셋: ${title}`;
 
-            if (text !== prevText) {
-              scannedCache.set(id, text);
-              let data;
-              try { data = JSON.parse(text); } catch (e) { return; }
-
-              // 1. PixelChibiParts 엔진에 파츠 등록
-              if (window.PixelChibiParts?.registerPart) {
-                window.PixelChibiParts.registerPart(category, id, data);
-              }
-
-              // 2. DOM에 버튼이 없으면 자동 생성하여 추가!
-              let btn = grid.querySelector(`button[data-val="${id}"]`);
-              const title = data.meta?.title || data.meta?.name || `${id} 신규 파츠`;
-              const pixelsCount = data.meta?.totalPixels || (Array.isArray(data.pixels) ? data.pixels.length : '');
-              const pxLabel = pixelsCount ? ` (${pixelsCount}px)` : '';
-
-              if (!btn) {
-                btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'maples-item-card auto-added-part';
-                btn.dataset.val = id;
-                btn.innerHTML = `<span class="item-code">${id}</span><span class="item-title">${title}${pxLabel}</span>`;
-                btn.title = `자동 등록된 신규 에셋: ${title}`;
-                
-                // 번호 순서에 맞게 삽입
-                const allButtons = [...grid.querySelectorAll('.maples-item-card')];
-                let inserted = false;
-                for (const existing of allButtons) {
-                  const existVal = existing.dataset.val || '';
-                  if (existVal.startsWith(prefix)) {
-                    const existNum = parseInt(existVal.slice(prefix.length), 10);
-                    if (existNum > i) {
-                      grid.insertBefore(btn, existing);
-                      inserted = true;
-                      break;
-                    }
-                  }
-                }
-                if (!inserted) grid.appendChild(btn);
-
-                // 상단 서브헤드 카운트 자동 갱신
-                const subhead = grid.parentElement?.querySelector('.maples-subhead em');
-                if (subhead) {
-                  const total = grid.querySelectorAll('.maples-item-card').length;
-                  const unit = category === 'face' ? 'Faces' : (category === 'hair' ? 'Styles' : 'Items');
-                  subhead.textContent = `${total} ${unit}`;
-                }
-
-                console.log(`[AutoDiscovery] 신규 파츠 ${id} (${title}) 자동 UI 추가 완료!`);
-              } else {
-                const titleEl = btn.querySelector('.item-title');
-                if (titleEl && !titleEl.textContent.includes('px') && pixelsCount) {
-                  titleEl.textContent = `${title}${pxLabel}`;
-                }
-              }
-
-              // 현재 활성화된 에이전트가 이 파츠를 장착 중이면 실시간 리렌더링
-              const activeAgent = modularAgents.find(a => a.id === selectedId);
-              if (activeAgent?.parts?.[category] === id) {
-                updateF07Badge();
-                renderDirectory();
-                updateCustomizer();
+          const allButtons = [...grid.querySelectorAll('.maples-item-card')];
+          let inserted = false;
+          for (const existing of allButtons) {
+            const existVal = existing.dataset.val || '';
+            if (existVal.startsWith(prefix)) {
+              const existNum = parseInt(existVal.slice(prefix.length), 10);
+              if (!isNaN(num) && existNum > num) {
+                grid.insertBefore(btn, existing);
+                inserted = true;
+                break;
               }
             }
-          } catch (err) {}
-        })());
-      }
-      await Promise.all(probePromises);
+          }
+          if (!inserted) grid.appendChild(btn);
+
+          const subhead = grid.parentElement?.querySelector('.maples-subhead em');
+          if (subhead) {
+            const total = grid.querySelectorAll('.maples-item-card').length;
+            const unit = category === 'face' ? 'Faces' : (category === 'hair' ? 'Styles' : 'Items');
+            subhead.textContent = `${total} ${unit}`;
+          }
+        } else {
+          const titleEl = btn.querySelector('.item-title');
+          if (titleEl && !titleEl.textContent.includes('px') && pixelsCount) {
+            titleEl.textContent = `${title}${pxLabel}`;
+          }
+        }
+
+        const activeAgent = modularAgents.find(a => a.id === selectedId);
+        if (activeAgent?.parts?.[category] === id) {
+          updateF07Badge();
+          renderDirectory();
+          updateCustomizer();
+        }
+      } catch (_) {}
     }
 
     async function runAutoDiscovery() {
-      await Promise.all([
-        probeCategoryParts('face', 'F', 10),
-        probeCategoryParts('hair', 'H', 5),
-        probeCategoryParts('outfit', 'O', 5),
-        probeCategoryParts('bottom', 'B', 5),
-        probeCategoryParts('acc', 'A', 5)
-      ]);
+      if (page !== 'agents') return;
+      try {
+        const res = await fetch('avatar/data/parts/manifest.json', { cache: 'no-store' });
+        if (!res.ok) return;
+        const manifest = await res.json();
+        const tasks = [];
+        for (const [category, ids] of Object.entries(manifest || {})) {
+          if (Array.isArray(ids)) {
+            ids.forEach(id => tasks.push(loadPartFromManifest(category, id)));
+          }
+        }
+        await Promise.all(tasks);
+      } catch (_) {}
     }
 
-    // 초기 실행 및 1.2초마다 백그라운드 자동 탐색
+    // 초기 1회 매니페스트 로드 (무차별 404 폴링 제거)
     runAutoDiscovery();
-    setInterval(runAutoDiscovery, 1200);
   }
 
   // ==========================================================================
-  // [4] agents.html 기존 AI 직원 필터 및 검색 기능 유지
+  // [4] agents.html AI 직원 & Triad 역할 필터 및 검색 기능
   // ==========================================================================
   if (page === 'agents') {
     const chips = [...document.querySelectorAll('.filter-chip')];
@@ -1115,13 +1353,16 @@
       const q = (search?.value || '').trim().toLowerCase();
       let visible = 0;
       rows.forEach(row => {
-        const matchFilter = activeFilter === 'all' || row.dataset.status === activeFilter;
-        const matchSearch = !q || row.dataset.name.toLowerCase().includes(q);
+        const matchFilter =
+          activeFilter === 'all' ||
+          row.dataset.status === activeFilter ||
+          row.dataset.role === activeFilter;
+        const matchSearch = !q || row.dataset.name.toLowerCase().includes(q) || (row.textContent || '').toLowerCase().includes(q);
         const show = matchFilter && matchSearch;
         row.style.display = show ? 'grid' : 'none';
         if (show) visible++;
       });
-      if (count) count.textContent = `${visible}개 표시 중 · 샘플 직원 8명`;
+      if (count) count.textContent = `${visible}개 Triad 핵심 에이전트 표시 중 · 캐릭터 스튜디오 ${modularAgents.length}명 연동`;
       const empty = document.getElementById('noAgents');
       if (!visible && !empty) {
         const node = document.createElement('div');
@@ -1138,12 +1379,796 @@
       filterRows();
     }));
     search?.addEventListener('input', filterRows);
-    document.getElementById('addAgent')?.addEventListener('click', () => {
-      alert('샘플 페이지입니다. 실제 서비스에서는 직원 생성 폼과 백엔드 API를 연결합니다.');
+  }
+
+  // ==========================================================================
+  // [5] AI DEV DIRECTOR × NEXUS Virtual Office (Triad Role & Multi-CLI 연동)
+  // ==========================================================================
+  const CLI_LABELS = {
+    claude: 'Claude Code (claude)',
+    antigravity: 'Google Antigravity (agy)',
+    openai: 'OpenAI Codex (codex)'
+  };
+  const CLI_SHORT = {
+    claude: 'Claude',
+    antigravity: 'Antigravity',
+    openai: 'Codex'
+  };
+  const ROLE_STORAGE_KEY = 'nexus-triad-roles-v1';
+
+  function loadStoredRoles() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(ROLE_STORAGE_KEY) || 'null');
+      if (parsed && parsed.head && parsed.builder && parsed.reviewer) return parsed;
+    } catch (_) {}
+    return { head: 'claude', builder: 'antigravity', reviewer: 'openai' };
+  }
+
+  let currentRoles = loadStoredRoles();
+  let localPipelineTimer = null;
+
+  function applyRolesToDOM(roles) {
+    currentRoles = { ...currentRoles, ...roles };
+    try { localStorage.setItem(ROLE_STORAGE_KEY, JSON.stringify(currentRoles)); } catch (_) {}
+
+    // 1. Update role select dropdowns
+    document.querySelectorAll('[data-role-select]').forEach(sel => {
+      const rKey = sel.dataset.roleSelect;
+      if (currentRoles[rKey]) sel.value = currentRoles[rKey];
+    });
+
+    // 2. Update pipeline labels on index.html
+    const pHead1 = document.getElementById('pipeLabelHead1');
+    const pBuilder = document.getElementById('pipeLabelBuilder');
+    const pReviewer = document.getElementById('pipeLabelReviewer');
+    const pHead2 = document.getElementById('pipeLabelHead2');
+    if (pHead1) pHead1.textContent = `HEAD · ${CLI_SHORT[currentRoles.head] || currentRoles.head}`;
+    if (pBuilder) pBuilder.textContent = `BUILDER · ${CLI_SHORT[currentRoles.builder] || currentRoles.builder}`;
+    if (pReviewer) pReviewer.textContent = `REVIEWER · ${CLI_SHORT[currentRoles.reviewer] || currentRoles.reviewer}`;
+    if (pHead2) pHead2.textContent = `HEAD · ${CLI_SHORT[currentRoles.head] || currentRoles.head}`;
+
+    // 3. Update dashboard table CLI pills
+    const updatePill = (id, cliKey) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.className = `cli-pill ${cliKey}`;
+      el.textContent = CLI_LABELS[cliKey] || cliKey;
+    };
+    updatePill('tableCliHead', currentRoles.head);
+    updatePill('tableCliBuilder', currentRoles.builder);
+    updatePill('tableCliReviewer', currentRoles.reviewer);
+
+    // 4. Update agents.html role badges
+    document.querySelectorAll('[data-role-badge]').forEach(badge => {
+      const rKey = badge.dataset.roleBadge;
+      const cliKey = currentRoles[rKey];
+      if (!cliKey) return;
+      const num = (badge.textContent.match(/#\d+/) || ['#001'])[0];
+      badge.textContent = `${rKey.toUpperCase()} · ${CLI_LABELS[cliKey]} · ${num}`;
+    });
+
+    // 5. Sync modularAgents #01 (HEAD), #05 (BUILDER), #13 (REVIEWER)
+    const mHead = modularAgents.find(a => a.id === '01');
+    const mBuilder = modularAgents.find(a => a.id === '05');
+    const mReviewer = modularAgents.find(a => a.id === '13');
+    if (mHead) mHead.dept = `HEAD · 총괄 지휘 (${CLI_SHORT[currentRoles.head]})`;
+    if (mBuilder) mBuilder.dept = `BUILDER · 구현 (${CLI_SHORT[currentRoles.builder]})`;
+    if (mReviewer) mReviewer.dept = `REVIEWER · 독립 검수 (${CLI_SHORT[currentRoles.reviewer]})`;
+  }
+
+  function updatePipelinePhaseDOM(phase, events = [], usage = null) {
+    const stages = ['PLANNING', 'BUILDING', 'VERIFYING', 'REVIEWING', 'DECIDING'];
+    const atIdx = stages.indexOf(phase);
+
+    document.querySelectorAll('#triadPipelineSteps .triad-step').forEach(stepEl => {
+      const st = stepEl.dataset.stage;
+      const idx = stages.indexOf(st);
+      stepEl.classList.toggle('on', idx === atIdx);
+      stepEl.classList.toggle('done', atIdx > idx && atIdx >= 0);
+    });
+
+    // Highlight active role card
+    const cardHead = document.getElementById('roleCardHead');
+    const cardBuilder = document.getElementById('roleCardBuilder');
+    const cardReviewer = document.getElementById('roleCardReviewer');
+    cardHead?.classList.toggle('active-stage', phase === 'PLANNING' || phase === 'DECIDING');
+    cardBuilder?.classList.toggle('active-stage', phase === 'BUILDING');
+    cardReviewer?.classList.toggle('active-stage', phase === 'REVIEWING');
+
+    const lblHead = document.getElementById('headStatusLabel');
+    const lblBuilder = document.getElementById('builderStatusLabel');
+    const lblReviewer = document.getElementById('reviewerStatusLabel');
+    if (lblHead) lblHead.textContent = (phase === 'PLANNING' || phase === 'DECIDING') ? `실행 중 (${phase})` : '대기 (STANDBY)';
+    if (lblBuilder) lblBuilder.textContent = phase === 'BUILDING' ? '실행 중 (BUILDING)' : '대기 (STANDBY)';
+    if (lblReviewer) lblReviewer.textContent = phase === 'REVIEWING' ? '실행 중 (REVIEWING)' : '대기 (STANDBY)';
+
+    const statPhase = document.getElementById('statActivePhase');
+    const statSub = document.getElementById('statActiveSub');
+    if (statPhase) statPhase.textContent = phase === 'IDLE' ? 'STANDBY' : phase;
+    if (statSub) {
+      statSub.textContent = phase === 'IDLE'
+        ? `HEAD(${CLI_SHORT[currentRoles.head]}) · BUILDER(${CLI_SHORT[currentRoles.builder]}) · REVIEWER(${CLI_SHORT[currentRoles.reviewer]})`
+        : `파이프라인 ${phase} 단계 실행 중`;
+    }
+
+    const topText = document.getElementById('topSystemText');
+    if (topText) {
+      topText.textContent = phase === 'IDLE'
+        ? `TRIAD STANDBY · HEAD=${CLI_SHORT[currentRoles.head]} / BUILDER=${CLI_SHORT[currentRoles.builder]} / REVIEWER=${CLI_SHORT[currentRoles.reviewer]}`
+        : `TRIAD LIVE · ${phase} 실행 중`;
+    }
+
+    // Update dashboard activity feed if events provided
+    if (Array.isArray(events) && events.length > 0) {
+      const dashFeed = document.getElementById('dashboardActivity');
+      if (dashFeed) {
+        dashFeed.innerHTML = events.slice(0, 4).map(ev => {
+          const icoClass = ev.role === 'REVIEWER' ? 'ico-amber' : ev.role === 'BUILDER' ? 'ico-blue' : ev.role === 'DIRECTOR' ? 'ico-purple' : 'ico-mint';
+          const icoChar = ev.to_state === 'PASS' ? '✓' : ev.role === 'REVIEWER' ? '◷' : ev.role === 'BUILDER' ? '↗' : '⌁';
+          return `<div class="activity-item">
+            <div class="event-icon ${icoClass}">${icoChar}</div>
+            <div class="event-main">
+              <div class="event-title">${ev.state_ko || ev.to_state}</div>
+              <div class="event-desc">${ev.role || 'TRIAD'} · ${ev.run_id || 'mission'}</div>
+            </div>
+            <div class="event-time">실시간</div>
+          </div>`;
+        }).join('');
+      }
+      const agentLog = document.getElementById('activity');
+      if (agentLog && page === 'agents') {
+        agentLog.innerHTML = events.slice(0, 5).map(ev => {
+          const icoClass = ev.role === 'REVIEWER' ? 'ico-amber' : ev.role === 'BUILDER' ? 'ico-blue' : ev.role === 'DIRECTOR' ? 'ico-purple' : 'ico-mint';
+          const icoChar = ev.to_state === 'PASS' ? '✓' : ev.role === 'REVIEWER' ? '◷' : ev.role === 'BUILDER' ? '↗' : '⌁';
+          return `<div class="log-row">
+            <div class="log-marker ${icoClass}">${icoChar}</div>
+            <div class="log-copy">
+              <strong>${ev.role || 'TRIAD'} · ${ev.to_state}</strong>
+              <p>${ev.state_ko || ''}</p>
+              <time>실시간 · ${ev.run_id || 'triad'}</time>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    }
+
+    if (usage && usage.total) {
+      const usageSummary = document.getElementById('usageTotalSummary');
+      if (usageSummary) {
+        const tokMan = (usage.total.tokens / 10000).toFixed(1);
+        usageSummary.textContent = `전체 ${usage.total.calls}회 CLI 호출 · ~${tokMan}만 토큰 (구독 세션 · API 비용 $0)`;
+      }
+    }
+  }
+
+  // Bind Role Swap Dropdowns (HEAD / BUILDER / REVIEWER must be 3 distinct CLIs)
+  document.querySelectorAll('[data-role-select]').forEach(sel => {
+    sel.addEventListener('change', async (e) => {
+      const changedRole = e.target.dataset.roleSelect;
+      const newCli = e.target.value;
+      const nextRoles = { ...currentRoles };
+      const conflictRole = Object.keys(nextRoles).find(r => nextRoles[r] === newCli && r !== changedRole);
+      if (conflictRole) {
+        nextRoles[conflictRole] = currentRoles[changedRole];
+      }
+      nextRoles[changedRole] = newCli;
+      applyRolesToDOM(nextRoles);
+
+      try {
+        await fetch('/ops/roles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(nextRoles)
+        });
+        pollOrchestrator();
+      } catch (_) {}
+    });
+  });
+
+  // Fallback client-side pipeline runner when running under static file server
+  function startLocalPipelineFallback(goal) {
+    if (localPipelineTimer) clearInterval(localPipelineTimer);
+    const stages = [
+      { phase: 'PLANNING', role: 'HEAD', msg: `HEAD(${CLI_LABELS[currentRoles.head]})가 '${goal}' 목표의 ORDER를 수립했습니다.` },
+      { phase: 'BUILDING', role: 'BUILDER', msg: `BUILDER(${CLI_LABELS[currentRoles.builder]})가 격리 Worktree에 전체 파일 JSON을 제안했습니다.` },
+      { phase: 'VERIFYING', role: 'DIRECTOR', msg: `DIRECTOR Scope Guard 경로·파일 상한 및 테스트 검증을 통과했습니다.` },
+      { phase: 'REVIEWING', role: 'REVIEWER', msg: `REVIEWER(${CLI_LABELS[currentRoles.reviewer]}) 독립 검수 통과 (verdict: pass).` },
+      { phase: 'DECIDING', role: 'HEAD', msg: `HEAD(${CLI_LABELS[currentRoles.head]}) 최종 PASS 판정 및 산출물 안전 반영 완료.` }
+    ];
+    let stepIdx = 0;
+    const localEvents = [];
+    const stepFn = () => {
+      if (stepIdx < stages.length) {
+        const s = stages[stepIdx];
+        localEvents.unshift({ to_state: s.phase, state_ko: s.msg, role: s.role, run_id: `local-s${stepIdx + 1}` });
+        updatePipelinePhaseDOM(s.phase, localEvents);
+        stepIdx++;
+      } else {
+        clearInterval(localPipelineTimer);
+        localPipelineTimer = null;
+        localEvents.unshift({ to_state: 'PASS', state_ko: `미션 완료: '${goal}' 검증 통과`, role: 'HEAD', run_id: 'local-done' });
+        updatePipelinePhaseDOM('IDLE', localEvents);
+      }
+    };
+    stepFn();
+    localPipelineTimer = setInterval(stepFn, 1600);
+  }
+
+  async function dispatchMissionGoal(goal, profile = 'standard') {
+    if (!goal || !goal.trim()) return;
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: goal.trim(), profile })
+      });
+      if (res.ok || res.status === 202) {
+        pollOrchestrator();
+        return;
+      }
+    } catch (_) {}
+    startLocalPipelineFallback(goal.trim());
+  }
+
+  async function askDirectQuestion(target, question, agentName = '') {
+    try {
+      const res = await apiFetch('/ops/cli-ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cli: target, agent_name: agentName, question })
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+    return {
+      ok: true,
+      mode: 'LOCAL_FALLBACK',
+      role: (target || 'HEAD').toUpperCase(),
+      label: agentName || CLI_LABELS[currentRoles[target] || currentRoles.head] || 'AI 직원',
+      seconds: 1,
+      command: 'local-fallback',
+      answer: `[${agentName || '로컬 안내'}] '${question}' 질문을 확인했습니다. (실제 CLI 응답을 받으려면 python server.py 8080 연결 상태를 확인해 주세요.)`
+    };
+  }
+
+  // Bind Goal / Question Form on index.html & agents.html
+  const goalForm = document.getElementById('triadGoalForm');
+  const targetAgentSelect = document.getElementById('triadAgentTargetSelect');
+
+  targetAgentSelect?.addEventListener('change', () => {
+    const replyRole = document.getElementById('triadReplyRole');
+    const optText = targetAgentSelect.options[targetAgentSelect.selectedIndex]?.text || 'HEAD Director AI';
+    const cleanName = optText.replace(/^[^\w가-힣]+\s*/, '');
+    if (replyRole) replyRole.textContent = `[${cleanName} 응답 대기]`;
+  });
+
+  // In agents.html, clicking an agent row selects that employee for quick question
+  document.querySelectorAll('#agentList .agent-card-row').forEach(row => {
+    row.style.cursor = 'pointer';
+    row.title = '클릭하여 이 AI 직원에게 질문하기';
+    row.addEventListener('click', () => {
+      const role = (row.dataset.role || 'HEAD').toLowerCase();
+      const agentName = row.querySelector('.agent-name')?.textContent?.trim() || '';
+      if (targetAgentSelect) {
+        targetAgentSelect.value = ['head', 'builder', 'reviewer', 'director', 'triad'].includes(role) ? role : 'head';
+        targetAgentSelect.dataset.customAgentName = agentName;
+      }
+      const replyRole = document.getElementById('triadReplyRole');
+      if (replyRole && agentName) replyRole.textContent = `[${agentName} (${role.toUpperCase()}) 선택됨]`;
+      const input = document.getElementById('triadGoalInput');
+      if (input) {
+        input.placeholder = `${agentName}에게 물어볼 질문을 입력하세요...`;
+        input.focus();
+      }
+    });
+  });
+
+  goalForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('triadGoalInput');
+    const profileSel = document.getElementById('triadProfileSelect');
+    const submitBtn = document.getElementById('triadGoalSubmit');
+    const replyRole = document.getElementById('triadReplyRole');
+    const replyText = document.getElementById('triadReplyText');
+    const replyMeta = document.getElementById('triadReplyMeta');
+
+    const goal = (input?.value || '').trim();
+    if (!goal) return;
+    const mode = profileSel?.value || 'ask';
+    const targetRole = targetAgentSelect?.value || 'head';
+    const optText = targetAgentSelect?.options?.[targetAgentSelect.selectedIndex]?.text || 'HEAD Director AI';
+    const selectedName = targetAgentSelect?.dataset?.customAgentName || optText.replace(/^[^\w가-힣]+\s*/, '').split('(')[0].trim();
+    if (targetAgentSelect) delete targetAgentSelect.dataset.customAgentName;
+    input.value = '';
+
+    if (mode === 'ask') {
+      const origBtnText = submitBtn?.textContent || '질문 보내기 ↗';
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '답변 생성 중...'; }
+      if (replyRole) replyRole.textContent = `[${selectedName} 생각 중...]`;
+      if (replyText) replyText.textContent = `'${goal}' 질문에 대해 ${selectedName}의 CLI 프로세스를 호출하여 답변을 받아오고 있습니다...`;
+      if (replyMeta) replyMeta.textContent = 'CLI 호출 중';
+
+      const ans = await askDirectQuestion(targetRole, goal, selectedName);
+      if (replyRole) replyRole.textContent = `[${ans.label || selectedName} 답변]`;
+      if (replyText) replyText.textContent = ans.answer || '';
+      if (replyMeta) {
+        replyMeta.textContent = `${ans.mode === 'REAL_CLI' || ans.mode === 'REAL_CLI_PROXY' ? '실제 CLI 응답' : '시뮬레이션'} · ${ans.seconds || 1}초`;
+      }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = origBtnText; }
+      return;
+    }
+
+    if (replyRole) replyRole.textContent = `[개발 미션 가동 · ${mode.toUpperCase()}]`;
+    if (replyText) replyText.textContent = `'${goal}' 미션이 시작되었습니다. 아래 5단계 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)으로 진행됩니다.`;
+    await dispatchMissionGoal(goal, mode);
+  });
+
+  // Bind "+ 미션 목표 지시" button on agents.html
+  document.getElementById('addAgent')?.addEventListener('click', async () => {
+    const goal = prompt('HEAD 에이전트에게 지시할 한 줄 미션 목표(Goal)를 입력하세요:', '신규 기능 모듈 구현 및 격리 Worktree 테스트 검증');
+    if (goal && goal.trim()) {
+      await dispatchMissionGoal(goal.trim(), 'standard');
+    }
+  });
+
+  // Bind "■ 작업 정지" button
+  document.getElementById('btnStopMission')?.addEventListener('click', async () => {
+    if (localPipelineTimer) {
+      clearInterval(localPipelineTimer);
+      localPipelineTimer = null;
+    }
+    try {
+      await fetch('/ops/missions/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '버추얼 오피스 작업 정지 버튼' })
+      });
+    } catch (_) {}
+    updatePipelinePhaseDOM('IDLE', [
+      { to_state: 'STOPPED', state_ko: '작업 정지 실행 · 모든 실행 중인 미션 및 CLI 프로세스 종료', role: 'DIRECTOR', run_id: 'stop-signal' }
+    ]);
+  });
+
+  let backendAvailable = true;
+  let lastDiagnostics = null;
+
+  async function apiFetch(path, options = {}) {
+    const isFile = typeof window !== 'undefined' && window.location.protocol === 'file:';
+    if (!isFile) {
+      try {
+        const res = await fetch(path, options);
+        if (res.status !== 404 && res.status !== 405 && res.status !== 501) {
+          return res;
+        }
+      } catch (_) {}
+    }
+    // Fallback to explicit local orchestrator server on 127.0.0.1:8080 (supports file:// or Live Server 5500)
+    return fetch(`http://127.0.0.1:8080${path}`, options);
+  }
+
+  // ==========================================================================
+  // [6] AI CLI(Claude Code, OpenAI Codex, Google Antigravity) 로그인 확인 설정창
+  // ==========================================================================
+  function getFallbackDiagnostics() {
+    return {
+      triad_state: 'STATIC_FALLBACK',
+      checked_at: new Date().toISOString(),
+      forbidden_keys_stripped: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+      providers: {
+        claude: {
+          provider: 'claude',
+          cli: 'claude',
+          label: 'Claude Code',
+          installed: false,
+          auth_state: 'NOT_INSTALLED',
+          auth_label: '서버 연결 필요 (python server.py 8080)',
+          auth_detail: '현재 정적 서버(http.server) 모드입니다. 실제 CLI 로그인 상태를 진단하려면 python server.py 8080으로 실행하세요.',
+          version: '정적 데모 모드',
+          executable: null,
+          custom_executable: '',
+          login_cmd: 'claude login',
+          install_cmd: 'npm install -g @anthropic-ai/claude-code',
+          session_marker: null
+        },
+        antigravity: {
+          provider: 'antigravity',
+          cli: 'agy',
+          label: 'Google Antigravity',
+          installed: false,
+          auth_state: 'NOT_INSTALLED',
+          auth_label: '서버 연결 필요 (python server.py 8080)',
+          auth_detail: '현재 정적 서버(http.server) 모드입니다. 실제 CLI 로그인 상태를 진단하려면 python server.py 8080으로 실행하세요.',
+          version: '정적 데모 모드',
+          executable: null,
+          custom_executable: '',
+          login_cmd: 'agy login',
+          install_cmd: 'Antigravity IDE / CLI (%LOCALAPPDATA%\\agy\\bin\\agy.exe)',
+          session_marker: null
+        },
+        openai: {
+          provider: 'openai',
+          cli: 'codex',
+          label: 'OpenAI Codex',
+          installed: false,
+          auth_state: 'NOT_INSTALLED',
+          auth_label: '서버 연결 필요 (python server.py 8080)',
+          auth_detail: '현재 정적 서버(http.server) 모드입니다. 실제 CLI 로그인 상태를 진단하려면 python server.py 8080으로 실행하세요.',
+          version: '정적 데모 모드',
+          executable: null,
+          custom_executable: '',
+          login_cmd: 'codex login',
+          install_cmd: 'npm install -g @openai/codex',
+          session_marker: null
+        }
+      }
+    };
+  }
+
+  function ensureCliSettingsModal() {
+    const topActions = document.querySelector('.topbar .top-actions');
+    if (topActions && !document.getElementById('btnOpenCliSettings')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'btnOpenCliSettings';
+      btn.className = 'cli-settings-btn';
+      btn.innerHTML = `<span class="cli-settings-dot" id="cliSettingsDot"></span><span>⚙ CLI 로그인 & 설정</span>`;
+      btn.addEventListener('click', () => openCliSettingsModal(false));
+      topActions.insertBefore(btn, topActions.firstChild);
+    }
+
+    const wsCard = document.querySelector('.sidebar .workspace-card');
+    if (wsCard && !wsCard.dataset.cliBound) {
+      wsCard.dataset.cliBound = '1';
+      wsCard.style.cursor = 'pointer';
+      wsCard.title = '클릭하여 AI CLI 로그인 상태 및 경로 설정 열기';
+      wsCard.addEventListener('click', () => openCliSettingsModal(false));
+    }
+
+    if (document.getElementById('cliSettingsModalBackdrop')) return;
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'cliSettingsModalBackdrop';
+    backdrop.className = 'cli-modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="cli-modal" role="dialog" aria-modal="true" aria-labelledby="cliModalTitle">
+        <div class="cli-modal-head">
+          <div>
+            <div class="eyebrow">SUBSCRIPTION CLI AUTHENTICATION & DIAGNOSTICS</div>
+            <h2 id="cliModalTitle">AI CLI 로그인 상태 확인 & 실행 경로 설정</h2>
+            <p>Claude Code(claude), Google Antigravity(agy), OpenAI Codex(codex)의 설치·구독 로그인 세션 상태와 종량제 API 키 차단(Sanitized Env) 여부를 확인합니다.</p>
+          </div>
+          <button type="button" class="cli-modal-close" id="btnCloseCliModal" aria-label="설정창 닫기">✕</button>
+        </div>
+        <div class="cli-modal-body">
+          <div class="cli-summary-banner" id="cliSummaryBanner">
+            <div>
+              <strong id="cliSummaryHeadline">진단 정보를 불러오는 중입니다...</strong>
+              <div id="cliSummarySub" style="margin-top:3px;font-size:10px;color:#64748b">모든 CLI 호출 시 OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY 등 종량제 키는 자동 제거됩니다.</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn small mint" id="btnInstallAllMissingCli">⚡ 미설치 CLI 일괄 원클릭 설치</button>
+              <button type="button" class="btn small" id="btnDeepProbeCli">🔍 실시간 로그인 검증 (Deep Probe)</button>
+              <button type="button" class="btn small primary" id="btnSaveCliPaths">💾 실행 경로 저장 & 재검증</button>
+            </div>
+          </div>
+          <form id="cliModalAskForm" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-radius:11px;background:#f1f5f9;border:1px solid #cbd5e1">
+            <span class="triad-role-badge role-reviewer">💬 1줄 질문 테스트</span>
+            <select id="cliModalAskTarget" class="triad-cli-select" style="height:32px">
+              <option value="antigravity">Google Antigravity (agy)</option>
+              <option value="claude">Claude Code (claude)</option>
+              <option value="openai">OpenAI Codex (codex)</option>
+              <option value="head">현재 HEAD 담당 CLI</option>
+            </select>
+            <input type="text" id="cliModalAskInput" class="triad-goal-input" style="height:32px;font-size:11px" value="안녕? 너는 어떤 AI CLI이고 지금 정상 작동 중이니? 한 문장으로 답해줘." placeholder="CLI에 던질 간단한 질문을 입력하세요">
+            <button type="submit" class="btn small primary" id="btnCliModalAsk">질문 보내기 & 응답 확인 ↗</button>
+          </form>
+          <div id="cliInstallLogBox" style="display:none;background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:10px;font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-height:160px;overflow-y:auto;white-space:pre-wrap"></div>
+          <div class="cli-auth-grid" id="cliAuthGrid"></div>
+        </div>
+        <div class="cli-modal-foot">
+          <span id="cliModalFootNote">✦ 팁: 터미널을 python server.py 8080으로 실행하면 로컬 PC의 실제 CLI 설치 및 구독 로그인 세션을 실시간 감지합니다.</span>
+          <button type="button" class="btn small" id="btnCloseCliModalFoot">닫기</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) backdrop.classList.remove('open');
+    });
+    document.getElementById('btnCloseCliModal')?.addEventListener('click', () => backdrop.classList.remove('open'));
+    document.getElementById('btnCloseCliModalFoot')?.addEventListener('click', () => backdrop.classList.remove('open'));
+    document.getElementById('btnDeepProbeCli')?.addEventListener('click', () => fetchAndRenderCliDiagnostics(true));
+    document.getElementById('btnSaveCliPaths')?.addEventListener('click', saveCustomCliPaths);
+    document.getElementById('btnInstallAllMissingCli')?.addEventListener('click', () => triggerOneClickInstall('all'));
+    document.getElementById('cliModalAskForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const target = document.getElementById('cliModalAskTarget')?.value || 'antigravity';
+      const qInput = document.getElementById('cliModalAskInput');
+      const askBtn = document.getElementById('btnCliModalAsk');
+      const logBox = document.getElementById('cliInstallLogBox');
+      const q = (qInput?.value || '').trim();
+      if (!q) return;
+      if (askBtn) { askBtn.disabled = true; askBtn.textContent = '⏳ CLI 응답 대기 중...'; }
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `[질문 전송] 대상: ${target.toUpperCase()} | 질문: "${q}"\nCLI 프로세스를 호출하여 답변을 생성하고 있습니다...`;
+      }
+      const ans = await askDirectQuestion(target, q);
+      if (logBox) {
+        logBox.textContent = (
+          `▶ [응답 완료 · ${ans.label || target}] (모드: ${ans.mode} | 소요시간: ${ans.seconds || 1}초)\n` +
+          `▶ 실행 명령: ${ans.command || '-'}\n` +
+          `----------------------------------------------------------------------\n` +
+          `${ans.answer || ''}`
+        );
+      }
+      if (askBtn) { askBtn.disabled = false; askBtn.textContent = '질문 보내기 & 응답 확인 ↗'; }
     });
   }
+
+  async function triggerOneClickInstall(targetCli, triggerBtn = null) {
+    const logBox = document.getElementById('cliInstallLogBox');
+    const allBtn = document.getElementById('btnInstallAllMissingCli');
+    const origText = triggerBtn ? triggerBtn.textContent : (allBtn ? allBtn.textContent : '');
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = '⏳ 자동 설치 중...';
+    }
+    if (allBtn && targetCli === 'all') {
+      allBtn.disabled = true;
+      allBtn.textContent = '⏳ 미설치 CLI 설치 중...';
+    }
+    if (logBox) {
+      logBox.style.display = 'block';
+      logBox.textContent = `[원클릭 설치 시작] 대상: ${targetCli.toUpperCase()} · npm / 로컬 바이너리 설치를 진행하고 있습니다. 잠시만 기다려 주세요...`;
+    }
+
+    try {
+      const res = await apiFetch('/ops/cli-install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cli: targetCli })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics);
+      }
+      if (logBox) {
+        const lines = (data.results || []).map(r =>
+          `▶ [${(r.cli || targetCli).toUpperCase()}] (${r.command || 'install'}) -> ${r.ok ? '성공 ✓' : '확인 필요 !'}\n${r.output || ''}`
+        ).join('\n\n');
+        logBox.textContent = `${data.message || '설치 요청 완료'}\n\n${lines}`.trim();
+      }
+    } catch (err) {
+      if (logBox) {
+        logBox.textContent = `[오류] 원클릭 설치 API 호출 실패: ${err.message}\n(터미널에서 python server.py 8080이 실행 중인지 확인해 주세요.)`;
+      }
+    } finally {
+      if (triggerBtn) {
+        triggerBtn.disabled = false;
+        triggerBtn.textContent = origText;
+      }
+      if (allBtn && targetCli === 'all') {
+        allBtn.disabled = false;
+        allBtn.textContent = '⚡ 미설치 CLI 일괄 원클릭 설치';
+      }
+    }
+  }
+
+  async function triggerCliLoginTerminal(cliName, triggerBtn = null) {
+    const logBox = document.getElementById('cliInstallLogBox');
+    try {
+      const res = await apiFetch('/ops/cli-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cli: cliName })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = data.message || `'${cliName} login' 터미널을 실행했습니다.`;
+      }
+    } catch (_) {
+      navigator.clipboard?.writeText(`${cliName} login`);
+    }
+    if (triggerBtn) {
+      const prev = triggerBtn.textContent;
+      triggerBtn.textContent = '✓ 로그인 창 실행됨';
+      setTimeout(() => { triggerBtn.textContent = prev; }, 1600);
+    }
+  }
+
+  function renderCliDiagnosticsModal(diag) {
+    lastDiagnostics = diag || getFallbackDiagnostics();
+    const providers = lastDiagnostics.providers || {};
+    const grid = document.getElementById('cliAuthGrid');
+    const headline = document.getElementById('cliSummaryHeadline');
+    const sub = document.getElementById('cliSummarySub');
+    const dot = document.getElementById('cliSettingsDot');
+
+    const list = ['claude', 'antigravity', 'openai'].map(k => providers[k]).filter(Boolean);
+    const loggedInCount = list.filter(p => p.auth_state === 'LOGGED_IN').length;
+    const installedCount = list.filter(p => p.installed).length;
+
+    if (dot) {
+      dot.className = `cli-settings-dot ${loggedInCount === 3 ? '' : loggedInCount >= 1 || installedCount >= 1 ? 'warn' : 'off'}`;
+    }
+
+    if (headline) {
+      if (lastDiagnostics.triad_state === 'STATIC_FALLBACK') {
+        headline.textContent = '현재 정적 파일 서버(http.server) 모드 · 404 방지 폴백 활성화됨';
+      } else {
+        headline.textContent = `구독 로그인 확인: ${loggedInCount} / 3개 CLI · 설치 감지: ${installedCount} / 3개 CLI (${lastDiagnostics.triad_state || 'TRIAD'})`;
+      }
+    }
+    if (sub) {
+      const stripped = (lastDiagnostics.forbidden_keys_stripped || ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY']).join(', ');
+      sub.textContent = `종량제 API 키 차단(Sanitized): ${stripped} 자동 제거 · 마지막 확인: ${new Date().toLocaleTimeString('ko-KR')}`;
+    }
+
+    if (!grid) return;
+
+    const roleByProvider = {};
+    for (const [rKey, pKey] of Object.entries(currentRoles)) {
+      roleByProvider[pKey] = rKey.toUpperCase();
+    }
+
+    grid.innerHTML = ['claude', 'antigravity', 'openai'].map(key => {
+      const p = providers[key] || {};
+      const state = p.auth_state || 'NOT_INSTALLED';
+      const cardCls = state === 'LOGGED_IN' ? 'logged-in' : state === 'AUTH_REQUIRED' ? 'auth-required' : '';
+      const assignedRole = roleByProvider[key] || 'UNASSIGNED';
+      const roleCls = assignedRole === 'HEAD' ? 'role-head' : assignedRole === 'BUILDER' ? 'role-builder' : 'role-reviewer';
+      const cliName = p.cli || (key === 'claude' ? 'claude' : key === 'antigravity' ? 'agy' : 'codex');
+
+      const actionButtonsHtml = !p.installed
+        ? `
+          <button type="button" class="btn small primary btn-install-cli" data-cli="${cliName}">⚡ 원클릭 설치 (${cliName})</button>
+          <button type="button" class="btn small mint btn-login-cli" data-cli="${cliName}">🔑 설치+로그인 창 열기</button>
+        `
+        : state === 'LOGGED_IN'
+        ? `
+          <button type="button" class="btn small" style="background:#dcfce7;color:#15803d;border-color:#86efac" disabled>✓ 구독 로그인 완료됨</button>
+          <button type="button" class="btn small btn-install-cli" data-cli="${cliName}">🔄 경로/버전 재확인</button>
+        `
+        : `
+          <button type="button" class="btn small mint btn-login-cli" data-cli="${cliName}">🔑 원클릭 로그인 창 열기</button>
+          <button type="button" class="btn small btn-install-cli" data-cli="${cliName}">🔄 재설치/연결</button>
+        `;
+
+      return `
+        <div class="cli-auth-card ${cardCls}">
+          <div class="cli-auth-top">
+            <div class="cli-auth-title">
+              <span class="triad-role-badge ${roleCls}">${assignedRole}</span>
+              <span>${p.label || key}</span>
+            </div>
+            <span class="cli-auth-badge ${state}">${p.auth_label || state}</span>
+          </div>
+          <div class="cli-auth-detail">${p.auth_detail || ''}</div>
+          <div class="cli-auth-rows">
+            <div class="cli-auth-row"><span>CLI 명령어</span><code>${cliName}</code></div>
+            <div class="cli-auth-row"><span>설치 명령</span><code>${p.install_cmd || ''}</code></div>
+            <div class="cli-auth-row"><span>감지된 버전</span><strong>${p.version || '미확인'}</strong></div>
+            <div class="cli-auth-row"><span>실행 파일 경로</span><code>${p.executable || 'PATH 미감지 (원클릭 설치 가능)'}</code></div>
+            <div class="cli-auth-row"><span>구독 세션 파일</span><code>${p.session_marker || '미감지'}</code></div>
+            <div class="cli-auth-row"><span>종량제 API 키</span><strong style="color:#15803d">차단됨 (구독 전용)</strong></div>
+          </div>
+          <div>
+            <label style="display:block;font-size:9.5px;font-weight:700;color:#475569;margin-bottom:4px">수동 실행 파일 경로 지정 (${cliName}.exe / .cmd)</label>
+            <input type="text" class="cli-path-input" data-cli-path="${cliName}" value="${p.custom_executable || p.executable || ''}" placeholder="예: C:\\Users\\...\\${cliName}.exe">
+          </div>
+          <div class="cli-card-actions">
+            ${actionButtonsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    grid.querySelectorAll('.btn-install-cli').forEach(btn => {
+      btn.addEventListener('click', () => triggerOneClickInstall(btn.dataset.cli, btn));
+    });
+    grid.querySelectorAll('.btn-login-cli').forEach(btn => {
+      btn.addEventListener('click', () => triggerCliLoginTerminal(btn.dataset.cli, btn));
+    });
+    grid.querySelectorAll('.btn-copy-login').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cmd = btn.dataset.cmd || '';
+        navigator.clipboard?.writeText(cmd);
+        const orig = btn.textContent;
+        btn.textContent = `✓ 복사됨 (${cmd})`;
+        setTimeout(() => { btn.textContent = orig; }, 1400);
+      });
+    });
+  }
+
+  async function fetchAndRenderCliDiagnostics(deep = false) {
+    const btn = document.getElementById('btnDeepProbeCli');
+    if (btn && deep) {
+      btn.disabled = true;
+      btn.textContent = '검증 중...';
+    }
+    try {
+      const res = await apiFetch(`/ops/cli-check?deep=${deep ? '1' : '0'}`, { cache: 'no-store' });
+      if (res.ok) {
+        backendAvailable = true;
+        const diag = await res.json();
+        renderCliDiagnosticsModal(diag);
+        return;
+      }
+      if (res.status === 404) backendAvailable = false;
+    } catch (_) {} finally {
+      if (btn && deep) {
+        btn.disabled = false;
+        btn.textContent = '🔍 실시간 로그인 검증 (Deep Probe)';
+      }
+    }
+    renderCliDiagnosticsModal(getFallbackDiagnostics());
+  }
+
+  async function saveCustomCliPaths() {
+    const btn = document.getElementById('btnSaveCliPaths');
+    const paths = {};
+    document.querySelectorAll('[data-cli-path]').forEach(inp => {
+      paths[inp.dataset.cliPath] = (inp.value || '').trim();
+    });
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '저장 및 검증 중...';
+    }
+    try {
+      const res = await apiFetch('/ops/cli-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics);
+      }
+    } catch (_) {} finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '💾 실행 경로 저장 & 재검증';
+      }
+    }
+  }
+
+  function openCliSettingsModal(deep = false) {
+    ensureCliSettingsModal();
+    const backdrop = document.getElementById('cliSettingsModalBackdrop');
+    backdrop?.classList.add('open');
+    fetchAndRenderCliDiagnostics(deep);
+  }
+
+  async function pollOrchestrator() {
+    if (!backendAvailable) return;
+    try {
+      const res = await apiFetch('/ops/activity', { cache: 'no-store' });
+      if (res.status === 404) {
+        // 정적 서버(python -m http.server) 환경인 경우 반복 404 방지를 위해 자동 폴링 중지
+        backendAvailable = false;
+        renderCliDiagnosticsModal(getFallbackDiagnostics());
+        return;
+      }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.roles) applyRolesToDOM(data.roles);
+      if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics);
+      const usageObj = data.usage?.today || data.usage?.mission || null;
+      updatePipelinePhaseDOM(data.phase || 'IDLE', data.events || [], usageObj);
+    } catch (_) {}
+  }
+
+  ensureCliSettingsModal();
+  applyRolesToDOM(currentRoles);
+  pollOrchestrator();
+  setInterval(pollOrchestrator, 3000);
 
   // 전역 참조 노출 (개발자 콘솔 또는 기타 스크립트 연동)
   window.CharacterEngine = CharacterEngine;
   window.modularAgents = modularAgents;
+  window.openCliSettingsModal = openCliSettingsModal;
 })();

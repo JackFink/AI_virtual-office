@@ -1,0 +1,51 @@
+# NEXUS AI Virtual Office × AI DEV DIRECTOR Configuration
+# Strict NO PAY-PER-USE API policy: every agent runs through an official, signed-in CLI session
+# (Claude Code / OpenAI Codex / Google Antigravity). API keys in the environment are stripped before any CLI call.
+
+head:
+  provider: claude        # HEAD plans ORDER and makes final PASS/FAIL decisions
+  executable: null        # Discovered automatically via resolve_cli('claude')
+
+builder:
+  mode: proposal          # BUILDER returns whole files as JSON; Director validates via Scope Guard
+  provider: antigravity   # Primary BUILDER: Google Antigravity CLI (agy)
+  model: antigravity-cli
+  executable: null        # Discovered automatically via resolve_cli('agy')
+
+reviewer:
+  provider: codex         # Primary REVIEWER: OpenAI Codex CLI (codex)
+  model: codex-cli
+  executable: null        # Discovered automatically via resolve_cli('codex')
+
+timeouts:
+  head: 300
+  builder: 600
+  reviewer: 300
+  no_progress: 180
+  heartbeat: 30
+
+safety:
+  max_files_changed: 15
+  max_diff_lines: 1500
+  approved_commands:
+    - python
+    - pytest
+    - npm
+
+verification:
+  build_command: null
+  test_command: "python -m pytest tests/"
+  lint_command: null
+
+autonomy:
+  enabled: true
+  head_proxy: true
+  max_repairs: 3
+  builder_attempts: 3
+  max_steps: 6
+  auto_apply: on_pass
+  profiles:
+    quick:    {max_steps: 2, max_repairs: 1, builder_attempts: 2}
+    standard: {max_steps: 6, max_repairs: 3, builder_attempts: 3}
+    deep:     {max_steps: 12, max_repairs: 3, builder_attempts: 3}
+

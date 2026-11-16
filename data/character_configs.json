@@ -1,0 +1,10 @@
+{
+  "01": {
+    "id": "01",
+    "name": "HEAD Director AI",
+    "triadRole": "HEAD",
+    "cliProvider": "claude",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300"
+  }
+}
