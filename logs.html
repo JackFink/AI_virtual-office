@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXUS · 실행 기록 & 최근 Triad 파이프라인 로그</title>
+<link rel="stylesheet" href="styles.css?v=triad26">
+</head>
+<body data-page="logs">
+<div class="app">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI DEV DIRECTOR</div></div></a>
+  <div class="nav-label">WORKSPACE</div>
+  <nav class="nav-group">
+    <a class="nav-link" href="index.html"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a>
+    <a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">가상 오피스 (GM SVG)</span><span class="nav-pill">SVG</span></a>
+    <a class="nav-link" href="agents.html"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a>
+    <a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">AI 설정 & 질문</span></a>
+    <a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a>
+  </nav>
+  <div class="nav-label" style="margin-top:30px">MANAGEMENT</div>
+  <nav class="nav-group">
+    <a class="nav-link active" href="logs.html" aria-current="page"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption" id="sidebarTriadCaption">Claude · Codex · Antigravity · Grok<br>HEAD / BUILDER / REVIEWER / RESEARCHER</div><div class="usage"><span>미션 단계 예산</span><strong id="sidebarStepUsage">5 / 6</strong></div><div class="usage-track"><span style="width:83%"></span></div></div>
+    <div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div>
+  </div>
+</aside>
+
+<main class="main">
+<header class="topbar">
+  <div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>실행 기록 · 최근 Triad 파이프라인 로그</strong></div>
+  <div class="top-actions">
+    <div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">TRIAD STANDBY · 구독 CLI 전용</span></div>
+    <button class="icon-button" aria-label="알림">♧<span class="notify"></span></button>
+    <div class="top-user">팀장</div>
+  </div>
+</header>
+
+<div class="content">
+  <div class="page-heading">
+    <div>
+      <div class="eyebrow">TRIAD PIPELINE EXECUTION HISTORY & EVENT STREAM</div>
+      <h1>◷ 실행 기록 & 최근 Triad 파이프라인 로그</h1>
+      <p>HEAD · BUILDER · REVIEWER · RESEARCHER · DIRECTOR의 단계별 파이프라인 이벤트 스트림과 생성된 1사이클 미션 산출물 기록을 확인합니다.</p>
+    </div>
+    <div class="heading-actions">
+      <a class="btn" href="settings.html">⚙ AI 설정 & 질문</a>
+      <a class="btn" href="agents.html">♙ AI 직원 관리</a>
+      <a class="btn primary" href="office.html">⬡ 가상 오피스 입장 <span class="arrow">↗</span></a>
+    </div>
+  </div>
+
+  <div class="overview-grid">
+    <!-- 이동된 최근 Triad 파이프라인 로그 섹션 -->
+    <section class="panel" id="pipelineLogSection">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">최근 Triad 파이프라인 로그</div>
+          <div class="panel-sub">HEAD · BUILDER · REVIEWER · RESEARCHER · DIRECTOR 이벤트 스트림</div>
+        </div>
+        <span class="system-dot"></span>
+      </div>
+      <div class="log-list" id="activity">
+        <div class="log-row"><div class="log-marker ico-mint">✓</div><div class="log-copy"><strong>HEAD (Claude Code) · 최종 PASS 판정</strong><p>검증 및 독립 리뷰 통과 확인 후 산출물을 안전하게 반영했습니다.</p><time>방금 전 · mission-20558</time></div></div>
+        <div class="log-row"><div class="log-marker ico-amber">◷</div><div class="log-copy"><strong>REVIEWER (OpenAI Codex) · 독립 검수 통과</strong><p>read-only 샌드박스에서 git diff 및 테스트 증거를 대조해 pass 판정을 반환했습니다.</p><time>1분 전 · run-104</time></div></div>
+        <div class="log-row"><div class="log-marker ico-blue">↗</div><div class="log-copy"><strong>BUILDER (Google Antigravity) · JSON 제출</strong><p>격리 Worktree에 전체 파일 JSON 제안을 제출하고 Scope Guard 검사를 통과했습니다.</p><time>2분 전 · run-102</time></div></div>
+        <div class="log-row"><div class="log-marker" style="background:#ffebed;color:#ce5a65">!</div><div class="log-copy"><strong>DIRECTOR · 환경 변수 정화 (Sanitized Env)</strong><p>OPENAI/ANTHROPIC/GOOGLE_API_KEY 등 종량제 키를 제거하고 구독 CLI 세션을 강제했습니다.</p><time>3분 전 · safety-guard</time></div></div>
+        <div class="log-row"><div class="log-marker ico-purple">⌁</div><div class="log-copy"><strong>HEAD (Claude Code) · ORDER 명세 수립</strong><p>허용 경로 6개, 최대 변경 파일 15개, diff 상한 1500줄로 작업 지시서를 생성했습니다.</p><time>4분 전 · run-101</time></div></div>
+      </div>
+      <div class="right-note" style="margin-top:10px">
+        <strong>Triad 오케스트레이터 안내</strong>
+        <p>'AI 설정 & 질문' 탭에서 HEAD · BUILDER · REVIEWER · RESEARCHER 담당 CLI를 변경하거나 1사이클 미션을 실행하면 이곳에 실시간으로 기록됩니다.</p>
+      </div>
+    </section>
+
+    <!-- 우측: 생성된 산출물 및 최근 CLI 호출 내역 -->
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">생성된 1사이클 미션 산출물 & 실행 결과</div>
+          <div class="panel-sub">5단계 파이프라인을 통과해 생성된 마크다운 리포트(.md)입니다.</div>
+        </div>
+        <a href="settings.html" class="text-link">새 미션 실행 ↗</a>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <a href="deliverables/mission-20558.md" target="_blank" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid #cbeee0;background:#f2fcf8;border-radius:10px;text-decoration:none;color:#0f6848;font-size:12px;font-weight:700">
+          <span>📄 deliverables/mission-20558.md — 파이썬 로또 번호 5세트 자동 추천기 함수 (5/5 PASS)</span>
+          <span>리포트 열기 ↗</span>
+        </a>
+      </div>
+
+      <div class="panel-head" style="margin-top:18px;padding-top:14px;border-top:1px solid #eef2f5">
+        <div>
+          <div class="panel-title">최근 CLI 단계별 호출 요약</div>
+          <div class="panel-sub">각 단계에서 호출된 AI CLI, 소요 시간, 토큰 수</div>
+        </div>
+      </div>
+      <div class="activity-list" id="dashboardActivity">
+        <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">HEAD 최종 PASS 판정 · 원본 안전 반영</div><div class="event-desc">HEAD (Claude Code CLI) · mission-20558</div></div><div class="event-time">방금 전</div></div>
+        <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">REVIEWER 독립 코드 검수 통과 (P0:0, P1:0)</div><div class="event-desc">REVIEWER (OpenAI Codex CLI) · 5초 · 120 tok</div></div><div class="event-time">1분 전</div></div>
+        <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">BUILDER 파이썬 코드 생성 완료</div><div class="event-desc">BUILDER (Google Antigravity CLI) · 7초 · 134 tok</div></div><div class="event-time">1분 전</div></div>
+      </div>
+    </section>
+  </div>
+</div>
+</main>
+</div>
+<script src="app.js?v=triad26"></script>
+</body>
+</html>
+

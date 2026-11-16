@@ -210,7 +210,8 @@
 /* ==========================================================================
    AI DEV DIRECTOR × NEXUS Virtual Office (Triad Role & Multi-CLI Integration)
    ========================================================================== */
-.triad-bar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.triad-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}
+@media(max-width:1280px){.triad-bar{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .triad-role-card{background:#fff;border:1px solid #e7edf2;border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px;transition:border-color .18s,box-shadow .18s}
 .triad-role-card.active-stage{border-color:#42c99a;box-shadow:0 0 0 2px #42c99a26,var(--shadow);background:#f7fdfb}
 .triad-role-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -237,6 +238,7 @@
 .cli-pill.claude{background:#fff3ef;color:#c84b28;border-color:#fbd5c8}
 .cli-pill.antigravity{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
 .cli-pill.openai{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
+.cli-pill.grok{background:#f3e8ff;color:#6b21a8;border-color:#d8b4fe}
 @media(max-width:900px){.triad-bar{grid-template-columns:1fr}.triad-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* ==========================================================================
@@ -259,7 +261,7 @@
 .cli-modal-body{padding:20px 24px;display:flex;flex-direction:column;gap:16px}
 .cli-summary-banner{padding:12px 15px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:#475569}
 .cli-summary-banner strong{color:#0f172a;font-size:12px}
-.cli-auth-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cli-auth-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .cli-auth-card{border:1px solid #e2e8f0;border-radius:14px;padding:15px;background:#ffffff;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 14px rgba(15,23,42,.03)}
 .cli-auth-card.logged-in{border-color:#86efac;background:#f8fefb}
 .cli-auth-card.auth-required{border-color:#fcd34d;background:#fffdf7}
@@ -313,12 +315,13 @@
 .char-cli-badge.claude{background:#fff3ef;color:#c84b28;border-color:#fbd5c8}
 .char-cli-badge.antigravity{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
 .char-cli-badge.openai{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
+.char-cli-badge.grok{background:#f3e8ff;color:#6b21a8;border-color:#d8b4fe}
 .studio-ai-quickbar{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:7px 8px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0}
 .studio-ai-quickbar label{display:flex;flex-direction:column;gap:3px;font-size:8.5px;font-weight:700;color:#64748b}
 .studio-ai-select,.studio-ai-input{height:26px;border:1px solid #cbd5e1;border-radius:6px;padding:0 7px;font-size:10px;font-weight:700;color:#1e293b;background:#fff;outline:none}
 .studio-ai-select:focus,.studio-ai-input:focus,.studio-ai-textarea:focus{border-color:#ea580c}
 .studio-ai-textarea{width:100%;min-height:54px;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font:10px/1.45 'DM Sans','Noto Sans KR',sans-serif;color:#1e293b;background:#fff;resize:vertical;outline:none}
-.studio-cli-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.studio-cli-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 .studio-cli-card{border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:7px 8px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:3px;transition:all .15s}
 .studio-cli-card:hover{border-color:#94a3b8;transform:translateY(-1px)}
 .studio-cli-card.active{border-color:#ea580c;background:#fff7ed;box-shadow:0 0 0 2px rgba(234,88,12,.18)}
@@ -379,3 +382,37 @@
 .maple-2d-guild-line.role-HEAD{color:#ffd43b}
 .maple-2d-guild-line.role-BUILDER{color:#74c0fc}
 .maple-2d-guild-line.role-REVIEWER{color:#63e6be}
+
+/* ==========================================================================
+   AI CLI 구독 제한 사용량 게이지 & 캐릭터 페르소나/스킬 칩 (CLI Quota Gauge & Skills)
+   ========================================================================== */
+.cli-quota-box{margin-top:6px;padding:8px 10px;border-radius:9px;background:#f8fafc;border:1px solid #e2e8f0;display:flex;flex-direction:column;gap:5px}
+.cli-quota-top{display:flex;align-items:center;justify-content:space-between;font-size:9.5px;color:#475569;gap:6px}
+.cli-quota-top strong{font-size:10px;color:#0f172a;font-weight:800}
+.cli-quota-pct{padding:1.5px 6px;border-radius:5px;font-size:8.5px;font-weight:800}
+.cli-quota-pct.safe{background:#dcfce7;color:#15803d}
+.cli-quota-pct.warn{background:#fef3c7;color:#b45309}
+.cli-quota-pct.danger{background:#fee2e2;color:#b91c1c}
+.cli-quota-pct.free{background:#e0f2fe;color:#0369a1}
+.cli-quota-pct.unsub{background:#f1f5f9;color:#64748b}
+.cli-quota-track{height:7px;width:100%;border-radius:99px;background:#e2e8f0;overflow:hidden;position:relative}
+.cli-quota-fill{display:block;height:100%;border-radius:99px;transition:width .35s ease}
+.cli-quota-fill.safe{background:linear-gradient(90deg,#34d399,#10b981)}
+.cli-quota-fill.warn{background:linear-gradient(90deg,#fbbf24,#f59e0b)}
+.cli-quota-fill.danger{background:linear-gradient(90deg,#f87171,#ef4444)}
+.cli-quota-fill.free{background:linear-gradient(90deg,#60a5fa,#3b82f6)}
+.cli-quota-fill.unsub{background:repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1 6px,#94a3b8 6px,#94a3b8 12px)}
+.cli-quota-meta{display:flex;align-items:center;justify-content:space-between;font-size:8.5px;color:#64748b}
+
+/* 캐릭터 스튜디오 페르소나 템플릿 & 스킬 태그 매니저 */
+.persona-preset-bar{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px}
+.persona-preset-chip{border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:2.5px 6px;font-size:8.5px;font-weight:700;cursor:pointer;transition:all .14s}
+.persona-preset-chip:hover{border-color:#ea580c;color:#ea580c;background:#fff7ed}
+.skill-manager-box{border:1px solid #e2e8f0;border-radius:8px;padding:8px;background:#f8fafc;display:flex;flex-direction:column;gap:6px}
+.skill-chip-list{display:flex;flex-wrap:wrap;gap:5px;min-height:24px;align-items:center}
+.skill-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:6px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:9px;font-weight:700}
+.skill-chip button{border:0;background:transparent;color:#60a5fa;font-size:10px;padding:0 2px;cursor:pointer;line-height:1}
+.skill-chip button:hover{color:#dc2626}
+.skill-catalog-bar{display:flex;gap:4px;flex-wrap:wrap;padding-top:4px;border-top:1px dashed #e2e8f0}
+.skill-preset-btn{border:1px dashed #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:2px 6px;font-size:8.5px;font-weight:600;cursor:pointer}
+.skill-preset-btn:hover{border-color:#2eb48a;color:#0f6848;background:#f0fdf8}

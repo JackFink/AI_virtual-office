@@ -17,12 +17,14 @@
   const CLI_LABELS = {
     claude: 'Claude Code (claude)',
     antigravity: 'Google Antigravity (agy)',
-    openai: 'OpenAI Codex (codex)'
+    openai: 'OpenAI Codex (codex)',
+    grok: 'xAI Grok (grok)'
   };
   const CLI_SHORT = {
     claude: 'Claude',
     antigravity: 'Antigravity',
-    openai: 'Codex'
+    openai: 'Codex',
+    grok: 'Grok'
   };
 
   const ROLE_STORAGE_KEY = 'nexus-triad-roles-v1';
@@ -706,6 +708,7 @@
           agent_name: spec.name,
           custom_cli: spec.cliKey,
           system_prompt: spec.studioAgent?.systemPrompt || '',
+          skills: Array.isArray(spec.studioAgent?.skills) ? spec.studioAgent.skills : [],
           question: q
         })
       });
@@ -885,6 +888,13 @@
       const seatOptionsHtml = floorSeats.map((s, idx) =>
         `<option value="${idx}" ${idx === spec.seatIndex ? 'selected' : ''}>${s.label}</option>`
       ).join('');
+      const skills = Array.isArray(spec.studioAgent?.skills) ? spec.studioAgent.skills : [];
+      const skillsHtml = skills.length
+        ? skills.map(sk => `<span class="skill-chip" style="padding:2px 6px;font-size:8.5px">⚡ ${sk}</span>`).join('')
+        : '<span style="font-size:9px;color:#94a3b8">장착된 스킬 없음</span>';
+      const quotaInfo = window.NEXUS_CLI_QUOTA?.getCliQuotaStatus
+        ? window.NEXUS_CLI_QUOTA.getCliQuotaStatus(spec.cliKey)
+        : { isSubscribed: false, planName: '구독 확인 중', planLabel: '구독 확인 중', topSummaryText: '-', bottomMetaText: '-', statusBadgeText: '확인 중', dailyPct: 0, monthlyPct: 0, dailyRemainPct: 0, monthlyRemainPct: 0, calls: 0, maxCalls: 0, monthlyUsedCalls: 0, monthlyMaxCalls: 0, level: 'unsub' };
 
       selectedAgentPanel.innerHTML = `
         <div class="selected-identity">
@@ -902,8 +912,17 @@
               <option value="claude" ${spec.cliKey === 'claude' ? 'selected' : ''}>Claude Code (claude)</option>
               <option value="antigravity" ${spec.cliKey === 'antigravity' ? 'selected' : ''}>Google Antigravity (agy)</option>
               <option value="openai" ${spec.cliKey === 'openai' ? 'selected' : ''}>OpenAI Codex (codex)</option>
+              <option value="grok" ${spec.cliKey === 'grok' ? 'selected' : ''}>xAI Grok (grok)</option>
             </select>
           </strong>
+        </div>
+        <div class="detail-line"><span>구독 중인 플랜</span><strong style="color:${quotaInfo.isSubscribed ? (quotaInfo.isPaid ? '#15803d' : '#0284c7') : '#64748b'}">${quotaInfo.planName || quotaInfo.planLabel}</strong></div>
+        <div class="cli-quota-box" style="margin:4px 0 6px">
+          <div class="cli-quota-top"><span>📅 일일 제한 (Daily)</span><strong>${quotaInfo.isSubscribed ? `${quotaInfo.calls}/${quotaInfo.maxCalls}회 (잔여 ${quotaInfo.dailyRemainPct}%)` : '미구독 (0/0회)'}</strong></div>
+          <div class="cli-quota-track"><span class="cli-quota-fill ${quotaInfo.level}" style="width:${quotaInfo.isSubscribed ? quotaInfo.dailyRemainPct : 0}%"></span></div>
+          <div class="cli-quota-top" style="margin-top:2px"><span>🗓️ 월간 제한 (Monthly)</span><strong>${quotaInfo.isSubscribed ? `${quotaInfo.monthlyUsedCalls}/${quotaInfo.monthlyMaxCalls}회 (잔여 ${quotaInfo.monthlyRemainPct}%)` : '미구독 (0/0회)'}</strong></div>
+          <div class="cli-quota-track"><span class="cli-quota-fill ${quotaInfo.level}" style="width:${quotaInfo.isSubscribed ? quotaInfo.monthlyRemainPct : 0}%"></span></div>
+          <div class="cli-quota-meta"><span>${quotaInfo.accountEmail || '로컬 세션 미연결'}</span><span class="cli-quota-pct ${quotaInfo.level}">${quotaInfo.statusBadgeText}</span></div>
         </div>
         <div class="detail-line">
           <span>이 층 좌석 변경</span>
@@ -912,6 +931,10 @@
               ${seatOptionsHtml}
             </select>
           </strong>
+        </div>
+        <div style="padding:6px 0;border-top:1px solid #f0f3f6">
+          <div style="font-size:9.5px;color:#8c99a8;margin-bottom:4px;display:flex;justify-content:space-between"><span>장착 스킬 (${skills.length}개)</span><a href="agents.html#characters" style="color:#ea580c;font-weight:700">+ 스킬/페르소나 편집</a></div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${skillsHtml}</div>
         </div>
         <div class="side-ask-box">
           <strong style="font-size:10px;color:#1e293b">💬 ${spec.name}에게 말풍선 질문하기</strong>
