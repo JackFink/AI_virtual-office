@@ -16,13 +16,15 @@
 
   const CLI_LABELS = {
     claude: 'Claude Code (claude)',
-    antigravity: 'Google Antigravity (agy)',
+    antigravity: 'Google Antigravity (agy · 계정1)',
+    gemini: 'Google Gemini 2 (gemini · 계정2)',
     openai: 'OpenAI Codex (codex)',
     grok: 'xAI Grok (grok)'
   };
   const CLI_SHORT = {
     claude: 'Claude',
     antigravity: 'Antigravity',
+    gemini: 'Gemini 2',
     openai: 'Codex',
     grok: 'Grok'
   };
@@ -33,7 +35,7 @@
       const parsed = JSON.parse(localStorage.getItem(ROLE_STORAGE_KEY) || 'null');
       if (parsed && parsed.head && parsed.builder && parsed.reviewer) return parsed;
     } catch (_) {}
-    return { head: 'claude', builder: 'antigravity', reviewer: 'openai' };
+    return { head: 'claude', builder: 'antigravity', sub_builder: 'gemini', reviewer: 'openai', researcher: 'grok' };
   }
   let currentRoles = loadLocalRoles();
 
@@ -896,6 +898,17 @@
         ? window.NEXUS_CLI_QUOTA.getCliQuotaStatus(spec.cliKey)
         : { isSubscribed: false, planName: '구독 확인 중', planLabel: '구독 확인 중', topSummaryText: '-', bottomMetaText: '-', statusBadgeText: '확인 중', dailyPct: 0, monthlyPct: 0, dailyRemainPct: 0, monthlyRemainPct: 0, calls: 0, maxCalls: 0, monthlyUsedCalls: 0, monthlyMaxCalls: 0, level: 'unsub' };
 
+      const storedCliSlots = (() => {
+        try {
+          const parsed = JSON.parse(localStorage.getItem('nexus-cli-slots-v1') || 'null');
+          if (Array.isArray(parsed) && parsed.length) return parsed;
+        } catch (_) {}
+        return Object.entries(CLI_LABELS).map(([k, lbl]) => ({ key: k, label: lbl }));
+      })();
+      const cliOptionsHtml = storedCliSlots.map(s =>
+        `<option value="${s.key}" ${spec.cliKey === s.key ? 'selected' : ''}>${s.label}</option>`
+      ).join('') + `<option value="__add_new_cli__">➕ 새 CLI 로그인 추가...</option>`;
+
       selectedAgentPanel.innerHTML = `
         <div class="selected-identity">
           <div class="agent-avatar">${avatarSvg}</div>
@@ -909,10 +922,7 @@
           <span>담당 AI CLI</span>
           <strong>
             <select id="officeAgentCliSelect" class="triad-cli-select" style="height:24px;font-size:10px;padding:0 6px">
-              <option value="claude" ${spec.cliKey === 'claude' ? 'selected' : ''}>Claude Code (claude)</option>
-              <option value="antigravity" ${spec.cliKey === 'antigravity' ? 'selected' : ''}>Google Antigravity (agy)</option>
-              <option value="openai" ${spec.cliKey === 'openai' ? 'selected' : ''}>OpenAI Codex (codex)</option>
-              <option value="grok" ${spec.cliKey === 'grok' ? 'selected' : ''}>xAI Grok (grok)</option>
+              ${cliOptionsHtml}
             </select>
           </strong>
         </div>
@@ -952,6 +962,10 @@
 
       document.getElementById('officeAgentCliSelect')?.addEventListener('change', (e) => {
         const newCli = e.target.value;
+        if (newCli === '__add_new_cli__') {
+          window.location.href = 'settings.html#cliAuthSection';
+          return;
+        }
         if (spec.studioAgent) {
           spec.studioAgent.cliProvider = newCli;
           try {

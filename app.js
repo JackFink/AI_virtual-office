@@ -557,9 +557,9 @@
   const ALL_AGENT_PRESETS = [
     { id: '01', name: 'HEAD Director AI', triadRole: 'HEAD', floor: '1F', dept: 'HEAD · 총괄 지휘 (Claude Code)', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F07', outfit: 'O01', bottom: 'B01', acc: 'A03' } },
     { id: '02', name: 'Grok Scout AI', triadRole: 'RESEARCHER', floor: '1F', dept: 'RESEARCHER · 심층 추론 (xAI Grok)', gender: '픽셀 치비', skin: '#ebb99a', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H04', face: 'F02', outfit: 'O01', bottom: 'B01', acc: 'A01' } },
-    { id: '03', name: 'Builder Dev AI', triadRole: 'BUILDER', floor: '1F', dept: 'BUILDER · 구현 (Antigravity)', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H03', face: 'F02', outfit: 'O02', bottom: 'B02', acc: 'A04' } },
+    { id: '03', name: 'Builder Dev AI', triadRole: 'BUILDER', floor: '1F', dept: 'BUILDER · 구현 (Antigravity · 계정1)', gender: '픽셀 치비', skin: '#f8cfbe', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H03', face: 'F02', outfit: 'O02', bottom: 'B02', acc: 'A04' } },
     { id: '04', name: 'Reviewer Audit AI', triadRole: 'REVIEWER', floor: '1F', dept: 'REVIEWER · 독립 검수 (Codex)', gender: '픽셀 치비', skin: '#fde2d2', hairColor: '#4a3525', eyeColor: '#2563eb', parts: { base: 'BASE_PIXEL', hair: 'H05', face: 'F02', outfit: 'O01', bottom: 'B03', acc: 'A01' } },
-    { id: '05', name: 'Scope Guard AI', triadRole: 'REVIEWER', floor: '1F', dept: 'DIRECTOR · 경로/Diff 상한 검증', gender: '픽셀 치비', skin: '#e3e8ee', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F06', outfit: 'O02', bottom: 'B02', acc: 'A01' } },
+    { id: '05', name: 'Gemini Sub AI', triadRole: 'SUB-BUILDER', floor: '1F', dept: 'SUB-BUILDER · 멀티 제미나이 (Google 계정2)', gender: '픽셀 치비', skin: '#e3e8ee', hairColor: '#1e1e24', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F06', outfit: 'O02', bottom: 'B02', acc: 'A01' } },
     { id: '06', name: 'HEAD Proxy Autopilot', triadRole: 'HEAD', floor: '2F', dept: 'HEAD · 자율 프록시 제어', gender: '픽셀 치비', skin: '#fde2d2', hairColor: '#7c4a2d', eyeColor: '#1e293b', parts: { base: 'BASE_PIXEL', hair: 'H02', face: 'F04', outfit: 'O03', bottom: 'B01', acc: 'A03' } },
     { id: '07', name: 'UI/UX Builder AI', triadRole: 'BUILDER', floor: '2F', dept: 'BUILDER · 프런트엔드 구현', gender: '픽셀 치비', skin: '#fde2d2', hairColor: '#d4a359', eyeColor: '#059669', parts: { base: 'BASE_PIXEL', hair: 'H07', face: 'F03', outfit: 'O05', bottom: 'B02', acc: 'A07' } },
     { id: '08', name: '3D Scene Builder AI', triadRole: 'BUILDER', floor: '2F', dept: 'BUILDER · Three.js 3D 구현', gender: '픽셀 치비', skin: '#fff0e6', hairColor: '#d4a359', eyeColor: '#9333ea', parts: { base: 'BASE_PIXEL', hair: 'H01', face: 'F01', outfit: 'O05', bottom: 'B03', acc: 'A03' } },
@@ -596,7 +596,8 @@
   const CHAR_AI_STORAGE_KEY = 'nexus-character-ai-configs-v1';
   const CLI_BADGE_LABELS = {
     claude: 'Claude Code',
-    antigravity: 'Antigravity',
+    antigravity: 'Google Antigravity (계정 1)',
+    gemini: 'Google Antigravity (계정 2)',
     openai: 'OpenAI Codex',
     grok: 'xAI Grok'
   };
@@ -608,6 +609,7 @@
   const DEFAULT_SKILLS_BY_ROLE = {
     HEAD: ['ORDER 명세 수립', '아키텍처 설계', 'PASS/FAIL 최종 판정'],
     BUILDER: ['풀스택 코드 구현', 'UI/UX & SVG', '격리 Worktree 제안'],
+    'SUB-BUILDER': ['구글 서브계정 병렬 구현', '멀티 제미나이 교차 검증', '코드 생성'],
     REVIEWER: ['코드 리뷰(P0/P1)', '자동화 테스트', 'Scope Guard 검증']
   };
 
@@ -627,7 +629,7 @@
   };
 
   function applySavedConfigToAgent(a, idx = 0) {
-    const defCli = a.triadRole === 'HEAD' ? 'claude' : a.triadRole === 'BUILDER' ? 'antigravity' : a.triadRole === 'RESEARCHER' ? 'grok' : 'openai';
+    const defCli = a.triadRole === 'HEAD' ? 'claude' : a.triadRole === 'BUILDER' ? 'antigravity' : a.triadRole === 'SUB-BUILDER' ? 'gemini' : a.triadRole === 'RESEARCHER' ? 'grok' : 'openai';
     const defSandbox = a.triadRole === 'BUILDER' ? 'proposal' : 'read-only';
     const defTimeout = a.triadRole === 'BUILDER' ? '600' : '300';
     const saved = savedCharAiConfigs[a.id] || {};
@@ -1206,7 +1208,15 @@
     studioQuickRole?.addEventListener('change', (e) => {
       updateSelectedAgentAiField(a => { a.triadRole = e.target.value; });
     });
-    studioQuickCli?.addEventListener('change', (e) => {
+    studioQuickCli?.addEventListener('change', async (e) => {
+      if (e.target.value === '__add_new_cli__') {
+        const agent = modularAgents.find(a => a.id === selectedId);
+        e.target.value = agent?.cliProvider || 'claude';
+        await promptAndAddCliSlotFromSelect((addedKey) => {
+          updateSelectedAgentAiField(a => { a.cliProvider = addedKey; });
+        });
+        return;
+      }
       updateSelectedAgentAiField(a => { a.cliProvider = e.target.value; });
     });
     document.querySelectorAll('#studioCliCardGroup .studio-cli-card').forEach(btn => {
@@ -1289,9 +1299,9 @@
     btnApplyCharToGlobalRole?.addEventListener('click', () => {
       const agent = modularAgents.find(a => a.id === selectedId);
       if (!agent) return;
-      const roleKey = (agent.triadRole || 'HEAD').toLowerCase();
-      if (!['head', 'builder', 'reviewer', 'researcher'].includes(roleKey)) {
-        alert('전역 오케스트레이터 역할 반영은 HEAD, BUILDER, REVIEWER, RESEARCHER 역할일 때 적용됩니다.');
+      const roleKey = (agent.triadRole || 'HEAD').toLowerCase().replace('-', '_');
+      if (!['head', 'builder', 'sub_builder', 'reviewer', 'researcher'].includes(roleKey)) {
+        alert('전역 오케스트레이터 역할 반영은 HEAD, BUILDER, SUB-BUILDER, REVIEWER, RESEARCHER 역할일 때 적용됩니다.');
         return;
       }
       const sel = document.querySelector(`[data-role-select="${roleKey}"]`);
@@ -1942,13 +1952,15 @@
   // ==========================================================================
   const CLI_LABELS = {
     claude: 'Claude Code (claude)',
-    antigravity: 'Google Antigravity (agy)',
+    antigravity: 'Google Antigravity (계정 1)',
+    gemini: 'Google Antigravity (계정 2)',
     openai: 'OpenAI Codex (codex)',
     grok: 'xAI Grok (grok)'
   };
   const CLI_SHORT = {
     claude: 'Claude',
-    antigravity: 'Antigravity',
+    antigravity: 'Antigravity 1',
+    gemini: 'Antigravity 2',
     openai: 'Codex',
     grok: 'Grok'
   };
@@ -1958,10 +1970,10 @@
     try {
       const parsed = JSON.parse(localStorage.getItem(ROLE_STORAGE_KEY) || 'null');
       if (parsed && parsed.head && parsed.builder && parsed.reviewer) {
-        return { researcher: 'grok', ...parsed };
+        return { sub_builder: 'gemini', researcher: 'grok', ...parsed };
       }
     } catch (_) {}
-    return { head: 'claude', builder: 'antigravity', reviewer: 'openai', researcher: 'grok' };
+    return { head: 'claude', builder: 'antigravity', sub_builder: 'gemini', reviewer: 'openai', researcher: 'grok' };
   }
 
   let currentRoles = loadStoredRoles();
@@ -1971,19 +1983,21 @@
   const CLI_QUOTA_CAPS = {
     claude:      { domain: 'ANTHROPIC', dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null },
     antigravity: { domain: 'GOOGLE',    dailyCalls: 60, dailyTokens: 500000, monthlyCalls: 1800, monthlyTokens: 15000000, planName: 'Google AI Pro (Antigravity IDE 구독 플랜)', planLabel: 'Google AI Pro (Antigravity 구독)', isSubscribed: true, isPaid: true, accountEmail: null },
+    gemini:      { domain: 'GEMINI2',   dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '서브 구글 계정 (계정 2) 로그인 필요', planLabel: '미로그인 (계정 2 로그인 대기)', isSubscribed: false, isPaid: false, accountEmail: null },
     openai:      { domain: 'OPENAI',    dailyCalls: 15, dailyTokens: 60000,  monthlyCalls: 300,  monthlyTokens: 1200000,  planName: 'ChatGPT Free (무료 플랜 · 유료 미구독)', planLabel: 'ChatGPT Free (무료 플랜)', isSubscribed: true, isPaid: false, accountEmail: null },
     grok:        { domain: 'XAI',       dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null }
   };
   let latestUsageByProvider = {
     ANTHROPIC: { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 },
     GOOGLE:    { calls: 1, tokens: 0, monthly_calls: 1, monthly_tokens: 0 },
+    GEMINI2:   { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 },
     OPENAI:    { calls: 2, tokens: 53475, monthly_calls: 2, monthly_tokens: 53475 },
     XAI:       { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 }
   };
 
   function getCliQuotaStatus(cliKey) {
-    const baseCap = CLI_QUOTA_CAPS[cliKey] || CLI_QUOTA_CAPS.claude;
     const diagProv = lastDiagnostics?.providers?.[cliKey] || null;
+    const baseCap = CLI_QUOTA_CAPS[cliKey] || CLI_QUOTA_CAPS[diagProv?.base_type] || CLI_QUOTA_CAPS.gemini || CLI_QUOTA_CAPS.claude;
 
     const isSubscribed = diagProv && typeof diagProv.is_subscribed === 'boolean' ? diagProv.is_subscribed : baseCap.isSubscribed;
     const isPaid = diagProv && typeof diagProv.is_paid === 'boolean' ? diagProv.is_paid : baseCap.isPaid;
@@ -2091,8 +2105,8 @@
     if (usageObj && usageObj.by_provider) {
       latestUsageByProvider = { ...latestUsageByProvider, ...usageObj.by_provider };
     }
-    ['head', 'builder', 'reviewer', 'researcher'].forEach(roleKey => {
-      const cliKey = currentRoles[roleKey] || (roleKey === 'researcher' ? 'grok' : 'claude');
+    ['head', 'builder', 'sub_builder', 'reviewer', 'researcher'].forEach(roleKey => {
+      const cliKey = currentRoles[roleKey] || (roleKey === 'researcher' ? 'grok' : roleKey === 'sub_builder' ? 'gemini' : 'claude');
       const q = getCliQuotaStatus(cliKey);
 
       document.querySelectorAll(`[data-quota-role="${roleKey}"] .cli-quota-top > span`).forEach(el => {
@@ -2171,6 +2185,7 @@
     };
     updatePill('tableCliHead', currentRoles.head);
     updatePill('tableCliBuilder', currentRoles.builder);
+    updatePill('tableCliSubBuilder', currentRoles.sub_builder || 'gemini');
     updatePill('tableCliReviewer', currentRoles.reviewer);
     updatePill('tableCliResearcher', currentRoles.researcher || 'grok');
 
@@ -2279,11 +2294,26 @@
     }
   }
 
-  // Bind Role Swap Dropdowns (HEAD / BUILDER / REVIEWER must be 3 distinct CLIs)
+  // Bind Role Swap Dropdowns (supports selecting "+ 새 CLI 로그인 추가..." directly from dropdown)
   document.querySelectorAll('[data-role-select]').forEach(sel => {
     sel.addEventListener('change', async (e) => {
       const changedRole = e.target.dataset.roleSelect;
       const newCli = e.target.value;
+      if (newCli === '__add_new_cli__') {
+        e.target.value = currentRoles[changedRole] || 'claude';
+        await promptAndAddCliSlotFromSelect(async (addedKey) => {
+          const nextR = { ...currentRoles, [changedRole]: addedKey };
+          applyRolesToDOM(nextR);
+          try {
+            await apiFetch('/ops/roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(nextR)
+            });
+          } catch (_) {}
+        });
+        return;
+      }
       const nextRoles = { ...currentRoles };
       const conflictRole = Object.keys(nextRoles).find(r => nextRoles[r] === newCli && r !== changedRole);
       if (conflictRole) {
@@ -2293,7 +2323,7 @@
       applyRolesToDOM(nextRoles);
 
       try {
-        await fetch('/ops/roles', {
+        await apiFetch('/ops/roles', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(nextRoles)
@@ -2387,7 +2417,7 @@
     const qAgent = (params.get('agent') || '').toLowerCase();
     const qName = params.get('name') || '';
     if (qAgent && targetAgentSelect) {
-      targetAgentSelect.value = ['head', 'builder', 'reviewer', 'researcher', 'director', 'triad'].includes(qAgent) ? qAgent : 'head';
+      targetAgentSelect.value = ['head', 'builder', 'sub_builder', 'reviewer', 'researcher', 'director', 'triad'].includes(qAgent) ? qAgent : 'head';
       if (qName) targetAgentSelect.dataset.customAgentName = qName;
       const replyRole = document.getElementById('triadReplyRole');
       if (replyRole && qName) replyRole.textContent = `[${qName} (${qAgent.toUpperCase()}) 선택됨]`;
@@ -2410,7 +2440,7 @@
         window.location.href = `settings.html?agent=${encodeURIComponent(role)}&name=${encodeURIComponent(agentName)}`;
         return;
       }
-      targetAgentSelect.value = ['head', 'builder', 'reviewer', 'researcher', 'director', 'triad'].includes(role) ? role : 'head';
+      targetAgentSelect.value = ['head', 'builder', 'sub_builder', 'reviewer', 'researcher', 'director', 'triad'].includes(role) ? role : 'head';
       targetAgentSelect.dataset.customAgentName = agentName;
       const replyRole = document.getElementById('triadReplyRole');
       if (replyRole && agentName) replyRole.textContent = `[${agentName} (${role.toUpperCase()}) 선택됨]`;
@@ -2532,7 +2562,7 @@
         antigravity: {
           provider: 'antigravity',
           cli: 'agy',
-          label: 'Google Antigravity',
+          label: 'Google Antigravity (계정 1)',
           installed: false,
           auth_state: 'NOT_INSTALLED',
           auth_label: '서버 연결 필요 (python server.py 8080)',
@@ -2542,6 +2572,21 @@
           custom_executable: '',
           login_cmd: 'agy login',
           install_cmd: 'Antigravity IDE / CLI (%LOCALAPPDATA%\\agy\\bin\\agy.exe)',
+          session_marker: null
+        },
+        gemini: {
+          provider: 'gemini',
+          cli: 'gemini',
+          label: 'Google Gemini 2 (서브 계정 2)',
+          installed: false,
+          auth_state: 'NOT_INSTALLED',
+          auth_label: '서버 연결 필요 (python server.py 8080)',
+          auth_detail: '서브 구글 계정(계정 2)은 ~/.gemini-acc2 격리 프로필을 통해 기존 Antigravity(계정 1)와 동시에 연결됩니다.',
+          version: '정적 데모 모드',
+          executable: null,
+          custom_executable: '',
+          login_cmd: 'gemini (GEMINI_CLI_HOME=%USERPROFILE%\\.gemini-acc2)',
+          install_cmd: 'npm install -g @google/gemini-cli',
           session_marker: null
         },
         openai: {
@@ -2602,6 +2647,16 @@
         document.getElementById('btnDeepProbeCli')?.addEventListener('click', () => fetchAndRenderCliDiagnostics(true));
         document.getElementById('btnSaveCliPaths')?.addEventListener('click', saveCustomCliPaths);
         document.getElementById('btnInstallAllMissingCli')?.addEventListener('click', () => triggerOneClickInstall('all'));
+        document.getElementById('btnAddCliSlot')?.addEventListener('click', () => handleAddCliSlotFromBar());
+        document.getElementById('btnResetCliSlots')?.addEventListener('click', () => handleResetCliSlots());
+        document.getElementById('cliModalAskTarget')?.addEventListener('change', async (e) => {
+          if (e.target.value === '__add_new_cli__') {
+            e.target.value = 'antigravity';
+            await promptAndAddCliSlotFromSelect((addedKey) => {
+              e.target.value = addedKey;
+            });
+          }
+        });
 
         document.getElementById('cliModalAskForm')?.addEventListener('submit', async (e) => {
           e.preventDefault();
@@ -2661,7 +2716,8 @@
           <form id="cliModalAskForm" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-radius:11px;background:#f1f5f9;border:1px solid #cbd5e1">
             <span class="triad-role-badge role-reviewer">💬 1줄 질문 테스트</span>
             <select id="cliModalAskTarget" class="triad-cli-select" style="height:32px">
-              <option value="antigravity">Google Antigravity (agy)</option>
+              <option value="antigravity">Google Antigravity (agy · 계정1)</option>
+              <option value="gemini">Google Gemini 2 (gemini · 계정2)</option>
               <option value="claude">Claude Code (claude)</option>
               <option value="openai">OpenAI Codex (codex)</option>
               <option value="grok">xAI Grok (grok)</option>
@@ -2787,15 +2843,237 @@
     }
   }
 
+  function syncAllCliDropdowns(providersObj) {
+    if (!providersObj || typeof providersObj !== 'object') return;
+    const keys = Object.keys(providersObj);
+    if (!keys.length) return;
+
+    // 1. Update CLI_LABELS, CLI_SHORT, CLI_BADGE_LABELS dynamically
+    keys.forEach(k => {
+      const p = providersObj[k] || {};
+      const cliCmd = p.cli || k;
+      const lbl = p.label || k;
+      CLI_LABELS[k] = lbl.includes(`(${cliCmd}`) ? lbl : `${lbl} (${cliCmd})`;
+      CLI_SHORT[k] = lbl.replace(/\s*\(.*?\)\s*/g, '').replace(/^Google\s+/i, '').replace(/^OpenAI\s+/i, '').replace(/^xAI\s+/i, '').trim() || k;
+      CLI_BADGE_LABELS[k] = lbl;
+    });
+
+    // Save active CLI options to localStorage so office.js can also read them
+    try {
+      const slotSummary = keys.map(k => ({
+        key: k,
+        label: CLI_LABELS[k],
+        short: CLI_SHORT[k],
+        base_type: providersObj[k]?.base_type || k
+      }));
+      localStorage.setItem('nexus-cli-slots-v1', JSON.stringify(slotSummary));
+    } catch (_) {}
+
+    // 2. Sync all [data-role-select] dropdowns
+    document.querySelectorAll('[data-role-select]').forEach(sel => {
+      const roleKey = sel.dataset.roleSelect;
+      const curVal = currentRoles[roleKey] && keys.includes(currentRoles[roleKey]) ? currentRoles[roleKey] : keys[0];
+      sel.innerHTML = keys.map(k =>
+        `<option value="${k}" ${k === curVal ? 'selected' : ''}>${CLI_LABELS[k]}</option>`
+      ).join('') + `<option value="__add_new_cli__">➕ 드롭다운에서 새 CLI 로그인 추가...</option>`;
+      sel.value = curVal;
+    });
+
+    // 3. Sync #cliModalAskTarget
+    const modalAskSel = document.getElementById('cliModalAskTarget');
+    if (modalAskSel) {
+      const prevVal = modalAskSel.value && (keys.includes(modalAskSel.value) || modalAskSel.value === 'head') ? modalAskSel.value : keys[0];
+      modalAskSel.innerHTML = keys.map(k =>
+        `<option value="${k}" ${k === prevVal ? 'selected' : ''}>${CLI_LABELS[k]}</option>`
+      ).join('') + `<option value="head" ${prevVal === 'head' ? 'selected' : ''}>현재 HEAD 담당 CLI</option>`
+        + `<option value="__add_new_cli__">➕ 드롭다운에서 새 CLI 로그인 추가...</option>`;
+      modalAskSel.value = prevVal;
+    }
+
+    // 4. Sync #studioQuickCli on agents.html
+    const studioCliSel = document.getElementById('studioQuickCli');
+    if (studioCliSel) {
+      const prevVal = studioCliSel.value && keys.includes(studioCliSel.value) ? studioCliSel.value : keys[0];
+      studioCliSel.innerHTML = keys.map(k =>
+        `<option value="${k}" ${k === prevVal ? 'selected' : ''}>${CLI_LABELS[k]}</option>`
+      ).join('') + `<option value="__add_new_cli__">➕ 드롭다운에서 새 CLI 로그인 추가...</option>`;
+      studioCliSel.value = prevVal;
+    }
+  }
+
+  async function handleAddCliSlotFromBar() {
+    const typeSel = document.getElementById('addCliTypeSelect');
+    const labelInp = document.getElementById('addCliLabelInput');
+    const addBtn = document.getElementById('btnAddCliSlot');
+    const logBox = document.getElementById('cliInstallLogBox');
+    const baseType = typeSel?.value || 'antigravity';
+    const customLabel = (labelInp?.value || '').trim();
+
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.textContent = '⏳ 추가 중...';
+    }
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', base_type: baseType, label: customLabel })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'CLI 슬롯 추가에 실패했습니다.');
+        return null;
+      }
+      if (labelInp) labelInp.value = '';
+      if (data.roles) currentRoles = { ...currentRoles, ...data.roles };
+      if (data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics);
+      } else {
+        await fetchAndRenderCliDiagnostics(false);
+      }
+      if (logBox) {
+        logBox.style.display = 'block';
+        const profNote = data.added?.profile_dir ? ` (동일 AI 다중 계정 감지 → 자동 격리 프로필: ${data.added.profile_dir})` : '';
+        logBox.textContent = `✓ ${data.message || '새 CLI 로그인 슬롯이 추가되었습니다.'}${profNote}\n아래 추가된 카드의 [🔑 원클릭 로그인 창 열기] 버튼을 눌러 로그인하세요.`;
+      }
+      return data.added?.key || null;
+    } catch (err) {
+      alert(`CLI 슬롯 추가 중 오류: ${err.message}`);
+      return null;
+    } finally {
+      if (addBtn) {
+        addBtn.disabled = false;
+        addBtn.textContent = '➕ 드롭다운에서 CLI 추가';
+      }
+    }
+  }
+
+  async function handleRemoveCliSlot(slotKey) {
+    const prov = lastDiagnostics?.providers?.[slotKey];
+    const label = prov?.label || slotKey;
+    const totalCount = Object.keys(lastDiagnostics?.providers || {}).length;
+    if (totalCount <= 1) {
+      alert('최소 1개 이상의 AI CLI 로그인 슬롯은 유지되어야 합니다.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `정말로 [${label}] CLI 로그인 슬롯을 목록에서 제거하시겠습니까?\n\n` +
+      `• 확인(OK)을 누르면 목록과 선택 드롭다운에서 제거됩니다.\n` +
+      `• 제거 후에도 상단 드롭다운 목록에서 언제든 다시 추가할 수 있습니다.`
+    );
+    if (!confirmed) return;
+
+    const logBox = document.getElementById('cliInstallLogBox');
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', key: slotKey })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'CLI 슬롯 제거에 실패했습니다.');
+        return;
+      }
+      if (data.roles) {
+        currentRoles = { ...currentRoles, ...data.roles };
+      }
+      if (data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics);
+      } else {
+        await fetchAndRenderCliDiagnostics(false);
+      }
+      applyRolesToDOM(currentRoles);
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `🗑️ [${label}] CLI 로그인 슬롯이 제거되었습니다. 상단 드롭다운 목록에서 언제든 다시 추가할 수 있습니다.`;
+      }
+    } catch (err) {
+      alert(`CLI 슬롯 제거 실패: ${err.message}`);
+    }
+  }
+
+  async function handleResetCliSlots() {
+    const confirmed = window.confirm('CLI 로그인 슬롯 목록을 초기 기본 상태로 복원하시겠습니까?');
+    if (!confirmed) return;
+    const logBox = document.getElementById('cliInstallLogBox');
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.roles) currentRoles = { ...currentRoles, ...data.roles };
+      if (data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics);
+      }
+      applyRolesToDOM(currentRoles);
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `↺ ${data.message || '기본 CLI 로그인 슬롯 목록으로 복원되었습니다.'}`;
+      }
+    } catch (_) {}
+  }
+
+  async function promptAndAddCliSlotFromSelect(onAddedCallback = null) {
+    const addBar = document.getElementById('cliSlotAddBar');
+    if (addBar) {
+      addBar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const typeSel = document.getElementById('addCliTypeSelect');
+      typeSel?.focus();
+    }
+    const choice = prompt(
+      '추가할 AI CLI 종류 번호 또는 이름을 입력하세요 (동일한 AI 추가 시 자동으로 독립 계정으로 격리됩니다):\n' +
+      '1. antigravity — Google Antigravity / Gemini (구글 AI)\n' +
+      '2. claude — Claude Code (Anthropic AI)\n' +
+      '3. openai — OpenAI Codex (ChatGPT AI)\n' +
+      '4. grok — xAI Grok (SuperGrok AI)',
+      '1'
+    );
+    if (!choice) return;
+    const mapChoice = {
+      '1': 'antigravity',
+      '2': 'claude',
+      '3': 'openai',
+      '4': 'grok',
+      antigravity: 'antigravity',
+      gemini: 'antigravity',
+      agy: 'antigravity',
+      claude: 'claude',
+      openai: 'openai',
+      codex: 'openai',
+      grok: 'grok'
+    };
+    const baseType = mapChoice[choice.trim().toLowerCase()] || 'antigravity';
+    const customLabel = prompt('표시할 CLI 계정 이름을 입력하세요 (비워두면 계정 번호로 자동 지정):', '') || '';
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', base_type: baseType, label: customLabel.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.added) {
+        if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics);
+        if (typeof onAddedCallback === 'function') {
+          await onAddedCallback(data.added.key);
+        }
+      }
+    } catch (_) {}
+  }
+
   function renderCliDiagnosticsModal(diag) {
     lastDiagnostics = diag || getFallbackDiagnostics();
     const providers = lastDiagnostics.providers || {};
+    syncAllCliDropdowns(providers);
     const grid = document.getElementById('cliAuthGrid');
     const headline = document.getElementById('cliSummaryHeadline');
     const sub = document.getElementById('cliSummarySub');
     const dot = document.getElementById('cliSettingsDot');
 
-    const list = ['claude', 'antigravity', 'openai', 'grok'].map(k => providers[k]).filter(Boolean);
+    const keys = Object.keys(providers);
+    const list = keys.map(k => providers[k]).filter(Boolean);
     const loggedInCount = list.filter(p => p.auth_state === 'LOGGED_IN').length;
     const installedCount = list.filter(p => p.installed).length;
 
@@ -2807,7 +3085,7 @@
       if (lastDiagnostics.triad_state === 'STATIC_FALLBACK') {
         headline.textContent = '현재 정적 파일 서버(http.server) 모드 · 404 방지 폴백 활성화됨';
       } else {
-        headline.textContent = `구독 로그인 확인: ${loggedInCount} / ${list.length}개 CLI · 설치 감지: ${installedCount} / ${list.length}개 CLI (${lastDiagnostics.triad_state || 'TRIAD'})`;
+        headline.textContent = `활성 CLI 슬롯: ${list.length}개 · 구독 로그인 확인: ${loggedInCount}/${list.length}개 · 설치 감지: ${installedCount}/${list.length}개 (${lastDiagnostics.triad_state || 'TRIAD'})`;
       }
     }
     if (sub) {
@@ -2822,43 +3100,50 @@
       roleByProvider[pKey] = rKey.toUpperCase();
     }
 
-    grid.innerHTML = ['claude', 'antigravity', 'openai', 'grok'].map(key => {
+    grid.innerHTML = keys.map(key => {
       const p = providers[key] || {};
       const state = p.auth_state || 'NOT_INSTALLED';
       const cardCls = state === 'LOGGED_IN' ? 'logged-in' : state === 'AUTH_REQUIRED' ? 'auth-required' : '';
       const assignedRole = roleByProvider[key] || 'UNASSIGNED';
-      const roleCls = assignedRole === 'HEAD' ? 'role-head' : assignedRole === 'BUILDER' ? 'role-builder' : 'role-reviewer';
-      const cliName = p.cli || (key === 'claude' ? 'claude' : key === 'antigravity' ? 'agy' : key === 'grok' ? 'grok' : 'codex');
+      const roleCls = assignedRole === 'HEAD' ? 'role-head' : (assignedRole === 'BUILDER' || assignedRole === 'SUB_BUILDER') ? 'role-builder' : 'role-reviewer';
+      const cliName = p.cli || (key === 'claude' ? 'claude' : key === 'antigravity' ? 'agy' : key === 'gemini' ? 'gemini' : key === 'grok' ? 'grok' : 'codex');
 
       const actionButtonsHtml = !p.installed
         ? `
           <button type="button" class="btn small primary btn-install-cli" data-cli="${cliName}">⚡ 원클릭 설치 (${cliName})</button>
-          <button type="button" class="btn small mint btn-login-cli" data-cli="${cliName}">🔑 설치+로그인 창 열기</button>
+          <button type="button" class="btn small mint btn-login-cli" data-cli="${key}">🔑 설치+로그인 창 열기</button>
+          <button type="button" class="btn small btn-remove-cli-slot" data-slot-key="${key}" title="이 CLI 로그인 슬롯 제거">🗑️ 제거</button>
         `
         : state === 'LOGGED_IN'
         ? `
           <button type="button" class="btn small" style="background:#dcfce7;color:#15803d;border-color:#86efac" disabled>✓ 구독 로그인 완료됨</button>
-          <button type="button" class="btn small btn-install-cli" data-cli="${cliName}">🔄 경로/버전 재확인</button>
+          <button type="button" class="btn small mint btn-login-cli" data-cli="${key}" title="다른 계정으로 다시 로그인">🔑 계정 변경/재로그인</button>
+          <button type="button" class="btn small btn-remove-cli-slot" data-slot-key="${key}" title="이 CLI 로그인 슬롯 제거">🗑️ 제거</button>
         `
         : `
-          <button type="button" class="btn small mint btn-login-cli" data-cli="${cliName}">🔑 원클릭 로그인 창 열기</button>
+          <button type="button" class="btn small mint btn-login-cli" data-cli="${key}">🔑 원클릭 로그인 창 열기</button>
           <button type="button" class="btn small btn-install-cli" data-cli="${cliName}">🔄 재설치/연결</button>
+          <button type="button" class="btn small btn-remove-cli-slot" data-slot-key="${key}" title="이 CLI 로그인 슬롯 제거">🗑️ 제거</button>
         `;
 
       return `
-        <div class="cli-auth-card ${cardCls}">
+        <div class="cli-auth-card ${cardCls}" data-slot-card="${key}">
           <div class="cli-auth-top">
             <div class="cli-auth-title">
               <span class="triad-role-badge ${roleCls}">${assignedRole}</span>
               <span>${p.label || key}</span>
             </div>
-            <span class="cli-auth-badge ${state}">${p.auth_label || state}</span>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="cli-auth-badge ${state}">${p.auth_label || state}</span>
+              <button type="button" class="btn-remove-cli-slot" data-slot-key="${key}" title="${p.label || key} 로그인 슬롯 제거">🗑️ 제거</button>
+            </div>
           </div>
           <div class="cli-auth-detail">${p.auth_detail || ''}</div>
           <div class="cli-auth-rows">
             <div class="cli-auth-row"><span>로그인 계정</span><strong>${p.account_email || '미로그인'}</strong></div>
             <div class="cli-auth-row"><span>구독 중인 플랜</span><strong style="color:${p.is_subscribed ? (p.is_paid ? '#15803d' : '#0284c7') : '#64748b'}">${p.plan_name || p.plan_label || '미구독 / 미로그인'}</strong></div>
-            <div class="cli-auth-row"><span>CLI 명령어</span><code>${cliName}</code></div>
+            <div class="cli-auth-row"><span>CLI 명령어 / 슬롯 ID</span><code>${cliName} (${key})</code></div>
+            ${p.profile_dir ? `<div class="cli-auth-row"><span>격리 프로필 폴더</span><code>${p.profile_dir}</code></div>` : ''}
             <div class="cli-auth-row"><span>감지된 버전</span><strong>${p.version || '미확인'}</strong></div>
             <div class="cli-auth-row"><span>실행 파일 경로</span><code>${p.executable || 'PATH 미감지 (원클릭 설치 가능)'}</code></div>
             <div class="cli-auth-row"><span>종량제 API 키</span><strong style="color:#15803d">차단됨 (구독 전용)</strong></div>
@@ -2900,6 +3185,9 @@
     });
     grid.querySelectorAll('.btn-login-cli').forEach(btn => {
       btn.addEventListener('click', () => triggerCliLoginTerminal(btn.dataset.cli, btn));
+    });
+    grid.querySelectorAll('.btn-remove-cli-slot').forEach(btn => {
+      btn.addEventListener('click', () => handleRemoveCliSlot(btn.dataset.slotKey));
     });
     grid.querySelectorAll('.btn-copy-login').forEach(btn => {
       btn.addEventListener('click', () => {

@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 ROLE_SETTINGS_PATH = DATA_DIR / "role_settings.json"
 CLI_PATHS_FILE = DATA_DIR / "cli_paths.json"
+CLI_SLOTS_FILE = DATA_DIR / "cli_slots.json"
 CHARACTER_CONFIGS_FILE = DATA_DIR / "character_configs.json"
 PARTS_DIR = ROOT / "avatar" / "data" / "parts"
 
@@ -48,6 +49,105 @@ AUTH_FAILURE_PHRASES = (
     "sign in required",
 )
 
+GEMINI2_HOME_DIR = Path.home() / ".gemini-acc2"
+
+CLI_CATALOG = {
+    "antigravity": {
+        "base_type": "antigravity",
+        "domain": "GOOGLE",
+        "cli": "agy",
+        "label": "Google Antigravity",
+        "model": "antigravity-cli",
+        "login_cmd": "agy login",
+        "install_cmd": "Antigravity IDE / CLI (%LOCALAPPDATA%\\agy\\bin\\agy.exe)",
+    },
+    "claude": {
+        "base_type": "claude",
+        "domain": "ANTHROPIC",
+        "cli": "claude",
+        "label": "Claude Code",
+        "model": "claude-code-cli",
+        "login_cmd": "claude login",
+        "install_cmd": "npm install -g @anthropic-ai/claude-code",
+    },
+    "openai": {
+        "base_type": "openai",
+        "domain": "OPENAI",
+        "cli": "codex",
+        "label": "OpenAI Codex",
+        "model": "codex-cli",
+        "login_cmd": "codex login",
+        "install_cmd": "npm install -g @openai/codex",
+    },
+    "grok": {
+        "base_type": "grok",
+        "domain": "XAI",
+        "cli": "grok",
+        "label": "xAI Grok",
+        "model": "grok-cli",
+        "login_cmd": "grok (XAI_API_KEY / ~/.grok/user-settings.json)",
+        "install_cmd": "npm install -g @vibe-kit/grok-cli",
+    },
+}
+
+DEFAULT_CLI_SLOTS = [
+    {
+        "key": "claude",
+        "base_type": "claude",
+        "domain": "ANTHROPIC",
+        "cli": "claude",
+        "label": "Claude Code",
+        "model": "claude-code-cli",
+        "login_cmd": "claude login",
+        "install_cmd": "npm install -g @anthropic-ai/claude-code",
+        "profile_dir": None,
+    },
+    {
+        "key": "antigravity",
+        "base_type": "antigravity",
+        "domain": "GOOGLE",
+        "cli": "agy",
+        "label": "Google Antigravity (계정 1)",
+        "model": "antigravity-cli",
+        "login_cmd": "agy login",
+        "install_cmd": "Antigravity IDE / CLI (%LOCALAPPDATA%\\agy\\bin\\agy.exe)",
+        "profile_dir": None,
+    },
+    {
+        "key": "gemini",
+        "base_type": "antigravity",
+        "domain": "GEMINI2",
+        "cli": "gemini",
+        "label": "Google Antigravity (계정 2)",
+        "model": "gemini-cli-sub",
+        "login_cmd": "gemini (자동 격리: ~/.gemini-acc2)",
+        "install_cmd": "npm install -g @google/gemini-cli",
+        "profile_dir": str(GEMINI2_HOME_DIR),
+    },
+    {
+        "key": "openai",
+        "base_type": "openai",
+        "domain": "OPENAI",
+        "cli": "codex",
+        "label": "OpenAI Codex",
+        "model": "codex-cli",
+        "login_cmd": "codex login",
+        "install_cmd": "npm install -g @openai/codex",
+        "profile_dir": None,
+    },
+    {
+        "key": "grok",
+        "base_type": "grok",
+        "domain": "XAI",
+        "cli": "grok",
+        "label": "xAI Grok",
+        "model": "grok-cli",
+        "login_cmd": "grok (XAI_API_KEY / ~/.grok/user-settings.json)",
+        "install_cmd": "npm install -g @vibe-kit/grok-cli",
+        "profile_dir": None,
+    },
+]
+
 ALIASES = {
     "codex": "openai",
     "openai": "openai",
@@ -58,42 +158,172 @@ ALIASES = {
     "agy": "antigravity",
     "grok": "grok",
     "xai": "grok",
+    "gemini": "gemini",
+    "gemini2": "gemini",
+    "google2": "gemini",
 }
-DOMAINS = {"openai": "OPENAI", "claude": "ANTHROPIC", "antigravity": "GOOGLE", "grok": "XAI"}
-PROVIDER_META = {
-    "claude": {
-        "domain": "ANTHROPIC",
-        "cli": "claude",
-        "label": "Claude Code",
-        "model": "claude-code-cli",
-        "login_cmd": "claude login",
-        "install_cmd": "npm install -g @anthropic-ai/claude-code",
-    },
-    "antigravity": {
-        "domain": "GOOGLE",
-        "cli": "agy",
-        "label": "Google Antigravity",
-        "model": "antigravity-cli",
-        "login_cmd": "agy login",
-        "install_cmd": "Antigravity IDE / CLI 설치 (%LOCALAPPDATA%\\agy\\bin\\agy.exe)",
-    },
-    "openai": {
-        "domain": "OPENAI",
-        "cli": "codex",
-        "label": "OpenAI Codex",
-        "model": "codex-cli",
-        "login_cmd": "codex login",
-        "install_cmd": "npm install -g @openai/codex",
-    },
-    "grok": {
-        "domain": "XAI",
-        "cli": "grok",
-        "label": "xAI Grok",
-        "model": "grok-cli",
-        "login_cmd": "grok (XAI_API_KEY / ~/.grok/user-settings.json)",
-        "install_cmd": "npm install -g @vibe-kit/grok-cli",
-    },
+DOMAINS = {
+    "openai": "OPENAI",
+    "claude": "ANTHROPIC",
+    "antigravity": "GOOGLE",
+    "grok": "XAI",
+    "gemini": "GEMINI2",
 }
+PROVIDER_META = {s["key"]: {k: v for k, v in s.items() if k != "key"} for s in DEFAULT_CLI_SLOTS}
+
+
+def _sync_provider_meta_from_slots(slots: List[Dict[str, Any]]) -> None:
+    """Dynamically updates PROVIDER_META, DOMAINS, and ALIASES from the active CLI slots."""
+    PROVIDER_META.clear()
+    DOMAINS.clear()
+    for s in slots:
+        key = str(s.get("key") or "").strip()
+        if not key:
+            continue
+        base_t = str(s.get("base_type") or key).strip()
+        if base_t == "gemini":
+            base_t = "antigravity"
+        cat = CLI_CATALOG.get(base_t, CLI_CATALOG["antigravity"])
+        domain = str(s.get("domain") or cat["domain"])
+        cli_cmd = str(s.get("cli") or cat["cli"])
+        prof = s.get("profile_dir")
+        login_c = str(s.get("login_cmd") or cat["login_cmd"])
+        if prof and "프로필" not in login_c and "HOME" not in login_c:
+            login_c = f"{cli_cmd} (자동 격리: ~/{Path(prof).name})"
+        PROVIDER_META[key] = {
+            "base_type": base_t,
+            "domain": domain,
+            "cli": cli_cmd,
+            "label": str(s.get("label") or cat["label"]),
+            "model": str(s.get("model") or cat["model"]),
+            "login_cmd": login_c,
+            "install_cmd": str(s.get("install_cmd") or cat["install_cmd"]),
+            "profile_dir": str(prof) if prof else None,
+        }
+        DOMAINS[key] = domain
+        ALIASES[key] = key
+
+
+def load_cli_slots() -> List[Dict[str, Any]]:
+    if CLI_SLOTS_FILE.exists():
+        try:
+            data = json.loads(CLI_SLOTS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list) and len(data) >= 1:
+                for item in data:
+                    if item.get("key") == "gemini" and item.get("base_type") == "gemini":
+                        item["base_type"] = "antigravity"
+                        if "Gemini 2" in str(item.get("label") or ""):
+                            item["label"] = "Google Antigravity (계정 2)"
+                _sync_provider_meta_from_slots(data)
+                return data
+        except Exception:
+            pass
+    default_copy = [dict(s) for s in DEFAULT_CLI_SLOTS]
+    _sync_provider_meta_from_slots(default_copy)
+    return default_copy
+
+
+def save_cli_slots(slots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CLI_SLOTS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(slots, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, CLI_SLOTS_FILE)
+    _sync_provider_meta_from_slots(slots)
+    return slots
+
+
+def add_cli_slot(base_type: str, custom_label: str = "") -> Dict[str, Any]:
+    """Adds a CLI login slot. If the same AI already exists, automatically assigns an isolated profile directory."""
+    base_type = str(base_type or "antigravity").lower().strip()
+    if base_type in ("gemini", "google", "agy"):
+        base_type = "antigravity"
+    elif base_type == "codex":
+        base_type = "openai"
+    elif base_type == "anthropic":
+        base_type = "claude"
+    if base_type not in CLI_CATALOG:
+        base_type = "antigravity"
+
+    cat = CLI_CATALOG[base_type]
+    slots = load_cli_slots()
+    existing_keys = {s.get("key") for s in slots}
+    same_family_slots = [
+        s for s in slots
+        if s.get("base_type") == base_type or (base_type == "antigravity" and s.get("base_type") in ("antigravity", "gemini"))
+    ]
+    acc_num = len(same_family_slots) + 1
+
+    # 1st account of this AI family -> uses default profile (no isolation needed)
+    if acc_num == 1 and base_type not in existing_keys:
+        new_key = base_type
+        prof_dir = None
+        cli_cmd = cat["cli"]
+        domain = cat["domain"]
+        default_lbl = f"{cat['label']} (계정 1)" if base_type == "antigravity" else cat["label"]
+        install_cmd = cat["install_cmd"]
+        login_cmd = cat["login_cmd"]
+    else:
+        # 2nd, 3rd, ... account of the SAME AI -> AUTOMATICALLY ISOLATED!
+        if base_type == "antigravity" and "gemini" not in existing_keys:
+            new_key = "gemini"
+        else:
+            idx = max(2, acc_num)
+            while f"{base_type}_{idx}" in existing_keys:
+                idx += 1
+            new_key = f"{base_type}_{idx}"
+
+        prof_prefix = "gemini" if base_type == "antigravity" else base_type
+        prof_dir = str(Path.home() / f".{prof_prefix}-acc{acc_num}")
+        # For 2nd+ Google accounts, use gemini CLI with GEMINI_CLI_HOME so it never overwrites Account 1
+        cli_cmd = "gemini" if base_type == "antigravity" else cat["cli"]
+        domain = "GEMINI2" if base_type == "antigravity" else cat["domain"]
+        default_lbl = f"{cat['label']} (계정 {acc_num})"
+        install_cmd = "npm install -g @google/gemini-cli" if base_type == "antigravity" else cat["install_cmd"]
+        login_cmd = f"{cli_cmd} (자동 격리: ~/{Path(prof_dir).name})"
+
+    label = custom_label.strip() if custom_label and custom_label.strip() else default_lbl
+
+    new_slot = {
+        "key": new_key,
+        "base_type": base_type,
+        "domain": domain,
+        "cli": cli_cmd,
+        "label": label,
+        "model": cat["model"],
+        "login_cmd": login_cmd,
+        "install_cmd": install_cmd,
+        "profile_dir": prof_dir,
+    }
+    slots.append(new_slot)
+    save_cli_slots(slots)
+    return new_slot
+
+
+def remove_cli_slot(slot_key: str) -> List[Dict[str, Any]]:
+    slot_key = str(slot_key or "").strip()
+    slots = load_cli_slots()
+    if len(slots) <= 1:
+        raise ValueError("최소 1개 이상의 AI CLI 로그인 슬롯은 유지되어야 합니다.")
+    next_slots = [s for s in slots if s.get("key") != slot_key]
+    if len(next_slots) == len(slots):
+        raise ValueError(f"존재하지 않는 CLI 슬롯입니다: {slot_key}")
+    save_cli_slots(next_slots)
+    # Re-validate saved roles so removed slot falls back cleanly to remaining slot
+    try:
+        current_roles = load_roles()
+        save_roles(current_roles)
+    except Exception:
+        pass
+    return next_slots
+
+
+def reset_cli_slots() -> List[Dict[str, Any]]:
+    default_copy = [dict(s) for s in DEFAULT_CLI_SLOTS]
+    return save_cli_slots(default_copy)
+
+
+# Initialize slots on startup
+load_cli_slots()
 
 _STATE_LOCK = threading.Lock()
 _ACTIVE_PIDS: Dict[int, str] = {}
@@ -125,7 +355,7 @@ def load_custom_cli_paths() -> Dict[str, str]:
 
 def save_custom_cli_paths(paths: Dict[str, str]) -> Dict[str, str]:
     cleaned = {}
-    for k in ("claude", "codex", "agy", "grok"):
+    for k in ("claude", "codex", "agy", "grok", "gemini"):
         val = str(paths.get(k) or "").strip()
         if val:
             cleaned[k] = val
@@ -137,7 +367,7 @@ def save_custom_cli_paths(paths: Dict[str, str]) -> Dict[str, str]:
 
 
 def resolve_cli(name: str) -> Optional[str]:
-    """Discovers official CLI executable (claude, codex, agy) from custom config, PATH, or standard install locations."""
+    """Discovers official CLI executable (claude, codex, agy, grok, gemini) from custom config, PATH, or standard install locations."""
     custom = load_custom_cli_paths().get(name)
     if custom and "antigravity-ide.cmd" not in custom.lower():
         try:
@@ -156,6 +386,12 @@ def resolve_cli(name: str) -> Optional[str]:
         gemini_agy = home / ".gemini" / "bin" / ("agy.exe" if os.name == "nt" else "agy")
         if gemini_agy.exists():
             return str(gemini_agy.resolve())
+
+    # Prefer gemini.cmd on Windows for @google/gemini-cli
+    if name == "gemini" and os.name == "nt":
+        npm_gemini = app_data / "npm" / "gemini.cmd"
+        if npm_gemini.exists():
+            return str(npm_gemini.resolve())
 
     if os.name == "nt":
         local = Path(os.environ.get("LOCALAPPDATA", ""))
@@ -208,6 +444,11 @@ def resolve_cli(name: str) -> Optional[str]:
             local_app_data / "Programs" / "Antigravity" / "bin" / "agy.exe",
             *[d / "agy" for d in posix_dirs],
             home / ".agy" / "bin" / "agy",
+        ],
+        "gemini": [
+            app_data / "npm" / "gemini.cmd",
+            app_data / "npm" / "gemini",
+            *[d / "gemini" for d in posix_dirs],
         ],
         "grok": [
             app_data / "npm" / "grok.cmd",
@@ -296,6 +537,7 @@ def install_single_cli(cli_name: str) -> Dict[str, Any]:
         "claude": "@anthropic-ai/claude-code",
         "codex": "@openai/codex",
         "grok": "@vibe-kit/grok-cli",
+        "gemini": "@google/gemini-cli",
     }
     pkg = pkg_map.get(cli_name)
     if not pkg:
@@ -355,46 +597,92 @@ def install_single_cli(cli_name: str) -> Dict[str, Any]:
 
 def launch_cli_login_terminal(cli_name: str) -> Dict[str, Any]:
     """Opens a guided interactive terminal window on the user's desktop for CLI installation & subscription login."""
-    cli_name = cli_name.lower().strip()
-    if cli_name in ("antigravity", "google"):
-        cli_name = "agy"
-    elif cli_name == "openai":
-        cli_name = "codex"
-    elif cli_name == "anthropic":
-        cli_name = "claude"
+    raw_target = cli_name.lower().strip()
+    load_cli_slots()
+    slot_meta = PROVIDER_META.get(raw_target)
+    if slot_meta:
+        slot_key = raw_target
+        cli_name = slot_meta["cli"]
+        profile_dir_str = slot_meta.get("profile_dir")
+        slot_label = slot_meta.get("label", slot_key)
+    else:
+        if raw_target in ("antigravity", "google"):
+            cli_name = "agy"
+            slot_key = "antigravity"
+        elif raw_target in ("gemini2", "google2"):
+            cli_name = "gemini"
+            slot_key = "gemini"
+        elif raw_target == "openai":
+            cli_name = "codex"
+            slot_key = "openai"
+        elif raw_target == "anthropic":
+            cli_name = "claude"
+            slot_key = "claude"
+        else:
+            slot_key = raw_target
+        slot_meta = PROVIDER_META.get(slot_key, {})
+        profile_dir_str = slot_meta.get("profile_dir") or (str(GEMINI2_HOME_DIR) if cli_name == "gemini" else None)
+        slot_label = slot_meta.get("label", cli_name.upper())
 
     exe = resolve_cli(cli_name)
-    marker_info = _check_session_markers(cli_name)
+    marker_info = _check_session_markers(cli_name, profile_dir_str)
 
-    if cli_name == "agy" and marker_info["detected"]:
+    if cli_name == "agy" and not profile_dir_str and marker_info["detected"]:
         return {
             "ok": True,
             "cli": "agy",
             "already_logged_in": True,
-            "message": f"[로그인 완료 상태] Google Antigravity는 이미 현재 PC의 구글 계정 세션({marker_info['marker']})으로 로그인되어 있습니다. 별도로 터미널에 입력하실 필요가 없습니다.",
+            "message": f"[로그인 완료 상태] {slot_label}는 이미 현재 PC의 구글 계정 세션({marker_info['marker']})으로 로그인되어 있습니다. 별도로 터미널에 입력하실 필요가 없습니다.",
         }
 
     pkg_map = {
         "claude": "@anthropic-ai/claude-code",
         "codex": "@openai/codex",
         "grok": "@vibe-kit/grok-cli",
+        "gemini": "@google/gemini-cli",
     }
     pkg = pkg_map.get(cli_name, "")
-    login_cmd_str = "claude" if cli_name == "claude" else f"{cli_name} login"
+    if cli_name == "claude":
+        login_cmd_str = "claude"
+    elif cli_name == "gemini":
+        login_cmd_str = "gemini"
+    elif cli_name == "grok":
+        login_cmd_str = "grok"
+    else:
+        login_cmd_str = f"{cli_name} login"
 
     try:
         if os.name == "nt":
             DATA_DIR.mkdir(parents=True, exist_ok=True)
-            bat_path = DATA_DIR / f"login_helper_{cli_name}.cmd"
+            prof_path = Path(profile_dir_str) if profile_dir_str else None
+            if prof_path:
+                prof_path.mkdir(parents=True, exist_ok=True)
+            bat_path = DATA_DIR / f"login_helper_{slot_key}.cmd"
             lines = [
                 "@echo off",
                 "chcp 65001 >nul",
-                "title [NEXUS Virtual Office] " + cli_name.upper() + " 구독 로그인 도우미",
+                f"title [NEXUS Virtual Office] {slot_label} 구독 로그인 도우미",
                 "echo ======================================================================",
-                f"echo   [{cli_name.upper()}] 구독형 AI CLI 설치 및 브라우저 로그인 도우미",
+                f"echo   [{slot_label}] 구독형 AI CLI 설치 및 브라우저 로그인 도우미",
                 "echo ======================================================================",
                 "echo.",
             ]
+            launch_env = get_sanitized_env()
+            if prof_path:
+                if cli_name in ("gemini", "agy"):
+                    lines.append(f'set "GEMINI_CLI_HOME={prof_path}"')
+                    launch_env["GEMINI_CLI_HOME"] = str(prof_path)
+                elif cli_name == "claude":
+                    lines.append(f'set "CLAUDE_CONFIG_DIR={prof_path}"')
+                    launch_env["CLAUDE_CONFIG_DIR"] = str(prof_path)
+                elif cli_name == "codex":
+                    lines.append(f'set "CODEX_HOME={prof_path}"')
+                    launch_env["CODEX_HOME"] = str(prof_path)
+                lines += [
+                    f"echo [독립 계정 프로필 격리 활성화] 프로필 폴더: {prof_path}",
+                    "echo   기존 로그인된 기본 계정을 덮어쓰지 않고 독립된 추가 계정으로 연결합니다.",
+                    "echo.",
+                ]
             if not exe and pkg:
                 lines += [
                     f"echo [1/2] 현재 PC에 '{cli_name}' CLI가 아직 설치되지 않아 npm으로 자동 설치를 진행합니다...",
@@ -403,7 +691,7 @@ def launch_cli_login_terminal(cli_name: str) -> Dict[str, Any]:
                 ]
             lines += [
                 f"echo [안내] 잠시 후 '{login_cmd_str}'가 실행되며 웹 브라우저 로그인 창(또는 안내)이 표시됩니다.",
-                "echo        브라우저에서 구독 계정(Claude / ChatGPT)으로 로그인을 완료한 뒤,",
+                "echo        브라우저에서 구독 계정으로 로그인을 완료한 뒤,",
                 "echo        버추얼 오피스 설정창에서 [실시간 로그인 검증] 버튼을 눌러주세요!",
                 "echo ======================================================================",
                 "echo.",
@@ -416,14 +704,16 @@ def launch_cli_login_terminal(cli_name: str) -> Dict[str, Any]:
             subprocess.Popen(
                 ["cmd.exe", "/c", "start", "", str(bat_path.resolve())],
                 cwd=str(ROOT),
-                env=get_sanitized_env(),
+                env=launch_env,
                 shell=False,
             )
             return {
                 "ok": True,
                 "cli": cli_name,
+                "slot_key": slot_key,
                 "message": (
-                    f"안내 스크립트가 포함된 새 터미널 창을 열었습니다. "
+                    f"[{slot_label}] 안내 스크립트가 포함된 새 터미널 창을 열었습니다. "
+                    f"{f'(프로필 격리: {prof_path.name}) ' if prof_path else ''}"
                     f"자동으로 '{login_cmd_str}'가 실행되며 브라우저 로그인 창이 뜨면 계정 로그인을 완료해 주세요."
                 ),
             }
@@ -598,6 +888,21 @@ def _read_local_cli_telemetry(cli_name: str) -> Dict[str, Any]:
             "server_primary_resets_at": None,
         }
 
+    if cli_name == "gemini":
+        return {
+            "telemetry_source": "~/.gemini-acc2/.gemini (구글 서브 계정 프로필)",
+            "exact_tokens_available": False,
+            "exact_rate_limit_percent_available": False,
+            "measured_daily_calls": 0,
+            "measured_daily_tokens": 0,
+            "measured_monthly_calls": 0,
+            "measured_monthly_tokens": 0,
+            "model_context_window": 1000000,
+            "server_primary_used_percent": None,
+            "server_primary_window_minutes": None,
+            "server_primary_resets_at": None,
+        }
+
     if cli_name == "grok":
         return {
             "telemetry_source": "~/.grok/user-settings.json (xAI Grok 설정)",
@@ -616,9 +921,9 @@ def _read_local_cli_telemetry(cli_name: str) -> Dict[str, Any]:
     return {}
 
 
-def _inspect_cli_account_plan(cli_name: str, marker_detected: bool) -> Dict[str, Any]:
+def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir: Optional[str] = None) -> Dict[str, Any]:
     """Reads local CLI auth/session metadata to determine account email, exact subscription plan, and both Daily & Monthly quota limits."""
-    home = Path.home()
+    home = Path(profile_dir) if profile_dir else Path.home()
     telemetry = _read_local_cli_telemetry(cli_name)
 
     # Default unsubscribed / logged-out state
@@ -814,6 +1119,59 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool) -> Dict[str,
             **telemetry,
         }
 
+    if cli_name == "gemini":
+        gem_base = Path(profile_dir) if profile_dir else GEMINI2_HOME_DIR
+        acc_file = gem_base / ".gemini" / "google_accounts.json"
+        cred_file = gem_base / ".gemini" / "oauth_creds.json"
+        email = None
+        hd_domain = None
+        try:
+            if acc_file.exists():
+                d = json.loads(acc_file.read_text(encoding="utf-8", errors="ignore"))
+                if isinstance(d, dict) and d.get("active"):
+                    email = str(d["active"])
+            if cred_file.exists():
+                cd = json.loads(cred_file.read_text(encoding="utf-8", errors="ignore"))
+                claims = _decode_jwt_payload(str((cd or {}).get("id_token") or ""))
+                email = email or claims.get("email")
+                hd_domain = claims.get("hd")
+        except Exception:
+            pass
+
+        if hd_domain:
+            return {
+                "account_email": email,
+                "plan_tier": "workspace_pro",
+                "plan_name": f"Google Workspace AI ({hd_domain} · 서브 계정)",
+                "plan_label": f"Google Workspace AI ({hd_domain})",
+                "is_subscribed": True,
+                "is_paid": True,
+                "daily_max_calls": 150,
+                "daily_max_tokens": 1000000,
+                "monthly_max_calls": 4500,
+                "monthly_max_tokens": 30000000,
+                "max_calls": 150,
+                "max_tokens": 1000000,
+                "window_label": "일일 제한 / 월간 제한",
+                **telemetry,
+            }
+        return {
+            "account_email": email or f"구글 추가 계정 ({gem_base.name})",
+            "plan_tier": "antigravity_pro_sub",
+            "plan_name": "Google AI Pro (Antigravity / Gemini 추가 계정)",
+            "plan_label": "Google AI Pro (추가 계정 구독)",
+            "is_subscribed": True,
+            "is_paid": True,
+            "daily_max_calls": 60,
+            "daily_max_tokens": 500000,
+            "monthly_max_calls": 1800,
+            "monthly_max_tokens": 15000000,
+            "max_calls": 60,
+            "max_tokens": 500000,
+            "window_label": "일일 제한 / 월간 제한",
+            **telemetry,
+        }
+
     if cli_name == "grok":
         return {
             "account_email": "xAI Console (XAI_API_KEY)",
@@ -850,21 +1208,27 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool) -> Dict[str,
     }
 
 
-def _check_session_markers(cli_name: str) -> Dict[str, Any]:
+def _check_session_markers(cli_name: str, profile_dir: Optional[str] = None) -> Dict[str, Any]:
     """Checks whether local subscription OAuth token files exist on disk (without reading secret contents)."""
-    home = Path.home()
+    home = Path(profile_dir) if profile_dir else Path.home()
 
     # Only check actual OAuth / credential token files (exclude plain config files or empty directories)
     markers_map = {
         "claude": [
             home / ".claude" / ".credentials.json",
+            home / ".credentials.json",
         ],
         "codex": [
             home / ".codex" / "auth.json",
+            home / "auth.json",
         ],
         "agy": [
             home / ".gemini" / "oauth_creds.json",
             home / ".gemini" / "google_accounts.json",
+        ],
+        "gemini": [
+            (Path(profile_dir) if profile_dir else GEMINI2_HOME_DIR) / ".gemini" / "oauth_creds.json",
+            (Path(profile_dir) if profile_dir else GEMINI2_HOME_DIR) / ".gemini" / "google_accounts.json",
         ],
         "grok": [
             home / ".grok" / "user-settings.json",
@@ -881,9 +1245,9 @@ def _check_session_markers(cli_name: str) -> Dict[str, Any]:
     return {"detected": False, "marker": None}
 
 
-def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False) -> Dict[str, Any]:
+def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False, profile_dir: Optional[str] = None) -> Dict[str, Any]:
     """Determines installation, version, and subscription login status for a CLI."""
-    marker_info = _check_session_markers(cli_name)
+    marker_info = _check_session_markers(cli_name, profile_dir)
     if not exe:
         if marker_info["detected"]:
             return {
@@ -895,12 +1259,13 @@ def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False) -> D
                 "session_detected": True,
                 "session_marker": marker_info["marker"],
             }
+        login_hint = PROVIDER_META.get(ALIASES.get(cli_name, ""), {}).get("login_cmd", f"{cli_name} login")
         return {
             "installed": False,
             "version": "미설치",
             "auth_state": "NOT_INSTALLED",
             "auth_label": "미설치 (시뮬레이션 폴백)",
-            "auth_detail": f"이 PC의 PATH에서 '{cli_name}' 실행 파일을 찾지 못했습니다. 설치 후 '{PROVIDER_META[ALIASES[cli_name]]['login_cmd']}'으로 로그인하세요.",
+            "auth_detail": f"이 PC의 PATH에서 '{cli_name}' 실행 파일을 찾지 못했습니다. 설치 후 '{login_hint}'으로 로그인하세요.",
             "session_detected": False,
             "session_marker": None,
         }
@@ -990,7 +1355,8 @@ def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False) -> D
 
 
 def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
-    """Checks installation & subscription login status of Claude Code, OpenAI Codex, and Google Antigravity CLIs."""
+    """Checks installation & subscription login status of all active CLI slots."""
+    slots = load_cli_slots()
     custom_paths = load_custom_cli_paths()
     report = {}
     usable_domains = []
@@ -998,9 +1364,10 @@ def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
 
     for key, meta in PROVIDER_META.items():
         cli_name = meta["cli"]
+        prof_dir = meta.get("profile_dir")
         exe = resolve_cli(cli_name)
-        login_info = _probe_cli_login(cli_name, exe, deep=deep)
-        plan_info = _inspect_cli_account_plan(cli_name, bool(login_info.get("session_detected")))
+        login_info = _probe_cli_login(cli_name, exe, deep=deep, profile_dir=prof_dir)
+        plan_info = _inspect_cli_account_plan(cli_name, bool(login_info.get("session_detected")), profile_dir=prof_dir)
         if login_info["installed"]:
             usable_domains.append(meta["domain"])
         if login_info["auth_state"] == "LOGGED_IN":
@@ -1008,9 +1375,11 @@ def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
 
         report[key] = {
             "provider": key,
+            "base_type": meta.get("base_type", key),
             "domain": meta["domain"],
             "cli": cli_name,
             "label": meta["label"],
+            "profile_dir": prof_dir,
             "executable": exe,
             "custom_executable": custom_paths.get(cli_name, ""),
             "login_cmd": meta["login_cmd"],
@@ -1021,7 +1390,7 @@ def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
         }
 
     missing = sorted({"OPENAI", "ANTHROPIC", "GOOGLE"} - set(usable_domains))
-    if len(logged_in_domains) == 3:
+    if len(logged_in_domains) >= 3:
         triad_state = "TRIAD_READY"
     elif len(usable_domains) >= 2:
         triad_state = "TRIAD_DEGRADED"
@@ -1030,9 +1399,11 @@ def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
 
     return {
         "providers": report,
+        "slots": slots,
+        "catalog": CLI_CATALOG,
         "triad_state": triad_state,
-        "usable_domains": sorted(usable_domains),
-        "logged_in_domains": sorted(logged_in_domains),
+        "usable_domains": sorted(set(usable_domains)),
+        "logged_in_domains": sorted(set(logged_in_domains)),
         "missing_domains": missing,
         "forbidden_keys_stripped": FORBIDDEN_API_KEYS,
         "checked_at": utc_now_iso(),
@@ -1054,25 +1425,36 @@ def scan_parts_manifest() -> Dict[str, List[str]]:
 
 
 def validate_roles(roles: Dict[str, str]) -> Dict[str, str]:
+    load_cli_slots()
     if not isinstance(roles, dict) or not {"head", "builder", "reviewer"}.issubset(set(roles.keys())):
         raise ValueError("HEAD, BUILDER, REVIEWER 세 역할을 모두 지정해야 합니다.")
+    fallback_key = next(iter(PROVIDER_META.keys()), "claude")
     normalized = {}
-    for r in ("head", "builder", "reviewer", "researcher"):
-        p = roles.get(r, "grok" if r == "researcher" else "")
-        canon = ALIASES.get(str(p).lower().strip())
-        if not canon or canon not in DOMAINS:
-            raise ValueError(f"지원하지 않는 AI 공급자입니다: {p}")
+    for r in ("head", "builder", "reviewer", "researcher", "sub_builder"):
+        default_val = "grok" if r == "researcher" else ("gemini" if r == "sub_builder" else fallback_key)
+        p = str(roles.get(r, default_val)).lower().strip()
+        canon = ALIASES.get(p, p)
+        if canon not in PROVIDER_META:
+            canon = fallback_key
         normalized[r] = canon
     return normalized
 
 
 def load_roles() -> Dict[str, str]:
+    load_cli_slots()
     if ROLE_SETTINGS_PATH.exists():
         try:
             return validate_roles(json.loads(ROLE_SETTINGS_PATH.read_text(encoding="utf-8")))
         except Exception:
             pass
-    return {"head": "claude", "builder": "antigravity", "reviewer": "openai", "researcher": "grok"}
+    fallback_key = next(iter(PROVIDER_META.keys()), "claude")
+    return validate_roles({
+        "head": "claude" if "claude" in PROVIDER_META else fallback_key,
+        "builder": "antigravity" if "antigravity" in PROVIDER_META else fallback_key,
+        "reviewer": "openai" if "openai" in PROVIDER_META else fallback_key,
+        "researcher": "grok" if "grok" in PROVIDER_META else fallback_key,
+        "sub_builder": "gemini" if "gemini" in PROVIDER_META else fallback_key,
+    })
 
 
 def save_roles(roles: Dict[str, str]) -> Dict[str, str]:
@@ -1179,6 +1561,14 @@ STATE: Dict[str, Any] = {
                 "monthly_calls": _read_local_cli_telemetry("agy").get("measured_monthly_calls", 0),
                 "monthly_tokens": _read_local_cli_telemetry("agy").get("measured_monthly_tokens", 0),
             },
+            "GEMINI2": {
+                "calls": _read_local_cli_telemetry("gemini").get("measured_daily_calls", 0),
+                "seconds": 0,
+                "tokens": _read_local_cli_telemetry("gemini").get("measured_daily_tokens", 0),
+                "exact_tokens": _read_local_cli_telemetry("gemini").get("measured_daily_tokens", 0),
+                "monthly_calls": _read_local_cli_telemetry("gemini").get("measured_monthly_calls", 0),
+                "monthly_tokens": _read_local_cli_telemetry("gemini").get("measured_monthly_tokens", 0),
+            },
             "OPENAI": {
                 "calls": _read_local_cli_telemetry("codex").get("measured_daily_calls", 0),
                 "seconds": 0,
@@ -1213,6 +1603,16 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
         return None
 
     domain = meta["domain"]
+    prof_dir = meta.get("profile_dir")
+    run_env = get_sanitized_env()
+    if prof_dir:
+        if meta["cli"] in ("gemini", "agy"):
+            run_env["GEMINI_CLI_HOME"] = str(prof_dir)
+        elif meta["cli"] == "claude":
+            run_env["CLAUDE_CONFIG_DIR"] = str(prof_dir)
+        elif meta["cli"] == "codex":
+            run_env["CODEX_HOME"] = str(prof_dir)
+
     if domain == "OPENAI":
         argv = [exe, "exec", "--sandbox", "read-only", "-"]
         stdin_data = prompt
@@ -1225,6 +1625,12 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
         argv = [exe, "--prompt", prompt]
         stdin_data = ""
         cmd_desc = "grok --prompt <prompt>"
+    elif domain == "GEMINI2":
+        if not prof_dir:
+            run_env["GEMINI_CLI_HOME"] = str(GEMINI2_HOME_DIR)
+        argv = [exe, "--prompt", prompt, "--output-format", "text"]
+        stdin_data = ""
+        cmd_desc = f"GEMINI_CLI_HOME={prof_dir or GEMINI2_HOME_DIR} gemini --prompt <prompt>"
     else:
         msg = {"event": "user", "message": {"role": "user", "content": [{"type": "text", "text": prompt}]}}
         argv = [exe, "--input-format", "stream-json", "--output-format", "stream-json", "--sandbox"]
@@ -1236,7 +1642,7 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
         proc = subprocess.Popen(
             argv,
             cwd=str(ROOT),
-            env=get_sanitized_env(),
+            env=run_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1306,6 +1712,12 @@ AGENT_PERSONAS = {
         "role": "BUILDER",
         "role_Binding": "builder",
         "desc": "격리 Git Worktree에서 전체 파일 JSON 제안 및 실제 코드 구현을 담당하는 개발 에이전트",
+    },
+    "sub_builder": {
+        "name": "Gemini Sub AI",
+        "role": "SUB-BUILDER",
+        "role_Binding": "sub_builder",
+        "desc": "두 번째 구글 제미나이 구독 계정(GEMINI_CLI_HOME 분리)으로 동작하는 멀티 제미나이 구현 에이전트",
     },
     "reviewer": {
         "name": "Reviewer Audit AI",
@@ -1874,6 +2286,8 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             deep = qs.get("deep", ["0"])[0] in ("1", "true", "yes")
             return self._send_json(probe_cli_diagnostics(deep=deep))
+        if path == "/ops/cli-slots":
+            return self._send_json({"slots": load_cli_slots(), "catalog": CLI_CATALOG, "diagnostics": probe_cli_diagnostics(deep=False)})
         if path == "/chat/messages":
             qs = parse_qs(parsed.query)
             try:
@@ -2030,6 +2444,54 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 return self._send_json(res, 200 if res.get("ok") else 400)
             except Exception as exc:
                 return self._send_json({"ok": False, "error": str(exc)}, 500)
+
+        if path == "/ops/cli-slots":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}")
+                action = str((payload or {}).get("action") or "add").lower().strip()
+                if action == "add":
+                    base_type = str((payload or {}).get("base_type") or "gemini").lower().strip()
+                    label = str((payload or {}).get("label") or "").strip()
+                    added = add_cli_slot(base_type, label)
+                    diag = probe_cli_diagnostics(deep=False)
+                    return self._send_json({
+                        "status": "ok",
+                        "action": "add",
+                        "added": added,
+                        "slots": load_cli_slots(),
+                        "roles": load_roles(),
+                        "diagnostics": diag,
+                        "message": f"새 CLI 로그인 슬롯 [{added['label']}]이(가) 추가되었습니다.",
+                    })
+                elif action == "remove":
+                    slot_key = str((payload or {}).get("key") or "").strip()
+                    slots = remove_cli_slot(slot_key)
+                    diag = probe_cli_diagnostics(deep=False)
+                    return self._send_json({
+                        "status": "ok",
+                        "action": "remove",
+                        "removed": slot_key,
+                        "slots": slots,
+                        "roles": load_roles(),
+                        "diagnostics": diag,
+                        "message": f"CLI 로그인 슬롯 [{slot_key}]이(가) 제거되었습니다.",
+                    })
+                elif action == "reset":
+                    slots = reset_cli_slots()
+                    diag = probe_cli_diagnostics(deep=False)
+                    return self._send_json({
+                        "status": "ok",
+                        "action": "reset",
+                        "slots": slots,
+                        "roles": load_roles(),
+                        "diagnostics": diag,
+                        "message": "기본 5대 CLI 로그인 슬롯 목록으로 복원되었습니다.",
+                    })
+                return self._send_json({"error": f"지원하지 않는 action입니다: {action}"}, 400)
+            except ValueError as exc:
+                return self._send_json({"error": str(exc)}, 400)
+            except Exception as exc:
+                return self._send_json({"error": f"CLI 슬롯 변경 실패: {exc}"}, 500)
 
         if path == "/ops/cli-config":
             try:
