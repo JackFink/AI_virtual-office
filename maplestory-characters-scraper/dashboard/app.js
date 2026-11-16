@@ -184,16 +184,30 @@
     updateAvatar();
   }
 
+  const EXCLUDED_MAPLE_TERMS = [
+    '메이플로드', '헤네시스', '히든스트리트', '유타네 집', '골렘사원',
+    '파르템', '엘리니아', '요정의 숲', '루엔의 집', '페리온'
+  ];
+  const EXCLUDED_MAPLE_SET = new Set(EXCLUDED_MAPLE_TERMS);
+
+  function isExcludedPart(p) {
+    if (!p) return true;
+    const sub = (p.subCategory || '').trim();
+    const name = (p.name || '').trim();
+    if (EXCLUDED_MAPLE_SET.has(sub) || EXCLUDED_MAPLE_SET.has(name)) return true;
+    return EXCLUDED_MAPLE_TERMS.some(term => sub.includes(term) || name.includes(term));
+  }
+
   function loadData() {
     if (window.__MAPLE_DATA__) {
-      state.parts = window.__MAPLE_DATA__.parts || [];
+      state.parts = (window.__MAPLE_DATA__.parts || []).filter(p => !isExcludedPart(p));
       state.summary = window.__MAPLE_DATA__.summary || {};
     } else {
       console.warn('__MAPLE_DATA__ not found. Attempting to fetch parts.json');
       fetch('parts.json')
         .then(r => r.json())
         .then(data => {
-          state.parts = data;
+          state.parts = (Array.isArray(data) ? data : []).filter(p => !isExcludedPart(p));
           updateCategoryCounts();
           renderStats();
           filterParts();
@@ -261,11 +275,14 @@
   function renderSubFilters() {
     const subCats = new Set();
     const targetParts = state.currentCategory === 'all' 
-      ? state.parts 
+      ? state.parts.filter(p => p.category !== 'building')
       : state.parts.filter(p => p.category === state.currentCategory);
     
     targetParts.forEach(p => {
-      if (p.subCategory) subCats.add(p.subCategory);
+      const sub = (p.subCategory || '').trim();
+      if (!sub || EXCLUDED_MAPLE_SET.has(sub)) return;
+      if (EXCLUDED_MAPLE_TERMS.some(term => sub.includes(term))) return;
+      subCats.add(sub);
     });
 
     if (subCats.size <= 1) {

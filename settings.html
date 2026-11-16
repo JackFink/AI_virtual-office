@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NEXUS · AI 설정 & 직원 질문 / 미션 컨트롤</title>
-<link rel="stylesheet" href="styles.css?v=triad24">
+<link rel="stylesheet" href="styles.css?v=triad25">
 </head>
 <body data-page="settings">
 <div class="app">
@@ -37,151 +37,181 @@
   </div>
 </header>
 
-<div class="content">
-  <div class="page-heading">
-    <div>
+<div class="content settings-page-content">
+  <div class="page-heading settings-page-heading">
+    <div style="flex:1;min-width:280px">
       <div class="eyebrow">AI CLI ROLE & QUOTA SETTINGS · DIRECT QUESTION & 1-CYCLE MISSION</div>
-      <h1>⚙ AI 카드 설정 & 직원 선택 질문 / 미션 컨트롤</h1>
+      <h1>⚙ AI 카드 설정 &amp; 직원 선택 질문 / 미션 컨트롤</h1>
       <p>4대 AI CLI(Claude Code, Google Antigravity, OpenAI Codex, xAI Grok)의 역할 배정·일일/월간 한도 게이지 확인과 AI 직원 선택 질문 및 5단계 1사이클 미션을 이곳에서 통합 관리합니다.</p>
     </div>
-    <div class="heading-actions">
-      <button type="button" class="btn" id="btnStopMission" style="color:#c45865;border-color:#f5cfd3">■ 작업 정지</button>
-      <a class="btn" href="#cliAuthSection">🔑 CLI 설치 & 로그인 설정 ↓</a>
-      <a class="btn" href="agents.html">♙ AI 직원 관리</a>
-      <a class="btn primary" href="office.html">⬡ 가상 오피스 입장 <span class="arrow">↗</span></a>
+    <div class="heading-actions" style="flex-shrink:0;flex-wrap:wrap">
+      <button type="button" class="btn" id="btnStopMission" style="color:#c45865;border-color:#f5cfd3;white-space:nowrap">■ 작업 정지</button>
+      <a class="btn" href="#cliAuthSection" style="white-space:nowrap">🔑 CLI 설치 &amp; 로그인 설정 ↓</a>
+      <a class="btn" href="agents.html" style="white-space:nowrap">♙ AI 직원 관리</a>
+      <a class="btn primary" href="office.html" style="white-space:nowrap">⬡ 가상 오피스 입장 <span class="arrow">↗</span></a>
     </div>
   </div>
 
-  <!-- [1] 4대 AI 카드 섹션 (HEAD / BUILDER / REVIEWER / RESEARCHER) -->
-  <section class="triad-bar" aria-label="다중 AI CLI 역할 배정 및 한도 게이지">
-    <div class="triad-role-card" id="roleCardHead" data-role="head">
-      <div class="triad-role-top">
-        <span class="triad-role-badge role-head">HEAD · 총괄 지휘</span>
-        <select class="triad-cli-select" data-role-select="head" aria-label="HEAD 담당 AI CLI 선택">
-          <option value="claude" selected>Claude Code (claude)</option>
-          <option value="antigravity">Google Antigravity (agy)</option>
-          <option value="openai">OpenAI Codex (codex)</option>
-          <option value="grok">xAI Grok (grok)</option>
-        </select>
+  <!-- [1] 4대 AI 카드 섹션 (HEAD / BUILDER / REVIEWER / RESEARCHER · 2x2 정렬 그리드) -->
+  <section class="panel settings-section-panel" aria-label="다중 AI CLI 역할 배정 및 한도 게이지">
+    <div class="panel-head settings-panel-head">
+      <div>
+        <div class="panel-title">01 · 4대 AI 역할 배정 &amp; 구독 CLI 한도 현황</div>
+        <div class="panel-sub">각 Triad 역할(HEAD · BUILDER · REVIEWER · RESEARCHER)에 배정할 구독형 AI CLI 엔진을 선택하고 일일/월간 잔여 한도를 실시간 확인합니다.</div>
       </div>
-      <div class="triad-role-meta">
-        <span>목표 분석 · ORDER 발행 · 최종 판정</span>
-        <strong id="headStatusLabel">대기 (STANDBY)</strong>
-      </div>
-      <div class="cli-quota-box" data-quota-role="head">
-        <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="head">일일 0/0회 · 월간 0/0회</strong></div>
-        <div class="cli-quota-track"><span class="cli-quota-fill unsub" data-quota-bar="head" style="width:0%"></span></div>
-        <div class="cli-quota-meta"><span data-quota-tokens="head">플랜 확인 중...</span><span class="cli-quota-pct unsub" data-quota-badge="head">확인 중</span></div>
-      </div>
+      <span class="status running">4 AI ROLES · 2×2 GRID</span>
     </div>
+    <div class="settings-panel-body">
+      <div class="triad-bar settings-triad-grid">
+        <div class="triad-role-card" id="roleCardHead" data-role="head">
+          <div class="triad-role-top">
+            <span class="triad-role-badge role-head">HEAD · 총괄 지휘</span>
+            <select class="triad-cli-select" data-role-select="head" aria-label="HEAD 담당 AI CLI 선택">
+              <option value="claude" selected>Claude Code (claude)</option>
+              <option value="antigravity">Google Antigravity (agy)</option>
+              <option value="openai">OpenAI Codex (codex)</option>
+              <option value="grok">xAI Grok (grok)</option>
+            </select>
+          </div>
+          <div class="triad-role-meta">
+            <span>목표 분석 · ORDER 발행 · 최종 판정</span>
+            <strong id="headStatusLabel">대기 (STANDBY)</strong>
+          </div>
+          <div class="cli-quota-box" data-quota-role="head">
+            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="head">일일 0/0회 · 월간 0/0회</strong></div>
+            <div class="cli-quota-track"><span class="cli-quota-fill unsub" data-quota-bar="head" style="width:0%"></span></div>
+            <div class="cli-quota-meta"><span data-quota-tokens="head">플랜 확인 중...</span><span class="cli-quota-pct unsub" data-quota-badge="head">확인 중</span></div>
+          </div>
+        </div>
 
-    <div class="triad-role-card" id="roleCardBuilder" data-role="builder">
-      <div class="triad-role-top">
-        <span class="triad-role-badge role-builder">BUILDER · 구현 코딩</span>
-        <select class="triad-cli-select" data-role-select="builder" aria-label="BUILDER 담당 AI CLI 선택">
-          <option value="claude">Claude Code (claude)</option>
-          <option value="antigravity" selected>Google Antigravity (agy)</option>
-          <option value="openai">OpenAI Codex (codex)</option>
-          <option value="grok">xAI Grok (grok)</option>
-        </select>
-      </div>
-      <div class="triad-role-meta">
-        <span>격리 Worktree · 코드/산출물 구현</span>
-        <strong id="builderStatusLabel">대기 (STANDBY)</strong>
-      </div>
-      <div class="cli-quota-box" data-quota-role="builder">
-        <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="builder">일일 1/60회 · 월간 1/1800회</strong></div>
-        <div class="cli-quota-track"><span class="cli-quota-fill safe" data-quota-bar="builder" style="width:98%"></span></div>
-        <div class="cli-quota-meta"><span data-quota-tokens="builder">구독 플랜: Google AI Pro</span><span class="cli-quota-pct safe" data-quota-badge="builder">일일 잔여 98%</span></div>
-      </div>
-    </div>
+        <div class="triad-role-card" id="roleCardBuilder" data-role="builder">
+          <div class="triad-role-top">
+            <span class="triad-role-badge role-builder">BUILDER · 구현 코딩</span>
+            <select class="triad-cli-select" data-role-select="builder" aria-label="BUILDER 담당 AI CLI 선택">
+              <option value="claude">Claude Code (claude)</option>
+              <option value="antigravity" selected>Google Antigravity (agy)</option>
+              <option value="openai">OpenAI Codex (codex)</option>
+              <option value="grok">xAI Grok (grok)</option>
+            </select>
+          </div>
+          <div class="triad-role-meta">
+            <span>격리 Worktree · 코드/산출물 구현</span>
+            <strong id="builderStatusLabel">대기 (STANDBY)</strong>
+          </div>
+          <div class="cli-quota-box" data-quota-role="builder">
+            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="builder">일일 1/60회 · 월간 1/1800회</strong></div>
+            <div class="cli-quota-track"><span class="cli-quota-fill safe" data-quota-bar="builder" style="width:98%"></span></div>
+            <div class="cli-quota-meta"><span data-quota-tokens="builder">구독 플랜: Google AI Pro</span><span class="cli-quota-pct safe" data-quota-badge="builder">일일 잔여 98%</span></div>
+          </div>
+        </div>
 
-    <div class="triad-role-card" id="roleCardReviewer" data-role="reviewer">
-      <div class="triad-role-top">
-        <span class="triad-role-badge role-reviewer">REVIEWER · 독립 검수</span>
-        <select class="triad-cli-select" data-role-select="reviewer" aria-label="REVIEWER 담당 AI CLI 선택">
-          <option value="claude">Claude Code (claude)</option>
-          <option value="antigravity">Google Antigravity (agy)</option>
-          <option value="openai" selected>OpenAI Codex (codex)</option>
-          <option value="grok">xAI Grok (grok)</option>
-        </select>
-      </div>
-      <div class="triad-role-meta">
-        <span>Scope Guard 검증 · Fail-Closed 리뷰</span>
-        <strong id="reviewerStatusLabel">대기 (STANDBY)</strong>
-      </div>
-      <div class="cli-quota-box" data-quota-role="reviewer">
-        <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="reviewer">일일 2/15회 · 월간 2/300회</strong></div>
-        <div class="cli-quota-track"><span class="cli-quota-fill free" data-quota-bar="reviewer" style="width:11%"></span></div>
-        <div class="cli-quota-meta"><span data-quota-tokens="reviewer">구독 플랜: ChatGPT Free</span><span class="cli-quota-pct free" data-quota-badge="reviewer">월간 잔여 100%</span></div>
-      </div>
-    </div>
+        <div class="triad-role-card" id="roleCardReviewer" data-role="reviewer">
+          <div class="triad-role-top">
+            <span class="triad-role-badge role-reviewer">REVIEWER · 독립 검수</span>
+            <select class="triad-cli-select" data-role-select="reviewer" aria-label="REVIEWER 담당 AI CLI 선택">
+              <option value="claude">Claude Code (claude)</option>
+              <option value="antigravity">Google Antigravity (agy)</option>
+              <option value="openai" selected>OpenAI Codex (codex)</option>
+              <option value="grok">xAI Grok (grok)</option>
+            </select>
+          </div>
+          <div class="triad-role-meta">
+            <span>Scope Guard 검증 · Fail-Closed 리뷰</span>
+            <strong id="reviewerStatusLabel">대기 (STANDBY)</strong>
+          </div>
+          <div class="cli-quota-box" data-quota-role="reviewer">
+            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="reviewer">일일 2/15회 · 월간 2/300회</strong></div>
+            <div class="cli-quota-track"><span class="cli-quota-fill free" data-quota-bar="reviewer" style="width:11%"></span></div>
+            <div class="cli-quota-meta"><span data-quota-tokens="reviewer">구독 플랜: ChatGPT Free</span><span class="cli-quota-pct free" data-quota-badge="reviewer">월간 잔여 100%</span></div>
+          </div>
+        </div>
 
-    <div class="triad-role-card" id="roleCardResearcher" data-role="researcher">
-      <div class="triad-role-top">
-        <span class="triad-role-badge role-director">RESEARCHER · 심층 추론</span>
-        <select class="triad-cli-select" data-role-select="researcher" aria-label="RESEARCHER 담당 AI CLI 선택">
-          <option value="claude">Claude Code (claude)</option>
-          <option value="antigravity">Google Antigravity (agy)</option>
-          <option value="openai">OpenAI Codex (codex)</option>
-          <option value="grok" selected>xAI Grok (grok)</option>
-        </select>
-      </div>
-      <div class="triad-role-meta">
-        <span>실시간 정보 탐색 · 다각도 가설 검증</span>
-        <strong id="researcherStatusLabel">대기 (STANDBY)</strong>
-      </div>
-      <div class="cli-quota-box" data-quota-role="researcher">
-        <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="researcher">일일 0/0회 · 월간 0/0회</strong></div>
-        <div class="cli-quota-track"><span class="cli-quota-fill unsub" data-quota-bar="researcher" style="width:0%"></span></div>
-        <div class="cli-quota-meta"><span data-quota-tokens="researcher">플랜: 미구독 (연결된 플랜 없음)</span><span class="cli-quota-pct unsub" data-quota-badge="researcher">미구독 · 일일 0% / 월간 0%</span></div>
+        <div class="triad-role-card" id="roleCardResearcher" data-role="researcher">
+          <div class="triad-role-top">
+            <span class="triad-role-badge role-director">RESEARCHER · 심층 추론</span>
+            <select class="triad-cli-select" data-role-select="researcher" aria-label="RESEARCHER 담당 AI CLI 선택">
+              <option value="claude">Claude Code (claude)</option>
+              <option value="antigravity">Google Antigravity (agy)</option>
+              <option value="openai">OpenAI Codex (codex)</option>
+              <option value="grok" selected>xAI Grok (grok)</option>
+            </select>
+          </div>
+          <div class="triad-role-meta">
+            <span>실시간 정보 탐색 · 다각도 가설 검증</span>
+            <strong id="researcherStatusLabel">대기 (STANDBY)</strong>
+          </div>
+          <div class="cli-quota-box" data-quota-role="researcher">
+            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="researcher">일일 0/0회 · 월간 0/0회</strong></div>
+            <div class="cli-quota-track"><span class="cli-quota-fill unsub" data-quota-bar="researcher" style="width:0%"></span></div>
+            <div class="cli-quota-meta"><span data-quota-tokens="researcher">플랜: 미구독 (연결된 플랜 없음)</span><span class="cli-quota-pct unsub" data-quota-badge="researcher">미구독 · 일일 0% / 월간 0%</span></div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- [2] 직원 선택 질문 & 1사이클(5단계) 미션 실행 섹션 -->
-  <section class="triad-pipeline-panel" aria-label="직원 선택 질문 및 파이프라인 단계">
-    <form class="triad-goal-form" id="triadGoalForm">
-      <span class="triad-role-badge role-head">💬 AI 직원 질문 / 지시</span>
-      <select class="triad-cli-select" id="triadAgentTargetSelect" aria-label="질문할 AI 직원 선택">
-        <option value="head" selected>👑 HEAD Director AI (총괄 지휘)</option>
-        <option value="builder">🛠 Builder Dev AI (구현 코딩)</option>
-        <option value="reviewer">🔍 Reviewer Audit AI (독립 검수)</option>
-        <option value="researcher">⚡ Grok Scout AI (xAI Grok 추론)</option>
-        <option value="director">🛡 Scope Guard AI (안전 검증)</option>
-        <option value="triad">🔬 Triad Research AI (교차 연구)</option>
-      </select>
-      <input type="text" class="triad-goal-input" id="triadGoalInput" placeholder="선택한 AI 직원에게 간단한 질문을 하거나, 오른쪽 모드를 '1사이클 미션'으로 바꿔 목표를 지시하세요!" required>
-      <select class="triad-cli-select" id="triadProfileSelect" aria-label="실행 모드 선택">
-        <option value="ask" selected>💬 간단 질문 (선택 직원 즉답)</option>
-        <option value="quick">⚡ 개발 미션 Quick (2단계)</option>
-        <option value="standard">🔄 1사이클 미션 Standard (5단계 산출물)</option>
-        <option value="deep">🔬 개발 미션 Deep (심층)</option>
-      </select>
-      <button type="submit" class="btn primary" id="triadGoalSubmit">질문 / 미션 실행 ↗</button>
-    </form>
-    <div id="triadChatReplyBox" style="padding:11px 14px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;font-size:11.5px;color:#1e293b;line-height:1.6;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+  <section class="panel settings-section-panel" aria-label="직원 선택 질문 및 파이프라인 단계">
+    <div class="panel-head settings-panel-head">
       <div>
-        <strong style="color:#0f6848;display:inline-block;margin-right:6px" id="triadReplyRole">[HEAD Director AI 응답 대기]</strong>
-        <span id="triadReplyText">위 드롭다운에서 원하는 AI 직원을 선택해 바로 질문하거나, '1사이클 미션 Standard'를 선택해 5단계 파이프라인 결과물(.md 리포트)을 생성해 보세요.</span>
+        <div class="panel-title">02 · AI 직원 선택 질문 &amp; 5단계 1-Cycle 미션 실행</div>
+        <div class="panel-sub">원하는 AI 직원을 지정하여 즉답 질문을 보내거나, 5단계 파이프라인(계획→구현→검증→검수→판정) 미션을 가동합니다.</div>
       </div>
       <span class="cli-pill" id="triadReplyMeta" style="flex-shrink:0">Ready</span>
     </div>
-    <div class="triad-steps" id="triadPipelineSteps">
-      <div class="triad-step" data-stage="PLANNING"><b>01 계획 (PLANNING)</b><span id="pipeLabelHead1">HEAD · Claude</span></div>
-      <div class="triad-step" data-stage="BUILDING"><b>02 구현 (BUILDING)</b><span id="pipeLabelBuilder">BUILDER · Antigravity</span></div>
-      <div class="triad-step" data-stage="VERIFYING"><b>03 검증 (VERIFYING)</b><span>DIRECTOR · Scope Guard</span></div>
-      <div class="triad-step" data-stage="REVIEWING"><b>04 검수 (REVIEWING)</b><span id="pipeLabelReviewer">REVIEWER · Codex</span></div>
-      <div class="triad-step" data-stage="DECIDING"><b>05 판정 (DECIDING)</b><span id="pipeLabelHead2">HEAD · PASS/FAIL</span></div>
+    <div class="settings-panel-body" style="display:flex;flex-direction:column;gap:12px">
+      <form class="settings-question-form" id="triadGoalForm">
+        <div class="settings-question-selectors">
+          <label class="settings-select-field">
+            <span>👤 질문 / 지시할 AI 직원 선택</span>
+            <select class="triad-cli-select" id="triadAgentTargetSelect" aria-label="질문할 AI 직원 선택">
+              <option value="head" selected>👑 HEAD Director AI (총괄 지휘)</option>
+              <option value="builder">🛠 Builder Dev AI (구현 코딩)</option>
+              <option value="reviewer">🔍 Reviewer Audit AI (독립 검수)</option>
+              <option value="researcher">⚡ Grok Scout AI (xAI Grok 추론)</option>
+              <option value="director">🛡 Scope Guard AI (안전 검증)</option>
+              <option value="triad">🔬 Triad Research AI (교차 연구)</option>
+            </select>
+          </label>
+          <label class="settings-select-field">
+            <span>⚙️ 실행 모드 (즉답 질문 / 미션 단계)</span>
+            <select class="triad-cli-select" id="triadProfileSelect" aria-label="실행 모드 선택">
+              <option value="ask" selected>💬 간단 질문 (선택 직원 즉답)</option>
+              <option value="quick">⚡ 개발 미션 Quick (2단계)</option>
+              <option value="standard">🔄 1사이클 미션 Standard (5단계 산출물)</option>
+              <option value="deep">🔬 개발 미션 Deep (심층)</option>
+            </select>
+          </label>
+        </div>
+        <div class="settings-question-input-row">
+          <input type="text" class="triad-goal-input" id="triadGoalInput" placeholder="선택한 AI 직원에게 간단한 질문을 하거나, 실행 모드를 '1사이클 미션'으로 바꿔 목표를 지시하세요!" required>
+          <button type="submit" class="btn primary" id="triadGoalSubmit" style="height:40px;padding:0 18px;white-space:nowrap;flex-shrink:0">질문 / 미션 실행 ↗</button>
+        </div>
+      </form>
+
+      <div id="triadChatReplyBox" class="settings-reply-box">
+        <div>
+          <strong style="color:#0f6848;display:inline-block;margin-right:6px" id="triadReplyRole">[HEAD Director AI 응답 대기]</strong>
+          <span id="triadReplyText">위 드롭다운에서 원하는 AI 직원을 선택해 바로 질문하거나, '1사이클 미션 Standard'를 선택해 5단계 파이프라인 결과물(.md 리포트)을 생성해 보세요.</span>
+        </div>
+      </div>
+
+      <div class="triad-steps settings-triad-steps" id="triadPipelineSteps">
+        <div class="triad-step" data-stage="PLANNING"><b>01 · 계획 (PLANNING)</b><span id="pipeLabelHead1">HEAD · Claude</span></div>
+        <div class="triad-step" data-stage="BUILDING"><b>02 · 구현 (BUILDING)</b><span id="pipeLabelBuilder">BUILDER · Antigravity</span></div>
+        <div class="triad-step" data-stage="VERIFYING"><b>03 · 검증 (VERIFYING)</b><span>DIRECTOR · Scope Guard</span></div>
+        <div class="triad-step" data-stage="REVIEWING"><b>04 · 검수 (REVIEWING)</b><span id="pipeLabelReviewer">REVIEWER · Codex</span></div>
+        <div class="triad-step" data-stage="DECIDING"><b>05 · 판정 (DECIDING)</b><span id="pipeLabelHead2">HEAD · PASS/FAIL</span></div>
+      </div>
     </div>
   </section>
 
   <!-- [3] 최근 파이프라인 활동 & 산출물 바로가기 -->
-  <section class="overview-grid">
+  <section class="overview-grid" style="margin-bottom:18px">
     <div class="panel activity-panel">
-      <div class="panel-head">
+      <div class="panel-head settings-panel-head">
         <div>
-          <div class="panel-title">실시간 파이프라인 실행 로그</div>
+          <div class="panel-title">03 · 실시간 파이프라인 실행 로그</div>
           <div class="panel-sub">HEAD · BUILDER · REVIEWER · RESEARCHER · DIRECTOR 최근 이벤트</div>
         </div>
         <a href="logs.html" class="text-link">전체 로그 ↗</a>
@@ -194,19 +224,20 @@
     </div>
 
     <div class="panel">
-      <div class="panel-head">
+      <div class="panel-head settings-panel-head">
         <div>
           <div class="panel-title">생성된 1사이클 미션 산출물 (.md 리포트)</div>
           <div class="panel-sub">5단계 파이프라인을 통과해 생성된 결과물입니다.</div>
         </div>
+        <a href="logs.html" class="text-link">실행 기록 ↗</a>
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px;padding-top:4px">
-        <a href="deliverables/mission-20558.md" target="_blank" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid #cbeee0;background:#f2fcf8;border-radius:10px;text-decoration:none;color:#0f6848;font-size:12px;font-weight:700">
+      <div class="settings-panel-body" style="display:flex;flex-direction:column;gap:12px">
+        <a href="deliverables/mission-20558.md" target="_blank" class="settings-deliverable-card">
           <span>📄 deliverables/mission-20558.md — 파이썬 로또 번호 5세트 자동 추천기 함수 (5/5 PASS)</span>
-          <span>리포트 열기 ↗</span>
+          <span style="white-space:nowrap;flex-shrink:0">리포트 열기 ↗</span>
         </a>
         <div class="right-note" style="margin:0">
-          <strong>💡 AI 설정 & 질문 페이지 안내</strong>
+          <strong>💡 AI 설정 &amp; 질문 페이지 안내</strong>
           <p>대시보드(Overview)와 AI 직원 관리 화면을 깔끔하게 유지하기 위해, 4대 AI 카드·직원 선택 질문/미션 실행 섹션·CLI 로그인 및 경로 설정을 모두 이 전용 설정 페이지에 통합했습니다.</p>
         </div>
       </div>
@@ -214,48 +245,50 @@
   </section>
 
   <!-- [4] 통합된 CLI 로그인 상태 확인 & 실행 경로 설정 섹션 -->
-  <section class="panel" id="cliAuthSection" style="margin-top:18px;display:flex;flex-direction:column;gap:14px">
-    <div class="panel-head" style="margin-bottom:0">
-      <div>
-        <div class="eyebrow">SUBSCRIPTION CLI AUTHENTICATION & DIAGNOSTICS</div>
-        <div class="panel-title" style="font-size:16px">🔑 AI CLI 로그인 상태 확인 & 실행 경로 설정</div>
+  <section class="panel settings-section-panel" id="cliAuthSection">
+    <div class="panel-head settings-panel-head">
+      <div style="flex:1;min-width:260px">
+        <div class="eyebrow">SUBSCRIPTION CLI AUTHENTICATION &amp; DIAGNOSTICS</div>
+        <div class="panel-title" style="font-size:15px;margin-top:2px">04 · 🔑 AI CLI 로그인 상태 확인 &amp; 실행 경로 설정</div>
         <div class="panel-sub">Claude Code(claude), Google Antigravity(agy), OpenAI Codex(codex), xAI Grok(grok)의 설치·구독 로그인 세션 상태와 실행 파일 경로를 관리합니다.</div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button type="button" class="btn small mint" id="btnInstallAllMissingCli">⚡ 미설치 CLI 일괄 원클릭 설치</button>
-        <button type="button" class="btn small" id="btnDeepProbeCli">🔍 실시간 로그인 검증 (Deep Probe)</button>
-        <button type="button" class="btn small primary" id="btnSaveCliPaths">💾 실행 경로 저장 & 재검증</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0">
+        <button type="button" class="btn small mint" id="btnInstallAllMissingCli" style="white-space:nowrap">⚡ 미설치 CLI 일괄 원클릭 설치</button>
+        <button type="button" class="btn small" id="btnDeepProbeCli" style="white-space:nowrap">🔍 실시간 로그인 검증 (Deep Probe)</button>
+        <button type="button" class="btn small primary" id="btnSaveCliPaths" style="white-space:nowrap">💾 실행 경로 저장 &amp; 재검증</button>
       </div>
     </div>
 
-    <div class="cli-summary-banner" id="cliSummaryBanner">
-      <div>
-        <strong id="cliSummaryHeadline">진단 정보를 불러오는 중입니다...</strong>
-        <div id="cliSummarySub" style="margin-top:3px;font-size:10px;color:#64748b">모든 CLI 호출 시 OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY 등 종량제 키는 자동 제거됩니다.</div>
+    <div class="settings-panel-body" style="display:flex;flex-direction:column;gap:14px">
+      <div class="cli-summary-banner" id="cliSummaryBanner">
+        <div>
+          <strong id="cliSummaryHeadline">진단 정보를 불러오는 중입니다...</strong>
+          <div id="cliSummarySub" style="margin-top:3px;font-size:10px;color:#64748b">모든 CLI 호출 시 OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY 등 종량제 키는 자동 제거됩니다.</div>
+        </div>
       </div>
+
+      <form id="cliModalAskForm" class="settings-cli-test-form">
+        <span class="triad-role-badge role-reviewer" style="white-space:nowrap;flex-shrink:0">💬 CLI 직접 응답 테스트</span>
+        <select id="cliModalAskTarget" class="triad-cli-select" style="height:34px;flex-shrink:0">
+          <option value="antigravity">Google Antigravity (agy)</option>
+          <option value="claude">Claude Code (claude)</option>
+          <option value="openai">OpenAI Codex (codex)</option>
+          <option value="grok">xAI Grok (grok)</option>
+          <option value="head">현재 HEAD 담당 CLI</option>
+        </select>
+        <input type="text" id="cliModalAskInput" class="triad-goal-input" style="height:34px;font-size:11px;flex:1;min-width:200px" value="안녕? 너는 어떤 AI CLI이고 지금 정상 작동 중이니? 한 문장으로 답해줘." placeholder="CLI에 던질 간단한 질문을 입력하세요">
+        <button type="submit" class="btn small primary" id="btnCliModalAsk" style="height:34px;padding:0 14px;white-space:nowrap;flex-shrink:0">질문 보내기 &amp; 응답 확인 ↗</button>
+      </form>
+
+      <div id="cliInstallLogBox" style="display:none;background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:10px;font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-height:180px;overflow-y:auto;white-space:pre-wrap"></div>
+
+      <div class="cli-auth-grid" id="cliAuthGrid"></div>
     </div>
-
-    <form id="cliModalAskForm" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-radius:11px;background:#f1f5f9;border:1px solid #cbd5e1">
-      <span class="triad-role-badge role-reviewer">💬 CLI 직접 응답 테스트</span>
-      <select id="cliModalAskTarget" class="triad-cli-select" style="height:32px">
-        <option value="antigravity">Google Antigravity (agy)</option>
-        <option value="claude">Claude Code (claude)</option>
-        <option value="openai">OpenAI Codex (codex)</option>
-        <option value="grok">xAI Grok (grok)</option>
-        <option value="head">현재 HEAD 담당 CLI</option>
-      </select>
-      <input type="text" id="cliModalAskInput" class="triad-goal-input" style="height:32px;font-size:11px" value="안녕? 너는 어떤 AI CLI이고 지금 정상 작동 중이니? 한 문장으로 답해줘." placeholder="CLI에 던질 간단한 질문을 입력하세요">
-      <button type="submit" class="btn small primary" id="btnCliModalAsk">질문 보내기 & 응답 확인 ↗</button>
-    </form>
-
-    <div id="cliInstallLogBox" style="display:none;background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:10px;font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-height:180px;overflow-y:auto;white-space:pre-wrap"></div>
-
-    <div class="cli-auth-grid" id="cliAuthGrid"></div>
   </section>
 </div>
 </main>
 </div>
-<script src="app.js?v=triad25"></script>
+<script src="app.js?v=triad32"></script>
 </body>
 </html>
 

@@ -944,7 +944,10 @@
             <button type="submit" class="bubble-send" id="sideAskSendBtn">질문 ↗</button>
           </form>
         </div>
-        <a class="btn small mint" href="agents.html#characters" style="width:100%;justify-content:center;margin-top:10px">🎨 캐릭터 스튜디오에서 코디/설정 변경 ↗</a>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <a class="btn small primary" href="agents.html#characterSimulatorSection" style="flex:1;justify-content:center;background:#ea580c;border-color:#ea580c">🍁 캐릭터 시뮬레이터 코디 ↗</a>
+          <a class="btn small mint" href="agents.html#characters" style="flex:1;justify-content:center">⚙️ AI CLI 설정 ↗</a>
+        </div>
       `;
 
       document.getElementById('officeAgentCliSelect')?.addEventListener('change', (e) => {
@@ -1046,6 +1049,38 @@
       }
     } catch (_) {}
   }
+
+  window.addEventListener('nexus:character-configs-updated', () => {
+    agentSpecs = buildAgentSpecsFromStudio();
+    buildOffice();
+    renderFloorAgents();
+  });
+
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'nexus-character-ai-configs-v1' && e.newValue) {
+      try {
+        const updated = JSON.parse(e.newValue) || {};
+        if (Array.isArray(window.modularAgents)) {
+          window.modularAgents.forEach(a => {
+            const sv = updated[a.id];
+            if (sv) {
+              if (sv.name) a.name = sv.name;
+              if (sv.floor) a.floor = sv.floor;
+              if (sv.triadRole) a.triadRole = sv.triadRole;
+              if (sv.cliProvider) a.cliProvider = sv.cliProvider;
+              if (sv.mapleEquipped && Object.keys(sv.mapleEquipped).length) a.mapleEquipped = { ...sv.mapleEquipped };
+              if (sv.mapleAnim) a.mapleAnim = sv.mapleAnim;
+              a.mapleAnimated = Boolean(sv.mapleAnimated);
+              a.mapleFlipped = Boolean(sv.mapleFlipped);
+            }
+          });
+        }
+        agentSpecs = buildAgentSpecsFromStudio();
+        buildOffice();
+        renderFloorAgents();
+      } catch (_) {}
+    }
+  });
 
   renderFloorSwitcher();
   buildOffice();

@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · AI 직원 & Triad 역할 관리</title><link rel="stylesheet" href="styles.css?v=triad20"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · AI 직원 & Triad 역할 관리</title><link rel="stylesheet" href="styles.css?v=triad24"></head>
 <body data-page="agents">
 <div class="app"><aside class="sidebar"><a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI DEV DIRECTOR</div></div></a><div class="nav-label">WORKSPACE</div><nav class="nav-group"><a class="nav-link" href="index.html"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a><a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">3D 가상 오피스</span><span class="nav-pill">LIVE</span></a><a class="nav-link active" href="agents.html" aria-current="page"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a><a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">AI 설정 & 질문</span></a><a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a></nav><div class="nav-label" style="margin-top:30px">MANAGEMENT</div><nav class="nav-group"><a class="nav-link" href="logs.html"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a></nav><div class="sidebar-bottom"><div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption">Claude · Codex · Antigravity · Grok<br>HEAD / BUILDER / REVIEWER / RESEARCHER</div><div class="usage"><span>미션 단계 예산</span><strong>5 / 6</strong></div><div class="usage-track"><span style="width:83%"></span></div></div><div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div></div></aside>
 <main class="main"><header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>AI 직원 관리 · Triad 역할 체계</strong></div><div class="top-actions"><div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">TRIAD STANDBY · 구독 CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
-<div class="content"><div class="page-heading"><div><div class="eyebrow">TRIAD AGENT CONTROL CENTER</div><h1>AI 직원 & 캐릭터 스튜디오 관리</h1><p>다중 AI CLI(Claude Code, OpenAI Codex, Google Antigravity, xAI Grok)가 배정된 AI 직원 명단과 모듈형 캐릭터 스튜디오를 관리합니다.</p></div><div class="heading-actions"><a class="btn" href="logs.html">◷ 실행 기록</a><a class="btn" href="settings.html">⚙ AI 설정 & 질문</a><a class="btn" href="office.html">⬡ 가상 오피스</a><a class="btn primary" href="#characters">♟ 캐릭터 스튜디오</a></div></div>
+<div class="content"><div class="page-heading"><div><div class="eyebrow">TRIAD AGENT CONTROL CENTER</div><h1>AI 직원 & 캐릭터 스튜디오 관리</h1><p>다중 AI CLI(Claude Code, OpenAI Codex, Google Antigravity, xAI Grok)가 배정된 AI 직원 설정과 독립된 캐릭터 시뮬레이터를 분리하여 관리합니다.</p></div><div class="heading-actions"><a class="btn" href="logs.html">◷ 실행 기록</a><a class="btn" href="settings.html">⚙ AI 설정 & 질문</a><a class="btn" href="office.html">⬡ 가상 오피스</a><a class="btn" href="#characters">♟ AI 직원 설정</a><a class="btn primary" href="#characterSimulatorSection">🍁 캐릭터 시뮬레이터</a></div></div>
 
 <section class="stats-grid"><div class="stat-card"><div class="stat-head"><span>등록된 AI 직원</span><span class="stat-ico ico-blue">♙</span></div><div class="stat-value" id="statRegisteredAgents">05</div><div class="stat-foot">HEAD · BUILDER · REVIEWER · RESEARCHER</div></div><div class="stat-card"><div class="stat-head"><span>구독 CLI 연동</span><span class="stat-ico ico-mint">↗</span></div><div class="stat-value">04 <span style="font-size:12px;color:#98a5b2;font-weight:600">CLIs</span></div><div class="stat-foot"><span class="tiny-dot"></span>Claude · Codex · Antigravity · Grok</div></div><div class="stat-card"><div class="stat-head"><span>독립 검수 (REVIEWER)</span><span class="stat-ico ico-amber">◷</span></div><div class="stat-value">02</div><div class="stat-foot">Fail-Closed 검수 활성</div></div><div class="stat-card"><div class="stat-head"><span>Scope Guard 차단/경고</span><span class="stat-ico" style="background:#ffebed;color:#d45c68">!</span></div><div class="stat-value">01</div><div class="stat-foot">경로/타임아웃 자동 복구 대상</div></div></section>
 
@@ -14,19 +14,31 @@
 <div class="agent-card-row" data-role="BUILDER" data-name="builder dev ai 구현 코딩 google antigravity agy json 제안" data-status="running"><div class="agent-cell"><div class="agent-avatar" style="background:#eaf2ff;color:#2b6cb0">B</div><div><div class="agent-name">Builder Dev AI</div><div class="agent-type" data-role-badge="builder">BUILDER · Google Antigravity (agy) · #003</div></div></div><div class="agent-task">격리 Worktree 전체 파일 JSON 제안 작성</div><div><div class="activity-track"><span style="width:100%"></span></div><div class="agent-type" style="margin-top:5px">구현 대기</div></div><div><span class="status running">BUILDER 활성</span></div></div>
 <div class="agent-card-row" data-role="REVIEWER" data-name="reviewer audit ai 독립 검수 openai codex 리뷰 검증" data-status="review"><div class="agent-cell"><div class="agent-avatar" style="background:#e4faf1;color:#15805c">R</div><div><div class="agent-name">Reviewer Audit AI</div><div class="agent-type" data-role-badge="reviewer">REVIEWER · OpenAI Codex (codex) · #004</div></div></div><div class="agent-task">read-only 샌드박스 독립 코드 검수 (P0/P1/P2)</div><div><div class="activity-track"><span style="width:100%;background:#ad91f3"></span></div><div class="agent-type" style="margin-top:5px">Fail-Closed</div></div><div><span class="status review">검수 준비</span></div></div>
 <div class="agent-card-row" data-role="DIRECTOR" data-name="scope guard ai director 안전 게이트 경로 diff 상한" data-status="running"><div class="agent-cell"><div class="agent-avatar" style="background:#f3efff;color:#6b46c1">D</div><div><div class="agent-name">Scope Guard AI</div><div class="agent-type">DIRECTOR · Safety Core · #005</div></div></div><div class="agent-task">허용 경로 · 파일 수(15) · Diff 상한(1500줄) 강제</div><div><div class="activity-track"><span style="width:100%"></span></div><div class="agent-type" style="margin-top:5px">상시 감시</div></div><div><span class="status running">보호 활성</span></div></div>
-</div><div class="section-foot"><span id="agentCount">5개 Triad 핵심 에이전트 표시 중 · 캐릭터 스튜디오 5명 연동</span><span>구독 CLI 전용 (API Key Stripped)</span></div></section></div>  <section class="character-studio panel" id="characters">
+</div><div class="section-foot"><span id="agentCount">5개 Triad 핵심 에이전트 표시 중 · 캐릭터 스튜디오 5명 연동</span><span>구독 CLI 전용 (API Key Stripped)</span></div></section></div>
+
+  <!-- [섹션 1] AI 직원 디렉토리 & AI CLI · 페르소나 · 스킬 설정 -->
+  <section class="character-studio panel" id="characters" style="margin-bottom:18px">
     <div class="panel-head character-studio-heading">
-      <div><div class="panel-title">모듈형 AI 캐릭터 스튜디오</div><div class="panel-sub">기본 베이스 신체(Base Body)와 5개 파츠 레이어로 초기 5명(최대 20명 확장 가능)의 역할·부서별 캐릭터를 실시간 구성합니다.</div></div>
-      <div class="character-heading-actions"><button type="button" class="btn small primary" id="btnAddStudioCharacter">＋ 직원 추가</button><span class="character-total" id="studioTotalBadge"><span class="character-total-dot"></span> 05 AGENTS</span><a class="text-link" href="office.html">가상 오피스 ↗</a></div>
+      <div>
+        <div class="panel-title">AI 직원 디렉토리 & 개별 CLI · 페르소나 · 스킬 설정</div>
+        <div class="panel-sub">초기 5명(최대 20명 확장 가능)의 AI 직원을 선택하여 담당 CLI 엔진(Claude, Antigravity, Codex, Grok), Triad 역할, 페르소나 지침 및 장착 스킬을 관리합니다.</div>
+      </div>
+      <div class="character-heading-actions">
+        <button type="button" class="btn small primary" id="btnAddStudioCharacter">＋ 직원 추가</button>
+        <span class="character-total" id="studioTotalBadge"><span class="character-total-dot"></span> 05 AGENTS</span>
+        <a class="btn small" href="#characterSimulatorSection" style="background:#fff7ed;color:#ea580c;border-color:#fed7aa">🍁 캐릭터 시뮬레이터 ↓</a>
+        <a class="text-link" href="office.html">가상 오피스 ↗</a>
+      </div>
     </div>
     <div class="character-studio-layout">
       <div class="character-library">
         <div class="character-library-toolbar">
-          <div><strong>캐릭터 디렉토리 (초기 5명)</strong><span>Triad 역할(HEAD/BUILDER/REVIEWER) 및 층별 매핑</span></div>
+          <div><strong>캐릭터 디렉토리 (초기 5명)</strong><span>Triad 역할(HEAD/BUILDER/REVIEWER/RESEARCHER) 및 층별 매핑</span></div>
           <div style="display:flex;align-items:center;gap:7px">
             <select id="floorFilter" style="height:28px;border:1px solid #dce4eb;border-radius:6px;padding:0 7px;font-size:9px;background:#fff;color:#506072;outline:none" aria-label="층별 및 역할별 필터">
               <option value="all">전체 층 & 역할 (초기 5명)</option>
               <option value="HEAD">★ HEAD · 총괄 지휘 그룹</option>
+              <option value="RESEARCHER">★ RESEARCHER · 심층 추론 그룹</option>
               <option value="BUILDER">★ BUILDER · 구현 코딩 그룹</option>
               <option value="REVIEWER">★ REVIEWER · 독립 검수 그룹</option>
               <option value="1F">1F HEAD · 기획&전략팀</option>
@@ -44,57 +56,240 @@
           </div>
         </div>
         <div class="char-directory-grid" id="charDirectoryGrid" aria-label="캐릭터 샘플 20종 디렉토리"></div>
-        <div class="character-library-foot"><span class="library-foot-mark">✦</span><span>카드를 클릭하면 우측 편집기에서 파츠를 실시간으로 스왑할 수 있습니다.</span></div>
+        <div class="character-library-foot"><span class="library-foot-mark">✦</span><span>카드를 클릭하면 우측 AI CLI 설정과 하단 <strong>캐릭터 시뮬레이터</strong> 대상 직원이 동시에 선택됩니다.</span></div>
       </div>
-      <aside class="character-editor maples-simulator" aria-label="메이플스토리 시뮬레이터 방식 캐릭터 커스터마이저">
-        <!-- maples.im Simulator Head -->
-        <div class="maples-sim-head">
-          <div class="maples-logo-wrap">
-            <span class="maples-badge">maples.im style</span>
-            <strong>캐릭터 시뮬레이터</strong>
+
+      <!-- 우측: 선택한 AI 직원의 CLI · 역할 · 페르소나 · 스킬 전용 설정 -->
+      <aside class="character-editor" aria-label="선택한 AI 직원의 CLI 및 페르소나 설정">
+        <div class="maples-sim-head" style="margin-bottom:10px;align-items:center">
+          <div class="maples-logo-wrap" style="min-width:0;flex:1;overflow:hidden">
+            <span class="agent-id-tag" id="selectedCharBadge" style="flex-shrink:0">#01</span>
+            <strong id="customizerName" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">전략기획 AI</strong>
+            <span id="customizerDept" style="font-size:9.5px;color:#64748b;white-space:nowrap;flex-shrink:0">1F · HEAD</span>
           </div>
-          <div class="maples-sim-status">
+          <a href="#characterSimulatorSection" class="sim-btn" style="text-decoration:none;padding:5px 9px;font-size:9.5px;background:#fff7ed;color:#ea580c;border-color:#fed7aa;white-space:nowrap;flex-shrink:0">🍁 코디 시뮬레이터 ↓</a>
+        </div>
+
+        <!-- Quick AI CLI & Role Assignment Bar -->
+        <div class="studio-ai-quickbar" aria-label="선택 캐릭터 AI CLI 및 역할 빠른 배정" style="margin-bottom:10px">
+          <label>
+            <span>Triad 역할 배정</span>
+            <select id="studioQuickRole" class="studio-ai-select">
+              <option value="HEAD">HEAD · 총괄 지휘</option>
+              <option value="BUILDER">BUILDER · 구현 코딩</option>
+              <option value="REVIEWER">REVIEWER · 독립 검수</option>
+              <option value="RESEARCHER">RESEARCHER · 심층 추론</option>
+              <option value="DIRECTOR">DIRECTOR · 안전 검증</option>
+              <option value="TRIAD">TRIAD · 교차 연구</option>
+            </select>
+          </label>
+          <label>
+            <span>담당 AI CLI 엔진</span>
+            <select id="studioQuickCli" class="studio-ai-select">
+              <option value="claude">Claude Code (claude)</option>
+              <option value="antigravity">Google Antigravity (agy)</option>
+              <option value="openai">OpenAI Codex (codex)</option>
+              <option value="grok">xAI Grok (grok)</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="maples-panel active" id="tab-ai" style="gap:10px">
+          <div>
+            <div class="maples-subhead"><span>이 캐릭터에 배정할 AI CLI (CLI Engine)</span><em>4 Engines</em></div>
+            <div class="studio-cli-cards" id="studioCliCardGroup">
+              <button type="button" class="studio-cli-card" data-cli-val="claude">
+                <span class="item-code">ANTHROPIC</span>
+                <strong>Claude Code</strong>
+                <span>claude (--print)</span>
+              </button>
+              <button type="button" class="studio-cli-card" data-cli-val="antigravity">
+                <span class="item-code">GOOGLE</span>
+                <strong>Antigravity</strong>
+                <span>agy.exe (stream-json)</span>
+              </button>
+              <button type="button" class="studio-cli-card" data-cli-val="openai">
+                <span class="item-code">OPENAI</span>
+                <strong>OpenAI Codex</strong>
+                <span>codex (read-only)</span>
+              </button>
+              <button type="button" class="studio-cli-card" data-cli-val="grok">
+                <span class="item-code">XAI</span>
+                <strong>xAI Grok</strong>
+                <span>grok (--prompt)</span>
+              </button>
+            </div>
+          </div>
+          <div class="studio-form-grid">
+            <label class="studio-field">
+              <span>캐릭터 이름 (Agent Name)</span>
+              <input type="text" id="studioAiNameInput" class="studio-ai-input" placeholder="예: 전략기획 AI">
+            </label>
+            <label class="studio-field">
+              <span>배치 층 / 부서 (Floor)</span>
+              <select id="studioAiFloorSelect" class="studio-ai-select">
+                <option value="1F">1F 기획&전략팀</option>
+                <option value="2F">2F 인사&경영지원</option>
+                <option value="3F">3F 개발&엔지니어링</option>
+                <option value="4F">4F 디자인&콘텐츠</option>
+                <option value="5F">5F 마케팅&홍보</option>
+                <option value="6F">6F 영업&파트너십</option>
+                <option value="7F">7F 리스크&감사</option>
+                <option value="8F">8F 고객지원 CS</option>
+                <option value="9F">9F 연구&R&D</option>
+                <option value="10F">10F 글로벌 사업</option>
+              </select>
+            </label>
+            <label class="studio-field">
+              <span>CLI 샌드박스 권한 (Sandbox)</span>
+              <select id="studioAiSandboxSelect" class="studio-ai-select">
+                <option value="read-only">read-only (읽기 전용 안전 모드)</option>
+                <option value="proposal">proposal (격리 Worktree JSON 제안)</option>
+                <option value="standard">standard (표준 CLI 실행)</option>
+              </select>
+            </label>
+            <label class="studio-field">
+              <span>실행 타임아웃 (Timeout)</span>
+              <select id="studioAiTimeoutSelect" class="studio-ai-select">
+                <option value="60">60초 (빠른 응답)</option>
+                <option value="180">180초 (표준 검토)</option>
+                <option value="300">300초 (HEAD / REVIEWER 기본)</option>
+                <option value="600">600초 (BUILDER 심층 구현)</option>
+              </select>
+            </label>
+          </div>
+          <div class="studio-field">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span>캐릭터 전용 페르소나 / 지침 (Persona & System Prompt)</span>
+              <em style="font-style:normal;font-size:8px;color:#ea580c;font-weight:700">클릭 시 템플릿 자동입력</em>
+            </div>
+            <div class="persona-preset-bar" id="studioPersonaPresetBar">
+              <button type="button" class="persona-preset-chip" data-persona="head">👑 총괄 디렉터(HEAD)</button>
+              <button type="button" class="persona-preset-chip" data-persona="builder">🛠 풀스택 빌더(BUILDER)</button>
+              <button type="button" class="persona-preset-chip" data-persona="reviewer">🔍 코드 감사관(REVIEWER)</button>
+              <button type="button" class="persona-preset-chip" data-persona="security">🛡 보안/Scope 가드</button>
+            </div>
+            <textarea id="studioAiPromptInput" class="studio-ai-textarea" placeholder="이 캐릭터의 성격·말투·전문 분야·업무 원칙(페르소나)을 입력하세요..."></textarea>
+          </div>
+          <div class="studio-field">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span>장착 스킬 (Character Skills · 질문/미션 시 자동 주입)</span>
+              <em id="studioSkillCountLabel" style="font-style:normal;font-size:8.5px;color:#2563eb;font-weight:800">0 Skills</em>
+            </div>
+            <div class="skill-manager-box">
+              <div class="skill-chip-list" id="studioSkillChipList"></div>
+              <div style="display:flex;gap:5px">
+                <input type="text" id="studioSkillInput" class="studio-ai-input" style="flex:1" placeholder="추가할 스킬 입력 (예: React 최적화, SQL 튜닝, 보안 감사)">
+                <button type="button" class="btn small" id="btnAddStudioSkill" style="padding:3px 9px;font-size:9.5px">＋ 스킬 추가</button>
+              </div>
+              <div class="skill-catalog-bar" id="studioSkillPresetBar">
+                <button type="button" class="skill-preset-btn" data-skill="아키텍처 설계">＋ 아키텍처 설계</button>
+                <button type="button" class="skill-preset-btn" data-skill="코드 리뷰(P0/P1)">＋ 코드 리뷰(P0/P1)</button>
+                <button type="button" class="skill-preset-btn" data-skill="UI/UX & SVG">＋ UI/UX & SVG</button>
+                <button type="button" class="skill-preset-btn" data-skill="Python 백엔드">＋ Python 백엔드</button>
+                <button type="button" class="skill-preset-btn" data-skill="자동화 테스트">＋ 자동화 테스트</button>
+                <button type="button" class="skill-preset-btn" data-skill="Scope Guard 검증">＋ Scope Guard 검증</button>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button type="button" class="btn small primary" id="btnSaveCharAiConfig" style="flex:1;justify-content:center">💾 이 캐릭터의 AI CLI 설정 저장</button>
+            <button type="button" class="btn small mint" id="btnApplyCharToGlobalRole" title="이 캐릭터의 CLI를 전역 HEAD/BUILDER/REVIEWER/RESEARCHER 역할에도 반영">⇄ 전역 역할에도 반영</button>
+          </div>
+          <form class="bubble-form" id="studioCharAskForm" style="padding-top:4px;border-top:1px solid #eef2f6">
+            <input type="text" class="bubble-input" id="studioCharAskInput" placeholder="현재 배정된 CLI로 이 캐릭터에게 시험 질문하기..." required>
+            <button type="submit" class="bubble-send" id="studioCharAskBtn">💬 시험 질문 ↗</button>
+          </form>
+          <div id="studioCharAskReply" style="display:none;font-size:10px;line-height:1.5;color:#1e293b;background:#f8fafc;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px"></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- [섹션 2] 독립 분리된 캐릭터 시뮬레이터 섹션 (KMS v389 파츠 & 모션 코디 스튜디오) -->
+  <section class="character-simulator-section panel" id="characterSimulatorSection">
+    <div class="panel-head sim-section-head">
+      <div class="sim-head-copy">
+        <div class="sim-title-row">
+          <span class="maples-badge">🍁 KMS v389</span>
+          <span class="panel-title">캐릭터 시뮬레이터 (파츠 & 모션 코디 스튜디오)</span>
+        </div>
+        <div class="panel-sub">선택한 AI 직원 아바타의 KMS v389 파츠(헤어·성형·의상·모자·신발·가구·펫·이펙트·피부)와 12종 동작 모션을 전용 섹션에서 커스터마이징합니다.</div>
+      </div>
+      <div class="sim-head-actions">
+        <a class="btn small" href="maplestory-characters-scraper/dashboard/index.html" target="_blank" style="background:#fff7ed;color:#ea580c;border-color:#fed7aa;white-space:nowrap">🍁 전체화면 파츠 랩 열기 ↗</a>
+        <a class="btn small primary" href="office.html" style="white-space:nowrap">⬡ 가상 오피스에서 보기 ↗</a>
+      </div>
+    </div>
+
+    <div class="simulator-split-layout">
+      <!-- 좌측: 대상 직원 선택 + 아바타 라이브 프리뷰 캔버스 + 장착 슬롯 목록 + JSON 프리셋 -->
+      <div class="simulator-preview-col">
+        <!-- 코디 대상 직원 & 실시간 상태 바 -->
+        <div class="sim-target-agent-box">
+          <div class="sim-target-row">
+            <span class="sim-target-label">👤 코디 대상 직원</span>
+            <select id="simAgentSelect" class="sim-agent-select" aria-label="코디 대상 직원 선택"></select>
+          </div>
+          <div class="sim-status-row">
             <span class="maples-live-dot"></span>
-            <span class="customizer-code-pill" id="customizerCodePill">BASE_M/H02/F02/O01/B01/A03</span>
+            <span class="customizer-code-pill" id="customizerCodePill">KMS 389 Live</span>
           </div>
         </div>
 
-        <!-- Viewport & Canvas Area -->
-        <div class="maples-viewport-card">
-          <!-- Top Tool Strip -->
-          <div class="maples-viewport-toolbar">
-            <div class="maples-tool-group">
-              <button type="button" class="sim-btn" id="btnFlipDir" title="좌우 반전 (Flip)">
-                <span>⇄</span> <span>방향</span>
-              </button>
-              <select id="selStance" class="sim-select" title="모션 / 스탠스">
-                <option value="stand1">스탠드 1 (기본)</option>
-                <option value="stand2">스탠드 2 (당당함)</option>
-                <option value="walk">워킹 (걸음)</option>
-                <option value="jump">점프 (도약)</option>
-                <option value="sit">착석 (의자)</option>
+        <div class="maples-viewport-card" style="margin-bottom:0">
+          <!-- 2단 정렬 뷰포트 툴바 (줄바꿈/깨짐 원천 방지) -->
+          <div class="sim-viewport-controls">
+            <div class="sim-control-row">
+              <select id="selStance" class="sim-select" style="flex:1;min-width:0;height:30px" title="모션 / 스탠스 (KMS v389 전체 동작)">
+                <option value="stand1">기본 서기 1 (숨쉬기)</option>
+                <option value="stand2">기본 서기 2 (한손 흔들기)</option>
+                <option value="sit">앉기 (가구/의자 착석)</option>
+                <option value="walk1">걷기 1 (팔다리 흔들기)</option>
+                <option value="walk2">걷기 2 (경보)</option>
+                <option value="jump">점프 (공중 모션)</option>
+                <option value="alert">경계 (무기 준비 태세)</option>
+                <option value="prone">엎드리기 (바닥)</option>
+                <option value="proneStab">엎드려 찌르기</option>
+                <option value="fly">날기 (부유 모션)</option>
+                <option value="ladder">사다리 타기</option>
+                <option value="rope">로프 타기</option>
               </select>
+              <button type="button" class="sim-btn" id="btnSimMotionPlay" title="살아 움직이는 GIF 모션 재생 / 정지 토글" style="height:30px;padding:0 11px;background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-weight:800;white-space:nowrap;flex-shrink:0">
+                <span id="simMotionIcon">▶</span> <span id="simMotionLabel">모션 재생</span>
+              </button>
             </div>
-            <div class="maples-tool-group">
+            <div class="sim-control-row" style="justify-content:space-between">
+              <button type="button" class="sim-btn" id="btnFlipDir" title="좌우 반전 (Flip)" style="height:28px;white-space:nowrap">
+                <span>⇄</span> <span>좌우 반전</span>
+              </button>
               <div class="zoom-pill-group">
                 <button type="button" class="zoom-btn active" data-zoom="1">1x</button>
                 <button type="button" class="zoom-btn" data-zoom="1.4">1.5x</button>
                 <button type="button" class="zoom-btn" data-zoom="1.8">2x</button>
               </div>
-              <button type="button" class="sim-btn" id="btnBackdrop" title="배경 전환">
-                <span>🏁</span> <span>배경</span>
+              <button type="button" class="sim-btn" id="btnBackdrop" title="배경 전환" style="height:28px;white-space:nowrap">
+                <span>🏁</span> <span>배경 전환</span>
               </button>
             </div>
           </div>
 
           <!-- Canvas Box -->
-          <div class="maples-canvas-area backdrop-checker" id="simCanvasArea">
-            <div class="customizer-stage stance-stand1" id="customizerStage"></div>
+          <div class="maples-canvas-area backdrop-checker" id="simCanvasArea" style="height:220px;position:relative;overflow:hidden">
+            <div id="simBgLayer" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;overflow:hidden">
+              <img id="simBgImg" src="" alt="건물 배경" style="width:100%;height:100%;object-fit:cover;opacity:0.88" />
+              <span id="simBgBadge" style="position:absolute;top:6px;left:8px;z-index:2;background:rgba(15,23,42,0.75);color:#fff;font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:999px">🏛️ 배경</span>
+            </div>
+            <div id="simPetBox" style="display:none;position:absolute;bottom:14px;left:18px;z-index:3;flex-direction:column;align-items:center;gap:2px;pointer-events:none">
+              <img id="simPetImg" src="" alt="동행 펫" style="width:36px;height:36px;object-fit:contain;image-rendering:pixelated" />
+              <span id="simPetName" style="background:rgba(15,23,42,0.72);color:#fde047;font-size:7.5px;font-weight:700;padding:1px 5px;border-radius:4px">펫</span>
+            </div>
+            <div class="customizer-stage stance-stand1" id="customizerStage" style="position:relative;z-index:2"></div>
           </div>
 
-          <!-- Stage Actions -->
+          <!-- Stage Actions (한 줄 고정 정렬) -->
           <div class="maples-stage-actions">
-            <button type="button" class="stage-action-btn primary" id="btnRandomize" title="무작위 파츠 조합">
+            <button type="button" class="stage-action-btn primary" id="btnRandomize" title="KMS v389 파츠 무작위 코디">
               <span>🎲</span> <span>랜덤</span>
             </button>
             <button type="button" class="stage-action-btn" id="btnLoadDefault" title="메이플 시뮬레이터 기본 캐릭터 로드">
@@ -103,352 +298,95 @@
             <button type="button" class="stage-action-btn" id="btnResetParts" title="초기화">
               <span>🔄</span> <span>초기화</span>
             </button>
-            <button type="button" class="stage-action-btn" id="btnExportPng" title="투명 배경 PNG 저장">
-              <span>💾</span> <span>PNG</span>
+            <button type="button" class="stage-action-btn" id="btnExportPng" title="아바타 이미지 파일(PNG/GIF) 다운로드">
+              <span>🖼️</span> <span>이미지</span>
             </button>
-            <button type="button" class="stage-action-btn" id="btnCopyJson" title="maples.im JSON 복사">
+            <button type="button" class="stage-action-btn" id="btnCopyJson" title="장착 JSON 복사">
               <span>📋</span> <span>JSON</span>
             </button>
           </div>
 
-          <!-- Agent Identity Meta -->
-          <div class="maples-agent-info">
-            <span class="agent-id-tag" id="selectedCharBadge">#01</span>
-            <div class="agent-name-meta">
-              <strong id="customizerName">전략기획 AI</strong>
-              <span id="customizerDept">1F 기획&전략팀 · 남성</span>
+          <!-- 캐릭터 시뮬레이터 설정 저장 & 오피스 적용 버튼 박스 -->
+          <div class="sim-save-apply-box">
+            <div class="sim-save-btn-row">
+              <button type="button" class="btn small primary sim-save-main-btn" id="btnSaveSimCharacter">
+                💾 이 캐릭터 코디 저장 &amp; 오피스 적용
+              </button>
+              <button type="button" class="btn small mint sim-save-all-btn" id="btnSaveAllSimCharacters" title="현재 등록된 모든 AI 직원의 코디/설정을 서버와 오피스에 일괄 저장">
+                📦 전체 저장
+              </button>
             </div>
-          </div>
-
-          <!-- Quick AI CLI & Role Assignment Bar -->
-          <div class="studio-ai-quickbar" aria-label="선택 캐릭터 AI CLI 및 역할 빠른 배정">
-            <label>
-              <span>Triad 역할 배정</span>
-              <select id="studioQuickRole" class="studio-ai-select">
-                <option value="HEAD">HEAD · 총괄 지휘</option>
-                <option value="BUILDER">BUILDER · 구현 코딩</option>
-                <option value="REVIEWER">REVIEWER · 독립 검수</option>
-                <option value="DIRECTOR">DIRECTOR · 안전 검증</option>
-                <option value="TRIAD">TRIAD · 교차 연구</option>
-              </select>
-            </label>
-            <label>
-              <span>담당 AI CLI 엔진</span>
-              <select id="studioQuickCli" class="studio-ai-select">
-                <option value="claude">Claude Code (claude)</option>
-                <option value="antigravity">Google Antigravity (agy)</option>
-                <option value="openai">OpenAI Codex (codex)</option>
-                <option value="grok">xAI Grok (grok)</option>
-              </select>
-            </label>
+            <div class="sim-save-status-banner" id="simSaveStatusBanner">
+              <span class="sim-save-dot"></span>
+              <span id="simSaveStatusText">파츠·모션 변경 후 <strong>[이 캐릭터 코디 저장 &amp; 오피스 적용]</strong>을 누르면 디렉토리와 가상 오피스에 영구 반영됩니다.</span>
+            </div>
           </div>
         </div>
 
-        <!-- maples.im Tab Navigation -->
-        <div class="maples-tab-bar" role="tablist">
-          <button type="button" class="maples-tab active" data-tab="tab-ai" role="tab">🤖 AI CLI & 설정</button>
-          <button type="button" class="maples-tab" data-tab="tab-body" role="tab">👤 바디/피부</button>
-          <button type="button" class="maples-tab" data-tab="tab-hair" role="tab">💇 헤어/염색</button>
-          <button type="button" class="maples-tab" data-tab="tab-face" role="tab">👀 얼굴/성형</button>
-          <button type="button" class="maples-tab" data-tab="tab-outfit" role="tab">👔 상의/의상</button>
-          <button type="button" class="maples-tab" data-tab="tab-bottom" role="tab">👖 하의/신발</button>
-          <button type="button" class="maples-tab" data-tab="tab-acc" role="tab">🎒 소품/장식</button>
-          <button type="button" class="maples-tab" data-tab="tab-layers" role="tab">📋 장착 목록</button>
-        </div>
-
-        <!-- Tab Panels Container -->
-        <div class="maples-tab-content">
-          <!-- 0. AI CLI & Role Config Tab -->
-          <div class="maples-panel active" id="tab-ai">
-            <div>
-              <div class="maples-subhead"><span>이 캐릭터에 배정할 AI CLI (CLI Engine)</span><em>4 Engines</em></div>
-              <div class="studio-cli-cards" id="studioCliCardGroup">
-                <button type="button" class="studio-cli-card" data-cli-val="claude">
-                  <span class="item-code">ANTHROPIC</span>
-                  <strong>Claude Code</strong>
-                  <span>claude (--print)</span>
-                </button>
-                <button type="button" class="studio-cli-card" data-cli-val="antigravity">
-                  <span class="item-code">GOOGLE</span>
-                  <strong>Antigravity</strong>
-                  <span>agy.exe (stream-json)</span>
-                </button>
-                <button type="button" class="studio-cli-card" data-cli-val="openai">
-                  <span class="item-code">OPENAI</span>
-                  <strong>OpenAI Codex</strong>
-                  <span>codex (read-only)</span>
-                </button>
-                <button type="button" class="studio-cli-card" data-cli-val="grok">
-                  <span class="item-code">XAI</span>
-                  <strong>xAI Grok</strong>
-                  <span>grok (--prompt)</span>
-                </button>
-              </div>
-            </div>
-            <div class="studio-form-grid">
-              <label class="studio-field">
-                <span>캐릭터 이름 (Agent Name)</span>
-                <input type="text" id="studioAiNameInput" class="studio-ai-input" placeholder="예: 전략기획 AI">
-              </label>
-              <label class="studio-field">
-                <span>배치 층 / 부서 (Floor)</span>
-                <select id="studioAiFloorSelect" class="studio-ai-select">
-                  <option value="1F">1F 기획&전략팀</option>
-                  <option value="2F">2F 인사&경영지원</option>
-                  <option value="3F">3F 개발&엔지니어링</option>
-                  <option value="4F">4F 디자인&콘텐츠</option>
-                  <option value="5F">5F 마케팅&홍보</option>
-                  <option value="6F">6F 영업&파트너십</option>
-                  <option value="7F">7F 리스크&감사</option>
-                  <option value="8F">8F 고객지원 CS</option>
-                  <option value="9F">9F 연구&R&D</option>
-                  <option value="10F">10F 글로벌 사업</option>
-                </select>
-              </label>
-              <label class="studio-field">
-                <span>CLI 샌드박스 권한 (Sandbox)</span>
-                <select id="studioAiSandboxSelect" class="studio-ai-select">
-                  <option value="read-only">read-only (읽기 전용 안전 모드)</option>
-                  <option value="proposal">proposal (격리 Worktree JSON 제안)</option>
-                  <option value="standard">standard (표준 CLI 실행)</option>
-                </select>
-              </label>
-              <label class="studio-field">
-                <span>실행 타임아웃 (Timeout)</span>
-                <select id="studioAiTimeoutSelect" class="studio-ai-select">
-                  <option value="60">60초 (빠른 응답)</option>
-                  <option value="180">180초 (표준 검토)</option>
-                  <option value="300">300초 (HEAD / REVIEWER 기본)</option>
-                  <option value="600">600초 (BUILDER 심층 구현)</option>
-                </select>
-              </label>
-            </div>
-            <div class="studio-field">
-              <div style="display:flex;align-items:center;justify-content:space-between">
-                <span>캐릭터 전용 페르소나 / 지침 (Persona & System Prompt)</span>
-                <em style="font-style:normal;font-size:8px;color:#ea580c;font-weight:700">클릭 시 템플릿 자동입력</em>
-              </div>
-              <div class="persona-preset-bar" id="studioPersonaPresetBar">
-                <button type="button" class="persona-preset-chip" data-persona="head">👑 총괄 디렉터(HEAD)</button>
-                <button type="button" class="persona-preset-chip" data-persona="builder">🛠 풀스택 빌더(BUILDER)</button>
-                <button type="button" class="persona-preset-chip" data-persona="reviewer">🔍 코드 감사관(REVIEWER)</button>
-                <button type="button" class="persona-preset-chip" data-persona="security">🛡 보안/Scope 가드</button>
-              </div>
-              <textarea id="studioAiPromptInput" class="studio-ai-textarea" placeholder="이 캐릭터의 성격·말투·전문 분야·업무 원칙(페르소나)을 입력하세요..."></textarea>
-            </div>
-            <div class="studio-field">
-              <div style="display:flex;align-items:center;justify-content:space-between">
-                <span>장착 스킬 (Character Skills · 질문/미션 시 자동 주입)</span>
-                <em id="studioSkillCountLabel" style="font-style:normal;font-size:8.5px;color:#2563eb;font-weight:800">0 Skills</em>
-              </div>
-              <div class="skill-manager-box">
-                <div class="skill-chip-list" id="studioSkillChipList"></div>
-                <div style="display:flex;gap:5px">
-                  <input type="text" id="studioSkillInput" class="studio-ai-input" style="flex:1" placeholder="추가할 스킬 입력 (예: React 최적화, SQL 튜닝, 보안 감사)">
-                  <button type="button" class="btn small" id="btnAddStudioSkill" style="padding:3px 9px;font-size:9.5px">＋ 스킬 추가</button>
-                </div>
-                <div class="skill-catalog-bar" id="studioSkillPresetBar">
-                  <button type="button" class="skill-preset-btn" data-skill="아키텍처 설계">＋ 아키텍처 설계</button>
-                  <button type="button" class="skill-preset-btn" data-skill="코드 리뷰(P0/P1)">＋ 코드 리뷰(P0/P1)</button>
-                  <button type="button" class="skill-preset-btn" data-skill="UI/UX & SVG">＋ UI/UX & SVG</button>
-                  <button type="button" class="skill-preset-btn" data-skill="Python 백엔드">＋ Python 백엔드</button>
-                  <button type="button" class="skill-preset-btn" data-skill="자동화 테스트">＋ 자동화 테스트</button>
-                  <button type="button" class="skill-preset-btn" data-skill="Scope Guard 검증">＋ Scope Guard 검증</button>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;gap:6px;align-items:center">
-              <button type="button" class="btn small primary" id="btnSaveCharAiConfig" style="flex:1;justify-content:center">💾 이 캐릭터의 AI CLI 설정 저장</button>
-              <button type="button" class="btn small mint" id="btnApplyCharToGlobalRole" title="이 캐릭터의 CLI를 전역 HEAD/BUILDER/REVIEWER 역할에도 반영">⇄ 전역 역할에도 반영</button>
-            </div>
-            <form class="bubble-form" id="studioCharAskForm" style="padding-top:4px;border-top:1px solid #eef2f6">
-              <input type="text" class="bubble-input" id="studioCharAskInput" placeholder="현재 배정된 CLI로 이 캐릭터에게 시험 질문하기..." required>
-              <button type="submit" class="bubble-send" id="studioCharAskBtn">💬 시험 질문 ↗</button>
-            </form>
-            <div id="studioCharAskReply" style="display:none;font-size:10px;line-height:1.5;color:#1e293b;background:#f8fafc;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px"></div>
+        <!-- 현재 장착 중인 KMS v389 파츠 목록 (상시 노출) -->
+        <div class="simulator-equipped-card">
+          <div class="maples-subhead" style="margin-bottom:8px">
+            <span>🎒 현재 장착 중인 파츠 (<strong id="simEquippedCount" style="color:#ea580c">0</strong> 슬롯)</span>
+            <button type="button" id="btnUnequipAllMaple" style="border:0;background:#fee2e2;color:#b91c1c;font-size:9px;font-weight:800;padding:4px 9px;border-radius:6px;cursor:pointer;white-space:nowrap">🗑️ 전체 해제</button>
           </div>
-
-          <!-- 1. Body & Skin Tab -->
-          <div class="maples-panel" id="tab-body">
-            <div>
-              <div class="maples-subhead"><span>체형 / 성별 베이스 (Body Base)</span><em>3 Types</em></div>
-              <div class="maples-item-grid" data-part="base">
-                <button type="button" class="maples-item-card" data-val="BASE_PIXEL">
-                  <span class="item-code">BASE_PIXEL</span>
-                  <span class="item-title">정밀 픽셀 치비 바디</span>
-                </button>
-                <button type="button" class="maples-item-card" data-val="BASE_M">
-                  <span class="item-code">BASE_M</span>
-                  <span class="item-title">남성형 치비 바디</span>
-                </button>
-                <button type="button" class="maples-item-card" data-val="BASE_F">
-                  <span class="item-code">BASE_F</span>
-                  <span class="item-title">여성형 치비 바디</span>
-                </button>
-              </div>
-            </div>
-            <div>
-              <div class="maples-subhead"><span>피부톤 컬러 (Skin Tone Palette)</span><em>6 Colors</em></div>
-              <div class="maples-swatch-row" id="skinPalette">
-                <button type="button" class="maples-swatch" data-color="#fff0e6" title="미백 스킨" style="background:#fff0e6"></button>
-                <button type="button" class="maples-swatch" data-color="#fde2d2" title="뽀송 스킨" style="background:#fde2d2"></button>
-                <button type="button" class="maples-swatch" data-color="#f8cfbe" title="홍조 스킨" style="background:#f8cfbe"></button>
-                <button type="button" class="maples-swatch" data-color="#ebb99a" title="내추럴 스킨" style="background:#ebb99a"></button>
-                <button type="button" class="maples-swatch" data-color="#cf9571" title="태닝 스킨" style="background:#cf9571"></button>
-                <button type="button" class="maples-swatch" data-color="#e3e8ee" title="시원한 쿨톤" style="background:#e3e8ee"></button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 2. Hair & Dye Tab -->
-          <div class="maples-panel" id="tab-hair">
-            <div>
-              <div class="maples-subhead"><span>헤어스타일 (Maple Royal Hair)</span><em>9 Styles</em></div>
-              <div class="maples-item-grid" data-part="hair">
-                <button type="button" class="maples-item-card" data-val="H00"><span class="item-code">H00</span><span class="item-title">삭발/민머리</span></button>
-                <button type="button" class="maples-item-card" data-val="H01"><span class="item-code">H01</span><span class="item-title">단발 보브컷</span></button>
-                <button type="button" class="maples-item-card" data-val="H02"><span class="item-code">H02</span><span class="item-title">모던 댄디컷</span></button>
-                <button type="button" class="maples-item-card" data-val="H03"><span class="item-code">H03</span><span class="item-title">로맨틱 웨이브</span></button>
-                <button type="button" class="maples-item-card" data-val="H04"><span class="item-code">H04</span><span class="item-title">클래식 포마드</span></button>
-                <button type="button" class="maples-item-card" data-val="H05"><span class="item-code">H05</span><span class="item-title">큐티 포니테일</span></button>
-                <button type="button" class="maples-item-card" data-val="H06"><span class="item-code">H06</span><span class="item-title">플러피 펌</span></button>
-                <button type="button" class="maples-item-card" data-val="H07"><span class="item-code">H07</span><span class="item-title">샤기 울프컷</span></button>
-                <button type="button" class="maples-item-card" data-val="H08"><span class="item-code">H08</span><span class="item-title">시니어 그레이</span></button>
-              </div>
-            </div>
-            <div>
-              <div class="maples-subhead"><span>믹스 염색 컬러 (Mix Dye Palette)</span><em>8 Colors</em></div>
-              <div class="maples-swatch-row" id="hairPalette">
-                <button type="button" class="maples-swatch" data-color="#1e1e24" title="옵시디언 블랙" style="background:#1e1e24"></button>
-                <button type="button" class="maples-swatch" data-color="#4a3525" title="다크 브라운" style="background:#4a3525"></button>
-                <button type="button" class="maples-swatch" data-color="#7c4a2d" title="초코 브라운" style="background:#7c4a2d"></button>
-                <button type="button" class="maples-swatch" data-color="#d4a359" title="골드 블론드" style="background:#d4a359"></button>
-                <button type="button" class="maples-swatch" data-color="#f472b6" title="로즈 핑크" style="background:#f472b6"></button>
-                <button type="button" class="maples-swatch" data-color="#3b82f6" title="코발트 블루" style="background:#3b82f6"></button>
-                <button type="button" class="maples-swatch" data-color="#94a3b8" title="애쉬 실버" style="background:#94a3b8"></button>
-                <button type="button" class="maples-swatch" data-color="#10b981" title="에메랄드" style="background:#10b981"></button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 3. Face & Eyes Tab -->
-          <div class="maples-panel" id="tab-face">
-            <div>
-              <div class="maples-subhead"><span>얼굴 성형 / 표정 (Face Expression)</span><em>11 Faces</em></div>
-              <div class="maples-item-grid" data-part="face">
-                <button type="button" class="maples-item-card" data-val="F00"><span class="item-code">F00</span><span class="item-title">투명/자체 표정</span></button>
-                <button type="button" class="maples-item-card" data-val="F01"><span class="item-code">F01</span><span class="item-title">아잉/방긋 미소</span></button>
-                <button type="button" class="maples-item-card" data-val="F02"><span class="item-code">F02</span><span class="item-title">조용한 눈 (시크)</span></button>
-                <button type="button" class="maples-item-card" data-val="F03"><span class="item-code">F03</span><span class="item-title">당당한 윙크</span></button>
-                <button type="button" class="maples-item-card" data-val="F04"><span class="item-code">F04</span><span class="item-title">멍한 인형 눈</span></button>
-                <button type="button" class="maples-item-card" data-val="F05"><span class="item-code">F05</span><span class="item-title">초롱 호기심 눈</span></button>
-                <button type="button" class="maples-item-card" data-val="F06"><span class="item-code">F06</span><span class="item-title">샤프 분석 눈빛</span></button>
-                <button type="button" class="maples-item-card" data-val="F07"><span class="item-code">F07</span><span class="item-title">정밀 멍한 눈 (160px)</span></button>
-                <button type="button" class="maples-item-card" data-val="F08"><span class="item-code">F08</span><span class="item-title">초롱 미소 눈 (144px)</span></button>
-                <button type="button" class="maples-item-card" data-val="F09"><span class="item-code">F09</span><span class="item-title">자신감 눈빛 (118px)</span></button>
-                <button type="button" class="maples-item-card" data-val="F10"><span class="item-code">F10</span><span class="item-title">반짝 미소 눈 (28px)</span></button>
-              </div>
-
-              <!-- F07 / F08 / F09 / F10+ 정밀 오프셋 실시간 튜너 (눈/입 위치 미세조정) -->
-              <div class="maples-offset-tuner" id="f07OffsetTuner" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                  <span style="font-size:12px;font-weight:700;color:#0f172a;">🎯 표정 위치 실시간 미세조정 (F07 ~ F10+)</span>
-                  <span id="f07CoordBadge" style="font-size:11px;font-family:monospace;background:#ea580c;color:#fff;font-weight:700;padding:2px 8px;border-radius:4px;">[F07] X: 7, Y: 17</span>
-                </div>
-                <div style="display:flex;gap:12px;align-items:center;">
-                  <div style="display:grid;grid-template-columns:repeat(3, 26px);grid-gap:3px;">
-                    <span></span>
-                    <button type="button" class="btn small f07-move-btn" data-axis="y" data-delta="-1" title="위로 1px 이동" style="padding:2px 0;font-size:11px;">▲</button>
-                    <span></span>
-                    <button type="button" class="btn small f07-move-btn" data-axis="x" data-delta="-1" title="왼쪽으로 1px 이동" style="padding:2px 0;font-size:11px;">◀</button>
-                    <button type="button" class="btn small f07-reset-btn" title="기본 정위치로 복원" style="padding:2px 0;background:#0284c7;color:#fff;font-size:10px;">●</button>
-                    <button type="button" class="btn small f07-move-btn" data-axis="x" data-delta="1" title="오른쪽으로 1px 이동" style="padding:2px 0;font-size:11px;">▶</button>
-                    <span></span>
-                    <button type="button" class="btn small f07-move-btn" data-axis="y" data-delta="1" title="아래로 1px 이동" style="padding:2px 0;font-size:11px;">▼</button>
-                    <span></span>
-                  </div>
-                  <div style="font-size:11px;color:#64748b;line-height:1.4;">
-                    버튼 클릭 또는 <code>F07.json</code> / <code>F08.json</code> / <code>F09.json</code> 수정 시 즉시 화면에 이동 반영됩니다.<br>
-                    <strong style="color:#0284c7;">정위치: F07/F08 (X:7, Y:17) · F09 (X:0, Y:0)</strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div>
-              <div class="maples-subhead"><span>동공 렌즈 컬러 (Color Lens)</span><em>6 Lens</em></div>
-              <div class="maples-swatch-row" id="eyePalette">
-                <button type="button" class="maples-swatch" data-color="#1e293b" title="옵시디언 렌즈" style="background:#1e293b"></button>
-                <button type="button" class="maples-swatch" data-color="#2563eb" title="사파이어 블루" style="background:#2563eb"></button>
-                <button type="button" class="maples-swatch" data-color="#059669" title="에메랄드 그린" style="background:#059669"></button>
-                <button type="button" class="maples-swatch" data-color="#dc2626" title="루비 레드" style="background:#dc2626"></button>
-                <button type="button" class="maples-swatch" data-color="#d97706" title="앰버 브라운" style="background:#d97706"></button>
-                <button type="button" class="maples-swatch" data-color="#9333ea" title="아메시스트" style="background:#9333ea"></button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 4. Outfit Tab -->
-          <div class="maples-panel" id="tab-outfit">
-            <div class="maples-subhead"><span>상의 / 의상 (Top & Outfit)</span><em>8 Outfits</em></div>
-            <div class="maples-item-grid" data-part="outfit">
-              <button type="button" class="maples-item-card" data-val="O00"><span class="item-code">O00</span><span class="item-title">없음 (이너웨어)</span></button>
-              <button type="button" class="maples-item-card" data-val="O01"><span class="item-code">O01</span><span class="item-title">비즈니스 수트</span></button>
-              <button type="button" class="maples-item-card" data-val="O02"><span class="item-code">O02</span><span class="item-title">개발자 후드티</span></button>
-              <button type="button" class="maples-item-card" data-val="O03"><span class="item-code">O03</span><span class="item-title">스마트 셔츠&니트</span></button>
-              <button type="button" class="maples-item-card" data-val="O04"><span class="item-code">O04</span><span class="item-title">연구실 랩가운</span></button>
-              <button type="button" class="maples-item-card" data-val="O05"><span class="item-code">O05</span><span class="item-title">크리에이티브 워크웨어</span></button>
-              <button type="button" class="maples-item-card" data-val="O06"><span class="item-code">O06</span><span class="item-title">클래식 트렌치코트</span></button>
-              <button type="button" class="maples-item-card" data-val="O07"><span class="item-code">O07</span><span class="item-title">캐주얼 로고 반팔티</span></button>
-            </div>
-          </div>
-
-          <!-- 5. Bottom Tab -->
-          <div class="maples-panel" id="tab-bottom">
-            <div class="maples-subhead"><span>하의 & 신발 (Bottom & Shoes)</span><em>5 Bottoms</em></div>
-            <div class="maples-item-grid" data-part="bottom">
-              <button type="button" class="maples-item-card" data-val="B00"><span class="item-code">B00</span><span class="item-title">없음 (이너웨어)</span></button>
-              <button type="button" class="maples-item-card" data-val="B01"><span class="item-code">B01</span><span class="item-title">포멀 슬랙스 & 구두</span></button>
-              <button type="button" class="maples-item-card" data-val="B02"><span class="item-code">B02</span><span class="item-title">롤업 진 & 스니커즈</span></button>
-              <button type="button" class="maples-item-card" data-val="B03"><span class="item-code">B03</span><span class="item-title">오피스 스커트 & 구두</span></button>
-              <button type="button" class="maples-item-card" data-val="B04"><span class="item-code">B04</span><span class="item-title">베이지 치노 & 로퍼</span></button>
-            </div>
-          </div>
-
-          <!-- 6. Accessory Tab -->
-          <div class="maples-panel" id="tab-acc">
-            <div class="maples-subhead"><span>액세서리 & 도구 (Acc & Handheld)</span><em>8 Items</em></div>
-            <div class="maples-item-grid" data-part="acc">
-              <button type="button" class="maples-item-card" data-val="A00"><span class="item-code">A00</span><span class="item-title">장착 해제</span></button>
-              <button type="button" class="maples-item-card" data-val="A01"><span class="item-code">A01</span><span class="item-title">동글이 오피스 안경</span></button>
-              <button type="button" class="maples-item-card" data-val="A02"><span class="item-code">A02</span><span class="item-title">무선 CS 헤드셋</span></button>
-              <button type="button" class="maples-item-card" data-val="A03"><span class="item-code">A03</span><span class="item-title">사원증 & 스마트폰</span></button>
-              <button type="button" class="maples-item-card" data-val="A04"><span class="item-code">A04</span><span class="item-title">슬림 랩탑 노트북</span></button>
-              <button type="button" class="maples-item-card" data-val="A05"><span class="item-code">A05</span><span class="item-title">클래식 서류 가방</span></button>
-              <button type="button" class="maples-item-card" data-val="A06"><span class="item-code">A06</span><span class="item-title">모닝 커피 텀블러</span></button>
-              <button type="button" class="maples-item-card" data-val="A07"><span class="item-code">A07</span><span class="item-title">스타일러스 펜&패드</span></button>
-            </div>
-          </div>
-
-          <!-- 7. Equipped Layers List (maples.im Layer Stack) -->
-          <div class="maples-panel" id="tab-layers">
-            <div class="maples-subhead"><span>장착 중인 레이어 스택 (Layer Stack)</span><em>👁️ 토글 / 🗑️ 해제</em></div>
-            <div class="maples-layer-list" id="equippedLayerList"></div>
-          </div>
+          <div class="maples-layer-list" id="equippedLayerList" style="max-height:220px;overflow-y:auto;padding-right:2px"></div>
         </div>
 
         <!-- Code & Preset Box -->
-        <div class="char-code-box">
+        <div class="char-code-box" style="margin-top:0">
           <div class="char-code-head">
-            <strong>maples.im JSON Preset Specification</strong>
+            <strong>KMS v389 + AI CLI JSON Preset Specification</strong>
             <button class="btn small" id="copyCharCode" type="button">코드 복사 ↗</button>
           </div>
           <pre class="character-json" id="charCodeOutput"><code></code></pre>
         </div>
-        <div class="character-editor-actions" style="margin-top:10px">
-          <a class="btn" href="agents.html">직원 목록 새로고침</a>
-          <a class="btn primary" href="office.html">3D 가상 오피스에서 보기 ↗</a>
+      </div>
+
+      <!-- 우측: KMS v389 전용 대화면 파츠 브라우저 -->
+      <div class="simulator-browser-col">
+        <div class="sim-category-tab-grid" id="mapleCategoryTabBar" role="tablist">
+          <button type="button" class="maples-tab active" data-tab="tab-maple-parts" data-maple-cat="all" role="tab">✨ 전체 (<span data-maple-count="all">29,218</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="hair" role="tab">💇 헤어 (<span data-maple-count="hair">9,473</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="face" role="tab">👀 성형 (<span data-maple-count="face">5,913</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="clothes" role="tab">👗 의상 (<span data-maple-count="clothes">3,193</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="accessories" role="tab">👑 모자/악세 (<span data-maple-count="accessories">4,777</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="shoes" role="tab">👟 신발 (<span data-maple-count="shoes">1,319</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="furniture" role="tab">🪑 가구/의자 (<span data-maple-count="furniture">1,153</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="pet" role="tab">🐾 펫 (<span data-maple-count="pet">958</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="building" role="tab">🏛️ 건물/공간 (<span data-maple-count="building">1,076</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="decoration" role="tab">✨ 이펙트/장식 (<span data-maple-count="decoration">1,343</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="skin" role="tab">🎨 피부 (<span data-maple-count="skin">13</span>)</button>
         </div>
-      </aside>
+
+        <div class="maples-panel active" id="tab-maple-parts" style="gap:10px">
+          <div class="sim-search-toolbar">
+            <div style="position:relative;flex:1;min-width:0">
+              <input type="text" id="mapleSimSearchInput" class="studio-ai-input" style="width:100%;height:36px;padding:0 30px 0 12px;font-size:11px" placeholder="🔍 KMS v389 파츠·가구·펫·이펙트 이름 또는 ID 검색..." />
+              <button type="button" id="btnMapleSimClearSearch" style="display:none;position:absolute;right:9px;top:8px;border:0;background:transparent;color:#94a3b8;font-size:12px;cursor:pointer">✕</button>
+            </div>
+            <label class="sim-equipped-only-toggle">
+              <input type="checkbox" id="mapleSimOnlyEquipped" />
+              <span>장착 중만 보기</span>
+            </label>
+          </div>
+
+          <!-- 서브카테고리 필터 칩 -->
+          <div id="mapleSimSubFilters" class="sim-subfilter-bar"></div>
+
+          <div class="maples-subhead" style="margin-top:2px;padding:0 2px">
+            <span id="mapleSimCategoryTitle" style="font-size:11px;font-weight:800;color:#1e293b">전체 항목 목록</span>
+            <em id="mapleSimResultCount" style="font-size:10px;font-weight:700;color:#ea580c">29,218 Items</em>
+          </div>
+
+          <!-- 로컬 이미지 기반 고속 파츠 그리드 (와이드 다단 그리드) -->
+          <div id="mapleSimPartsGrid" class="maple-sim-parts-grid"></div>
+
+          <div id="mapleSimLoadMoreWrap" style="display:none;align-items:center;justify-content:space-between;gap:8px;padding-top:10px;border-top:1px solid #eef2f6">
+            <span id="mapleSimLoadMoreInfo" style="font-size:10px;color:#64748b;font-weight:700">표시 중: 60</span>
+            <button type="button" class="btn small" id="btnMapleSimLoadMore" style="padding:6px 14px;font-size:10px">＋ 더 많은 항목 불러오기 (60개)</button>
+          </div>
+        </div>
+      </div>
     </div>
   </section></div>
-</main></div><script src="avatar/scripts/pixel-character.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-base.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-parts.js?v=1007"></script><script src="avatar/scripts/avatar-loader.js?v=1007"></script><script src="avatar/scripts/default-character.js?v=1007"></script><script src="app.js?v=triad25"></script></body></html>
+</main></div><script src="avatar/scripts/pixel-character.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-base.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-parts.js?v=1007"></script><script src="avatar/scripts/avatar-loader.js?v=1007"></script><script src="avatar/scripts/default-character.js?v=1007"></script><script src="maplestory-characters-scraper/dashboard/data.js?v=390"></script><script src="app.js?v=triad31"></script></body></html>

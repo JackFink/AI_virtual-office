@@ -399,7 +399,34 @@
       const { hiddenLayers = {}, view = 'front' } = options;
       const { skin = '#f8cfbe', hairColor = '#2d2926', eyeColor = '#1e293b', parts = {} } = agent;
 
-      // [0] 뒷모습(Back View) 렌더링: 마주보는 앞줄 좌석 착석 시 후면 헤어 + 후면 의상 표시
+      // [0] KMS v389 (maplestory-characters-scraper) 렌더링 최우선 적용 (디렉토리 · 가상 오피스 전 좌석 · 사이드바 공통)
+      if (agent && agent.mapleEquipped && Object.keys(agent.mapleEquipped).length > 0) {
+        const eq = agent.mapleEquipped;
+        const skinId = eq.skin || 2000;
+        const anim = options.stance || agent.mapleAnim || 'stand1';
+        const isAnimated = Boolean(options.animated !== undefined ? options.animated : agent.mapleAnimated);
+        const isFlip = Boolean(options.flipped !== undefined ? options.flipped : agent.mapleFlipped);
+        const visualSlots = [
+          'hair', 'face', 'overall', 'top', 'bottom', 'shoes',
+          'hat', 'faceAccessory', 'eyeDecoration', 'earrings', 'cape', 'glove',
+          'furniture', 'effect', 'ring', 'title', 'decoration', 'petEquip'
+        ];
+        const itemIds = [];
+        visualSlots.forEach(s => {
+          if (s === 'furniture' && anim !== 'sit') return;
+          if (eq[s]) itemIds.push(eq[s]);
+        });
+        const itemsParam = itemIds.join(',');
+        const kmsUrl = `https://maplestory.io/api/KMS/389/Character${isAnimated ? '/animated' : ''}/${skinId}/${itemsParam}/${anim}/0`;
+        const flipStyle = isFlip ? 'transform:scaleX(-1);' : '';
+        return `
+          <div class="kms389-avatar-wrap" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative">
+            <img src="${kmsUrl}" alt="${agent.name || 'Avatar'}" style="max-width:100%;max-height:100%;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 3px 6px rgba(15,23,42,0.18));${flipStyle}" />
+          </div>
+        `.trim();
+      }
+
+      // [0-2] 폴백: 뒷모습(Back View) 렌더링
       if (view === 'back') {
         const pParts = typeof window !== 'undefined' ? window.PixelChibiParts : null;
         const pBase = !hiddenLayers.base && window.AgentChibiBase ? window.AgentChibiBase.render(skin, { raw: true }) : '';
@@ -591,22 +618,46 @@
     security: "당신은 NEXUS 오피스의 Scope Guard 안전 감독관입니다. 허용 경로 준수, 파일 변경 상한, API 키 노출 차단 등 안전성과 규정 준수 관점에서 엄격하게 답변하세요."
   };
 
-  ALL_AGENT_PRESETS.forEach(a => {
+  const DEFAULT_MAPLE_EQUIPPED_BY_ID = {
+    '01': { skin: 2000, hair: 30000, face: 20000, overall: 1050018, shoes: 1072000, hat: 1002140 },
+    '02': { skin: 2000, hair: 30005, face: 20001, overall: 1050004, shoes: 1070004, hat: 1000004 },
+    '03': { skin: 2000, hair: 30002, face: 20002, overall: 1050000, shoes: 1070001, hat: 1000000 },
+    '04': { skin: 2000, hair: 30001, face: 20000, overall: 1050003, shoes: 1070005, hat: 1000002 },
+    '05': { skin: 2000, hair: 30004, face: 20001, overall: 1050005, shoes: 1070003, hat: 1000005 }
+  };
+
+  function applySavedConfigToAgent(a, idx = 0) {
     const defCli = a.triadRole === 'HEAD' ? 'claude' : a.triadRole === 'BUILDER' ? 'antigravity' : a.triadRole === 'RESEARCHER' ? 'grok' : 'openai';
     const defSandbox = a.triadRole === 'BUILDER' ? 'proposal' : 'read-only';
     const defTimeout = a.triadRole === 'BUILDER' ? '600' : '300';
     const saved = savedCharAiConfigs[a.id] || {};
+    const defMaple = DEFAULT_MAPLE_EQUIPPED_BY_ID[a.id] || {
+      skin: 2000,
+      hair: 30000 + (idx % 6),
+      face: 20000 + (idx % 5),
+      overall: 1050000 + (idx % 6),
+      shoes: 1070000 + (idx % 6),
+      hat: 1000000 + (idx % 6)
+    };
     a.name = saved.name || a.name;
     a.floor = saved.floor || a.floor;
     a.triadRole = saved.triadRole || a.triadRole || 'HEAD';
     a.cliProvider = saved.cliProvider || defCli;
     a.sandboxMode = saved.sandboxMode || defSandbox;
     a.timeoutSec = String(saved.timeoutSec || defTimeout);
+    a.mapleEquipped = (saved.mapleEquipped && typeof saved.mapleEquipped === 'object' && Object.keys(saved.mapleEquipped).length > 0)
+      ? { ...saved.mapleEquipped }
+      : { ...defMaple };
+    a.mapleAnim = saved.mapleAnim || 'stand1';
+    a.mapleAnimated = Boolean(saved.mapleAnimated);
+    a.mapleFlipped = Boolean(saved.mapleFlipped);
     a.skills = Array.isArray(saved.skills) && saved.skills.length
       ? [...saved.skills]
       : [...(DEFAULT_SKILLS_BY_ROLE[a.triadRole] || DEFAULT_SKILLS_BY_ROLE.HEAD)];
     a.systemPrompt = saved.systemPrompt || `당신은 ${a.floor} 소속 '${a.name}' (${a.triadRole} 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.`;
-  });
+  }
+
+  ALL_AGENT_PRESETS.forEach((a, idx) => applySavedConfigToAgent(a, idx));
 
   function persistCharacterAiConfig(agent) {
     if (!agent) return;
@@ -619,20 +670,99 @@
       cliProvider: agent.cliProvider,
       sandboxMode: agent.sandboxMode,
       timeoutSec: agent.timeoutSec,
+      mapleEquipped: agent.mapleEquipped ? { ...agent.mapleEquipped } : {},
+      mapleAnim: agent.mapleAnim || 'stand1',
+      mapleAnimated: Boolean(agent.mapleAnimated),
+      mapleFlipped: Boolean(agent.mapleFlipped),
       skills: Array.isArray(agent.skills) ? agent.skills : [],
-      systemPrompt: agent.systemPrompt
+      systemPrompt: agent.systemPrompt,
+      updatedAt: new Date().toISOString()
     };
     try {
       localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
     } catch (_) {}
   }
 
-  function formatPartCode(parts) {
+  async function saveCharacterConfigsToServer(targetAgent = null) {
+    if (targetAgent) {
+      persistCharacterAiConfig(targetAgent);
+    } else {
+      modularAgents.forEach(a => persistCharacterAiConfig(a));
+    }
+    try {
+      await fetch('/ops/character-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ configs: savedCharAiConfigs })
+      });
+    } catch (_) {}
+    renderTopRosterAvatars();
+    window.dispatchEvent(new CustomEvent('nexus:character-configs-updated', { detail: { configs: savedCharAiConfigs } }));
+  }
+
+  function renderTopRosterAvatars() {
+    // agents.html 상단 Triad 역할 체계별 AI 직원 목록(#agentList) 및 index.html 테이블 아바타에 KMS v389 캐릭터 반영
+    const topRows = document.querySelectorAll('#agentList .agent-card-row');
+    topRows.forEach((row, idx) => {
+      const ag = modularAgents[idx] || ALL_AGENT_PRESETS[idx];
+      if (!ag) return;
+      const avEl = row.querySelector('.agent-avatar');
+      if (avEl) {
+        avEl.style.overflow = 'hidden';
+        avEl.style.padding = '1px';
+        avEl.innerHTML = CharacterEngine.render(ag, { stance: ag.mapleAnim || 'stand1', animated: false });
+      }
+      const nameNode = row.querySelector('.agent-name');
+      if (nameNode && ag.name) nameNode.textContent = ag.name;
+    });
+    const dashRows = document.querySelectorAll('#dashboardAgentTableBody tr');
+    dashRows.forEach((tr, idx) => {
+      const ag = modularAgents[idx] || ALL_AGENT_PRESETS[idx];
+      if (!ag) return;
+      const avEl = tr.querySelector('.agent-avatar');
+      if (avEl) {
+        avEl.style.overflow = 'hidden';
+        avEl.style.padding = '1px';
+        avEl.innerHTML = CharacterEngine.render(ag, { stance: ag.mapleAnim || 'stand1', animated: false });
+      }
+    });
+  }
+
+  // 페이지 로드 시 서버(data/character_configs.json)에 저장된 캐릭터 코디 설정도 동기화
+  fetch('/ops/character-config')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && data.configs && typeof data.configs === 'object' && Object.keys(data.configs).length > 0) {
+        savedCharAiConfigs = { ...data.configs, ...savedCharAiConfigs };
+        Object.keys(data.configs).forEach(cid => {
+          const srv = data.configs[cid];
+          const loc = savedCharAiConfigs[cid];
+          if (srv && (!loc || (srv.updatedAt && (!loc.updatedAt || srv.updatedAt >= loc.updatedAt)))) {
+            savedCharAiConfigs[cid] = srv;
+          }
+        });
+        try {
+          localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
+        } catch (_) {}
+        ALL_AGENT_PRESETS.forEach((a, idx) => applySavedConfigToAgent(a, idx));
+        renderTopRosterAvatars();
+        window.dispatchEvent(new CustomEvent('nexus:character-configs-updated', { detail: { configs: savedCharAiConfigs } }));
+      }
+    })
+    .catch(() => {});
+
+  renderTopRosterAvatars();
+
+  function formatPartCode(parts, agent = null) {
+    if (agent && agent.mapleEquipped && Object.keys(agent.mapleEquipped).length > 0) {
+      const eq = agent.mapleEquipped;
+      return `KMS389 · H:${eq.hair || '-'} / F:${eq.face || '-'} / C:${eq.overall || eq.top || '-'}`;
+    }
     return `${parts.base}/${parts.hair}/${parts.face}/${parts.outfit}/${parts.bottom}/${parts.acc}`;
   }
 
   // ==========================================================================
-  // [3] maples.im 스타일 시뮬레이터 인터랙션 & 컨트롤러 바인딩
+  // [3] KMS v389 (maplestory-characters-scraper · 29,491 Parts) 시뮬레이터 컨트롤러
   // ==========================================================================
   if (page === 'dashboard' || page === 'agents') {
     const gridEl = document.getElementById('charDirectoryGrid');
@@ -648,12 +778,35 @@
     const btnCopyJson = document.getElementById('btnCopyJson');
     const btnFlipDir = document.getElementById('btnFlipDir');
     const selStance = document.getElementById('selStance');
+    const btnSimMotionPlay = document.getElementById('btnSimMotionPlay');
+    const simMotionIcon = document.getElementById('simMotionIcon');
+    const simMotionLabel = document.getElementById('simMotionLabel');
+    const simBgLayer = document.getElementById('simBgLayer');
+    const simBgImg = document.getElementById('simBgImg');
+    const simBgBadge = document.getElementById('simBgBadge');
+    const simPetBox = document.getElementById('simPetBox');
+    const simPetImg = document.getElementById('simPetImg');
+    const simPetName = document.getElementById('simPetName');
     const btnBackdrop = document.getElementById('btnBackdrop');
     const btnRandomize = document.getElementById('btnRandomize');
     const btnLoadDefault = document.getElementById('btnLoadDefault');
     const btnResetParts = document.getElementById('btnResetParts');
     const btnExportPng = document.getElementById('btnExportPng');
     const layerListEl = document.getElementById('equippedLayerList');
+    const simEquippedCountEl = document.getElementById('simEquippedCount');
+
+    // KMS v389 29,491개 파츠 브라우저 DOM
+    const mapleSimSearchInput = document.getElementById('mapleSimSearchInput');
+    const btnMapleSimClearSearch = document.getElementById('btnMapleSimClearSearch');
+    const mapleSimOnlyEquipped = document.getElementById('mapleSimOnlyEquipped');
+    const mapleSimSubFilters = document.getElementById('mapleSimSubFilters');
+    const mapleSimCategoryTitle = document.getElementById('mapleSimCategoryTitle');
+    const mapleSimResultCount = document.getElementById('mapleSimResultCount');
+    const mapleSimPartsGrid = document.getElementById('mapleSimPartsGrid');
+    const mapleSimLoadMoreWrap = document.getElementById('mapleSimLoadMoreWrap');
+    const mapleSimLoadMoreInfo = document.getElementById('mapleSimLoadMoreInfo');
+    const btnMapleSimLoadMore = document.getElementById('btnMapleSimLoadMore');
+    const btnUnequipAllMaple = document.getElementById('btnUnequipAllMaple');
 
     // AI CLI Studio Controls
     const studioQuickRole = document.getElementById('studioQuickRole');
@@ -674,21 +827,171 @@
     let isFlipped = false;
     let currentZoom = 1;
     let currentStance = 'stand1';
+    let isMotionAnimated = false;
     const backdrops = ['backdrop-checker', 'backdrop-white', 'backdrop-dark', 'backdrop-henesys'];
     let backdropIdx = 0;
-    const hiddenLayers = { base: false, hair: false, face: false, outfit: false, bottom: false, acc: false };
 
-    // 파츠 이름 사전
-    const partDict = {
-      base: { BASE_PIXEL: '정밀 픽셀 치비 바디', BASE_M: '남성형 치비 바디', BASE_F: '여성형 치비 바디' },
-      hair: { H00: '삭발/민머리', H01: '단발 보브컷', H02: '모던 댄디컷', H03: '로맨틱 웨이브', H04: '클래식 포마드', H05: '큐티 포니테일', H06: '플러피 펌', H07: '샤기 울프컷', H08: '시니어 그레이' },
-      face: { F00: '투명/스프라이트 표정', F01: '아잉/방긋 미소', F02: '조용한 눈', F03: '당당한 윙크', F04: '멍한 인형 눈', F05: '초롱 호기심 눈', F06: '샤프 분석 눈빛', F07: '정밀 멍한 눈 (144px)', F08: '초롱 미소 눈 (159px)' },
-      outfit: { O00: '없음 (이너웨어)', O01: '비즈니스 수트', O02: '개발자 후드티', O03: '스마트 셔츠&니트', O04: '연구실 랩가운', O05: '크리에이티브 워크웨어', O06: '클래식 트렌치코트', O07: '캐주얼 로고 반팔티' },
-      bottom: { B00: '없음 (이너웨어)', B01: '포멀 슬랙스&구두', B02: '롤업 진&스니커즈', B03: '오피스 스커트&구두', B04: '베이지 치노&로퍼' },
-      acc: { A00: '장착 해제', A01: '동글이 오피스 안경', A02: '무선 CS 헤드셋', A03: '사원증 & 스마트폰', A04: '슬림 랩탑 노트북', A05: '클래식 서류 가방', A06: '모닝 커피 텀블러', A07: '스타일러스 펜&패드' }
+    // ========================================================================
+    // KMS v389 (maplestory-characters-scraper) 29,491개 파츠 데이터 및 슬롯 정의
+    // ========================================================================
+    const SLOT_INFO = {
+      skin: { label: '피부', icon: '🎨', order: 1 },
+      hair: { label: '헤어', icon: '💇', order: 2 },
+      face: { label: '표정/성형', icon: '👀', order: 3 },
+      hat: { label: '모자', icon: '🎩', order: 4 },
+      overall: { label: '한벌옷', icon: '👗', order: 5 },
+      top: { label: '상의', icon: '👕', order: 6 },
+      bottom: { label: '하의', icon: '👖', order: 7 },
+      shoes: { label: '신발', icon: '👟', order: 8 },
+      cape: { label: '망토', icon: '🧣', order: 9 },
+      glove: { label: '장갑', icon: '🧤', order: 10 },
+      faceAccessory: { label: '얼굴장식', icon: '🎭', order: 11 },
+      eyeDecoration: { label: '눈장식', icon: '👓', order: 12 },
+      earrings: { label: '귀고리', icon: '💎', order: 13 },
+      effect: { label: '캐시이펙트', icon: '✨', order: 14 },
+      ring: { label: '반지/명찰', icon: '💍', order: 15 },
+      title: { label: '칭호', icon: '🏷️', order: 16 },
+      decoration: { label: '설치장식', icon: '🎀', order: 17 },
+      furniture: { label: '가구/의자', icon: '🪑', order: 18 },
+      pet: { label: '동행 펫', icon: '🐾', order: 19 },
+      petEquip: { label: '펫 장비', icon: '🔔', order: 20 },
+      building: { label: '건물 배경', icon: '🏛️', order: 21 }
     };
 
+    const CATEGORY_NAMES = {
+      all: '전체 항목',
+      hair: '💇 헤어 (Hair)',
+      face: '👀 표정/성형 (Face)',
+      clothes: '👗 의상 (한벌옷/상의/하의)',
+      accessories: '👑 모자/악세사리',
+      shoes: '👟 신발 (Shoes)',
+      furniture: '🪑 가구/의자 (Chair)',
+      pet: '🐾 펫/반려동물 (Pet)',
+      building: '🏛️ 건물/실내 배경 (Building)',
+      decoration: '✨ 이펙트/장식 (Decoration)',
+      skin: '🎨 피부 (Skin)'
+    };
+
+    const SKIN_COLORS = {
+      2000: '#fce3cc', 2001: '#b37c4d', 2002: '#e6eaf0', 2003: '#f7d88b',
+      2004: '#8dc891', 2010: '#fff0e1', 2012: '#d8d4dc', 2015: '#ffe4e6',
+      2016: '#ffccd5', 2018: '#f3e8ff', 2019: '#fae8ff', 2024: '#fed7aa', 2025: '#93c5fd'
+    };
+
+    // 사용자 요청에 따라 파츠/서브필터에서 제거할 10개 항목 목록
+    const EXCLUDED_MAPLE_TERMS = [
+      '메이플로드', '헤네시스', '히든스트리트', '유타네 집', '골렘사원',
+      '파르템', '엘리니아', '요정의 숲', '루엔의 집', '페리온'
+    ];
+    const EXCLUDED_MAPLE_SET = new Set(EXCLUDED_MAPLE_TERMS);
+
+    function isExcludedMaplePart(p) {
+      if (!p) return true;
+      const sub = (p.subCategory || '').trim();
+      const name = (p.name || '').trim();
+      if (EXCLUDED_MAPLE_SET.has(sub) || EXCLUDED_MAPLE_SET.has(name)) return true;
+      return EXCLUDED_MAPLE_TERMS.some(term => sub.includes(term) || name.includes(term));
+    }
+
+    const rawInitialParts = (typeof window !== 'undefined' && window.__MAPLE_DATA__ && Array.isArray(window.__MAPLE_DATA__.parts))
+      ? window.__MAPLE_DATA__.parts
+      : [];
+    let allMapleParts = rawInitialParts.filter(p => !isExcludedMaplePart(p));
+    const maplePartById = new Map();
+    allMapleParts.forEach(p => maplePartById.set(p.id, p));
+
+    function updateMapleTabCategoryCounts() {
+      const counts = {
+        all: allMapleParts.length,
+        hair: 0, face: 0, clothes: 0, accessories: 0,
+        shoes: 0, furniture: 0, pet: 0, building: 0, decoration: 0, skin: 0
+      };
+      allMapleParts.forEach(p => {
+        if (counts[p.category] !== undefined) counts[p.category]++;
+      });
+      document.querySelectorAll('[data-maple-count]').forEach(el => {
+        const key = el.dataset.mapleCount;
+        if (counts[key] !== undefined) el.textContent = counts[key].toLocaleString();
+      });
+    }
+
+    const simAgentSelect = document.getElementById('simAgentSelect');
+    function syncSimAgentSelect() {
+      if (!simAgentSelect) return;
+      simAgentSelect.innerHTML = modularAgents.map(a => {
+        const cliLabel = CLI_BADGE_LABELS[a.cliProvider] || a.cliProvider;
+        return `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>#${a.id} ${a.name} (${a.floor} · ${a.triadRole} / ${cliLabel})</option>`;
+      }).join('');
+    }
+    simAgentSelect?.addEventListener('change', (e) => {
+      selectedId = e.target.value;
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (agent) {
+        currentStance = agent.mapleAnim || 'stand1';
+        isMotionAnimated = Boolean(agent.mapleAnimated);
+        isFlipped = Boolean(agent.mapleFlipped);
+        if (selStance) selStance.value = currentStance;
+      }
+      renderDirectory();
+      updateCustomizer();
+      updateMapleCardEquippedHighlight();
+    });
+
+    let mapleBrowserState = {
+      category: 'all',
+      subCategory: 'all',
+      searchQuery: '',
+      onlyEquipped: false,
+      pageSize: 60,
+      currentPage: 1,
+      filtered: []
+    };
+
+    function getMaplePartLocalIcon(part) {
+      if (!part) return '';
+      if (part.icon) return `maplestory-characters-scraper/${part.icon}`;
+      return `maplestory-characters-scraper/images/${part.category}/${part.id}.png`;
+    }
+
+    function getMapleItemSlot(part) {
+      if (!part) return 'unknown';
+      if (part.category === 'skin') return 'skin';
+      if (part.category === 'hair') return 'hair';
+      if (part.category === 'face') return 'face';
+      if (part.category === 'shoes') return 'shoes';
+      if (part.category === 'furniture') return 'furniture';
+      if (part.category === 'building') return 'building';
+      if (part.category === 'clothes') {
+        if (part.subCategory === 'Overall') return 'overall';
+        if (part.subCategory === 'Top') return 'top';
+        if (part.subCategory === 'Bottom') return 'bottom';
+        return 'overall';
+      }
+      if (part.category === 'accessories') {
+        if (part.subCategory === 'Hat') return 'hat';
+        if (part.subCategory === 'Face Accessory') return 'faceAccessory';
+        if (part.subCategory === 'Eye Decoration') return 'eyeDecoration';
+        if (part.subCategory === 'Earrings') return 'earrings';
+        if (part.subCategory === 'Cape') return 'cape';
+        if (part.subCategory === 'Glove') return 'glove';
+        return 'hat';
+      }
+      if (part.category === 'pet') {
+        if (part.subCategory === 'Pet Equipment') return 'petEquip';
+        return 'pet';
+      }
+      if (part.category === 'decoration') {
+        if (part.subCategory === 'Effect') return 'effect';
+        if (part.subCategory === 'Ring') return 'ring';
+        if (part.subCategory === 'Title') return 'title';
+        if (part.subCategory === 'Decoration') return 'decoration';
+        return 'effect';
+      }
+      return part.category;
+    }
+
     function renderDirectory() {
+      syncSimAgentSelect();
       if (!gridEl) return;
       const filterVal = floorFilter?.value || 'all';
       gridEl.innerHTML = '';
@@ -714,18 +1017,24 @@
               <span>#${agent.id} · ${agent.triadRole || 'AGENT'}</span>
               <span class="char-floor-tag">${agent.floor}</span>
             </div>
-            <div class="char-svg-wrap">${CharacterEngine.render(agent)}</div>
+            <div class="char-svg-wrap">${CharacterEngine.render(agent, { stance: agent.mapleAnim || 'stand1', animated: false })}</div>
             <div class="char-card-name">${agent.name}</div>
             <span class="char-cli-badge ${cliKey}">${cliLabel} · ⚡${skillCount}</span>
-            <div class="char-card-code">${formatPartCode(agent.parts)}</div>
+            <div class="char-card-code">${formatPartCode(agent.parts, agent)}</div>
           `;
           card.addEventListener('click', () => {
             selectedId = agent.id;
+            currentStance = agent.mapleAnim || 'stand1';
+            isMotionAnimated = Boolean(agent.mapleAnimated);
+            isFlipped = Boolean(agent.mapleFlipped);
+            if (selStance) selStance.value = currentStance;
             renderDirectory();
             updateCustomizer();
+            updateMapleCardEquippedHighlight();
           });
           gridEl.appendChild(card);
         });
+      renderTopRosterAvatars();
     }
 
     document.getElementById('btnAddStudioCharacter')?.addEventListener('click', () => {
@@ -743,19 +1052,71 @@
       updateCustomizer();
     });
 
+    function updateMotionButtonUI() {
+      if (!btnSimMotionPlay) return;
+      if (isMotionAnimated) {
+        btnSimMotionPlay.style.background = '#dcfce7';
+        btnSimMotionPlay.style.color = '#15803d';
+        btnSimMotionPlay.style.borderColor = '#86efac';
+        if (simMotionIcon) simMotionIcon.textContent = '⏸';
+        if (simMotionLabel) simMotionLabel.textContent = '모션 정지';
+      } else {
+        btnSimMotionPlay.style.background = '#ecfdf5';
+        btnSimMotionPlay.style.color = '#047857';
+        btnSimMotionPlay.style.borderColor = '#a7f3d0';
+        if (simMotionIcon) simMotionIcon.textContent = '▶';
+        if (simMotionLabel) simMotionLabel.textContent = '모션 재생';
+      }
+    }
+
     function updateCustomizer() {
       const agent = modularAgents.find(a => a.id === selectedId) || modularAgents[0];
       if (!agent || !stageEl) return;
+      if (!agent.mapleEquipped) {
+        agent.mapleEquipped = { ...(DEFAULT_MAPLE_EQUIPPED_BY_ID[agent.id] || { skin: 2000, hair: 30000, face: 20000, overall: 1050018, shoes: 1072000, hat: 1002140 }) };
+      }
 
-      // 1. 프리뷰 뷰 렌더링
-      stageEl.innerHTML = CharacterEngine.render(agent, { stance: currentStance, hiddenLayers });
+      agent.mapleAnim = currentStance;
+      agent.mapleAnimated = isMotionAnimated;
+      updateMotionButtonUI();
+
+      // 1. 프리뷰 뷰포트 렌더링 (KMS v389 캐릭터 + 건물 배경 + 동행 펫)
+      stageEl.innerHTML = CharacterEngine.render(agent, { stance: currentStance, animated: isMotionAnimated });
       stageEl.className = `customizer-stage stance-${currentStance}${isFlipped ? ' flip-x' : ''}`;
       stageEl.style.transform = `scale(${currentZoom})`;
+
+      // 건물 배경 반영
+      if (simBgLayer && simBgImg && simBgBadge) {
+        const bId = agent.mapleEquipped.building;
+        const bPart = bId ? maplePartById.get(bId) : null;
+        if (bPart) {
+          simBgLayer.style.display = 'flex';
+          simBgImg.src = getMaplePartLocalIcon(bPart);
+          simBgImg.onerror = () => { if (bPart.bgUrl || bPart.iconUrl) simBgImg.src = bPart.bgUrl || bPart.iconUrl; };
+          simBgBadge.textContent = `🏛️ ${bPart.name}`;
+        } else {
+          simBgLayer.style.display = 'none';
+        }
+      }
+
+      // 동행 펫 반영
+      if (simPetBox && simPetImg && simPetName) {
+        const pId = agent.mapleEquipped.pet;
+        const pPart = pId ? maplePartById.get(pId) : null;
+        if (pPart) {
+          simPetBox.style.display = 'flex';
+          simPetImg.src = getMaplePartLocalIcon(pPart);
+          simPetImg.onerror = () => { if (pPart.iconUrl) simPetImg.src = pPart.iconUrl; };
+          simPetName.textContent = `🐾 ${pPart.name}`;
+        } else {
+          simPetBox.style.display = 'none';
+        }
+      }
 
       const cliLabel = CLI_BADGE_LABELS[agent.cliProvider] || agent.cliProvider;
       if (nameEl) nameEl.textContent = `Agent #${agent.id} · ${agent.name}`;
       if (deptEl) deptEl.textContent = `${agent.floor} · ${agent.triadRole} (${cliLabel})`;
-      if (pillEl) pillEl.textContent = `${agent.triadRole}/${cliLabel} · ${formatPartCode(agent.parts)}`;
+      if (pillEl) pillEl.textContent = `${agent.triadRole}/${cliLabel} · ${formatPartCode(agent.parts, agent)}`;
       if (badgeEl) badgeEl.textContent = `#${agent.id}`;
 
       // 1-2. AI CLI & 설정 탭 동기화
@@ -799,40 +1160,19 @@
         btn.classList.toggle('active', btn.dataset.cliVal === agent.cliProvider);
       });
 
-      // 2. 파츠 선택 카드 활성화 상태 동기화
-      document.querySelectorAll('.maples-item-card').forEach(card => {
-        const parentGrid = card.closest('.maples-item-grid');
-        const partKey = parentGrid?.dataset.part;
-        if (partKey && agent.parts[partKey] !== undefined) {
-          card.classList.toggle('active', card.dataset.val === agent.parts[partKey]);
-        }
-      });
-
-      // 3. 컬러 스와치 활성화 동기화
-      document.querySelectorAll('#skinPalette .maples-swatch').forEach(swatch => {
-        swatch.classList.toggle('active', swatch.dataset.color.toLowerCase() === (agent.skin || '').toLowerCase());
-      });
-      document.querySelectorAll('#hairPalette .maples-swatch').forEach(swatch => {
-        swatch.classList.toggle('active', swatch.dataset.color.toLowerCase() === (agent.hairColor || '').toLowerCase());
-      });
-      document.querySelectorAll('#eyePalette .maples-swatch').forEach(swatch => {
-        swatch.classList.toggle('active', swatch.dataset.color.toLowerCase() === (agent.eyeColor || '').toLowerCase());
-      });
-
-      // 4. 장착 레이어 스택 렌더링 (maples.im Signature Layer Stack)
+      // 2. KMS v389 장착 슬롯 목록 렌더링
       renderLayerStack(agent);
 
-      // 5. maples.im + AI CLI 통합 JSON 프리셋 코드 생성
+      // 3. KMS v389 + AI CLI 통합 JSON 프리셋 코드 생성
       if (codeOutputEl) {
         const presetObj = {
-          app: "maples-virtual-office-triad",
-          version: "3.0",
+          app: "maples-virtual-office-triad-kms389",
+          version: "389.0",
           character: {
             id: `AGENT_${agent.id}`,
             name: agent.name,
             floor: agent.floor,
             dept: agent.dept,
-            gender: agent.parts.base === 'BASE_PIXEL' ? '픽셀 베이스' : (agent.parts.base === 'BASE_M' ? '남성' : '여성'),
             aiConfig: {
               triadRole: agent.triadRole,
               cliProvider: agent.cliProvider,
@@ -842,11 +1182,9 @@
               skills: Array.isArray(agent.skills) ? agent.skills : [],
               systemPrompt: agent.systemPrompt
             },
-            skin: agent.skin,
-            hairColor: agent.hairColor,
-            eyeColor: agent.eyeColor,
-            parts: agent.parts,
+            mapleEquipped: agent.mapleEquipped,
             stance: currentStance,
+            animated: isMotionAnimated,
             flipped: isFlipped
           }
         };
@@ -952,8 +1290,8 @@
       const agent = modularAgents.find(a => a.id === selectedId);
       if (!agent) return;
       const roleKey = (agent.triadRole || 'HEAD').toLowerCase();
-      if (!['head', 'builder', 'reviewer'].includes(roleKey)) {
-        alert('전역 오케스트레이터 역할 반영은 HEAD, BUILDER, REVIEWER 역할일 때 적용됩니다.');
+      if (!['head', 'builder', 'reviewer', 'researcher'].includes(roleKey)) {
+        alert('전역 오케스트레이터 역할 반영은 HEAD, BUILDER, REVIEWER, RESEARCHER 역할일 때 적용됩니다.');
         return;
       }
       const sel = document.querySelector(`[data-role-select="${roleKey}"]`);
@@ -1005,129 +1343,340 @@
       }
     });
 
+    // ========================================================================
+    // KMS v389 21개 장착 슬롯 목록 렌더링
+    // ========================================================================
     function renderLayerStack(agent) {
       if (!layerListEl) return;
+      const eq = agent.mapleEquipped || {};
+      const equippedKeys = Object.keys(eq)
+        .filter(k => eq[k] !== null && eq[k] !== undefined && eq[k] !== '')
+        .sort((a, b) => ((SLOT_INFO[a]?.order || 99) - (SLOT_INFO[b]?.order || 99)));
+
+      if (simEquippedCountEl) simEquippedCountEl.textContent = String(equippedKeys.length);
+
+      if (equippedKeys.length === 0) {
+        layerListEl.innerHTML = `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:10px">현재 장착된 파츠가 없습니다. 상단 카테고리 탭에서 파츠를 클릭해 장착해 보세요.</div>`;
+        return;
+      }
+
       layerListEl.innerHTML = '';
-      const layerKeys = [
-        { key: 'base', label: '바디 베이스', resetVal: 'BASE_M' },
-        { key: 'hair', label: '헤어스타일', resetVal: 'H00' },
-        { key: 'face', label: '성형/표정', resetVal: 'F01' },
-        { key: 'outfit', label: '상의/의상', resetVal: 'O00' },
-        { key: 'bottom', label: '하의/신발', resetVal: 'B00' },
-        { key: 'acc', label: '액세서리', resetVal: 'A00' }
-      ];
+      equippedKeys.forEach(slotKey => {
+        const itemId = eq[slotKey];
+        const slotDef = SLOT_INFO[slotKey] || { label: slotKey, icon: '✨' };
+        const part = maplePartById.get(itemId);
+        const nameText = part ? part.name : `아이템 #${itemId}`;
+        const localIcon = part ? getMaplePartLocalIcon(part) : '';
 
-      layerKeys.forEach(({ key, label, resetVal }) => {
+        let thumbHtml = `<span>${slotDef.icon}</span>`;
+        if (slotKey === 'skin') {
+          const bg = SKIN_COLORS[itemId] || '#fce3cc';
+          thumbHtml = `<span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:${bg};border:1px solid #cbd5e1"></span>`;
+        } else if (part) {
+          thumbHtml = `<img src="${localIcon}" alt="${nameText}" style="width:22px;height:22px;object-fit:contain;image-rendering:pixelated" onerror="if(this.src!=='${part.iconUrl || ''}') this.src='${part.iconUrl || ''}'" />`;
+        }
+
         const row = document.createElement('div');
-        const isHidden = hiddenLayers[key];
-        row.className = `layer-row${isHidden ? ' hidden-layer' : ''}`;
-        const val = agent.parts[key];
-        const valName = partDict[key]?.[val] || val || '장착 안 됨';
-
+        row.className = 'layer-row';
         row.innerHTML = `
-          <div class="layer-info">
-            <span class="layer-tag">${label}</span>
-            <span class="layer-name">${valName}</span>
+          <div class="layer-info" style="display:flex;align-items:center;gap:7px">
+            ${thumbHtml}
+            <span class="layer-tag">${slotDef.label}</span>
+            <span class="layer-name" title="${nameText} (#${itemId})">${nameText} <small style="color:#94a3b8">#${itemId}</small></span>
           </div>
           <div class="layer-actions">
-            <button type="button" class="layer-btn btn-toggle-vis" title="${isHidden ? '레이어 보이기' : '레이어 숨기기'}">
-              ${isHidden ? '👁️‍🗨️' : '👁️'}
-            </button>
-            <button type="button" class="layer-btn btn-remove-layer" title="레이어 해제/초기화">
-              🗑️
-            </button>
+            ${slotKey !== 'skin' ? `<button type="button" class="layer-btn btn-remove-layer" title="${nameText} 해제">✕</button>` : ''}
           </div>
         `;
-
-        // 숨김 토글
-        row.querySelector('.btn-toggle-vis')?.addEventListener('click', () => {
-          hiddenLayers[key] = !hiddenLayers[key];
-          updateCustomizer();
-        });
-
-        // 해제 버튼
         row.querySelector('.btn-remove-layer')?.addEventListener('click', () => {
-          agent.parts[key] = resetVal;
+          delete agent.mapleEquipped[slotKey];
+          if (slotKey === 'furniture') {
+            currentStance = 'stand1';
+            if (selStance) selStance.value = 'stand1';
+          }
+          persistCharacterAiConfig(agent);
           renderDirectory();
           updateCustomizer();
+          updateMapleCardEquippedHighlight();
         });
-
         layerListEl.appendChild(row);
       });
     }
 
-    // [이벤트] maples.im 탭 전환
-    document.querySelectorAll('.maples-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.maples-tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.maples-panel').forEach(p => p.classList.remove('active'));
-        tab.classList.add('active');
-        const targetPanel = document.getElementById(tab.dataset.tab);
-        if (targetPanel) targetPanel.classList.add('active');
-      });
-    });
-
-    // [이벤트] 파츠 아이템 카드 클릭 (이벤트 위임으로 동적 생성 버튼도 100% 자동 지원)
-    document.addEventListener('click', (e) => {
-      const card = e.target.closest('.maples-item-card');
-      if (!card) return;
+    btnUnequipAllMaple?.addEventListener('click', () => {
       const agent = modularAgents.find(a => a.id === selectedId);
-      const parentGrid = card.closest('.maples-item-grid');
-      const partKey = parentGrid?.dataset.part;
-      if (!agent || !partKey) return;
-
-      agent.parts[partKey] = card.dataset.val;
-      if (partKey === 'base') {
-        agent.gender = card.dataset.val === 'BASE_PIXEL' ? '픽셀 베이스' : (card.dataset.val === 'BASE_M' ? '남성' : '여성');
-      }
-      hiddenLayers[partKey] = false; // 파츠 선택 시 숨김 자동 해제
-      updateF07Badge();
+      if (!agent) return;
+      agent.mapleEquipped = { skin: 2000 };
+      currentStance = 'stand1';
+      if (selStance) selStance.value = 'stand1';
+      persistCharacterAiConfig(agent);
       renderDirectory();
       updateCustomizer();
+      updateMapleCardEquippedHighlight();
     });
 
-    // [이벤트] 피부톤 스와치 클릭
-    document.querySelectorAll('#skinPalette .maples-swatch').forEach(swatch => {
-      swatch.addEventListener('click', () => {
-        const agent = modularAgents.find(a => a.id === selectedId);
-        if (!agent) return;
-        agent.skin = swatch.dataset.color;
-        renderDirectory();
-        updateCustomizer();
+    // ========================================================================
+    // KMS v389 29,491개 파츠 브라우저 렌더링 & 장착 토글
+    // ========================================================================
+    function toggleEquipMaplePart(part) {
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (!agent || !part) return;
+      if (!agent.mapleEquipped) agent.mapleEquipped = { skin: 2000 };
+
+      const slot = getMapleItemSlot(part);
+      const isCurrentlyEquipped = agent.mapleEquipped[slot] === part.id;
+
+      if (isCurrentlyEquipped) {
+        if (slot === 'skin') return;
+        delete agent.mapleEquipped[slot];
+        if (slot === 'furniture') {
+          currentStance = 'stand1';
+          if (selStance) selStance.value = 'stand1';
+        }
+      } else {
+        if (slot === 'overall') {
+          delete agent.mapleEquipped.top;
+          delete agent.mapleEquipped.bottom;
+        } else if (slot === 'top' || slot === 'bottom') {
+          delete agent.mapleEquipped.overall;
+        }
+        agent.mapleEquipped[slot] = part.id;
+        if (slot === 'furniture') {
+          currentStance = 'sit';
+          if (selStance) selStance.value = 'sit';
+        }
+      }
+
+      persistCharacterAiConfig(agent);
+      renderDirectory();
+      updateCustomizer();
+      updateMapleCardEquippedHighlight();
+    }
+
+    function updateMapleCardEquippedHighlight() {
+      if (!mapleSimPartsGrid) return;
+      const agent = modularAgents.find(a => a.id === selectedId);
+      const equippedIds = new Set(Object.values(agent?.mapleEquipped || {}));
+      mapleSimPartsGrid.querySelectorAll('.maples-item-card').forEach(card => {
+        const pid = Number(card.dataset.mapleId);
+        card.classList.toggle('active', equippedIds.has(pid));
       });
-    });
+    }
 
-    // [이벤트] 헤어 염색 컬러 스와치 클릭
-    document.querySelectorAll('#hairPalette .maples-swatch').forEach(swatch => {
-      swatch.addEventListener('click', () => {
-        const agent = modularAgents.find(a => a.id === selectedId);
-        if (!agent) return;
-        agent.hairColor = swatch.dataset.color;
-        renderDirectory();
-        updateCustomizer();
+    function renderMapleSubFilters() {
+      if (!mapleSimSubFilters) return;
+      const subCats = new Set();
+      // 'all'(전체) 탭일 때는 건물/공간(building) 지역명이 파츠 서브필터에 섞이지 않도록 제외하고, 요청된 10개 제외 항목도 원천 차단
+      const targetParts = mapleBrowserState.category === 'all'
+        ? allMapleParts.filter(p => p.category !== 'building')
+        : allMapleParts.filter(p => p.category === mapleBrowserState.category);
+      targetParts.forEach(p => {
+        const sub = (p.subCategory || '').trim();
+        if (!sub || EXCLUDED_MAPLE_SET.has(sub)) return;
+        if (EXCLUDED_MAPLE_TERMS.some(term => sub.includes(term))) return;
+        subCats.add(sub);
       });
+
+      if (subCats.size <= 1) {
+        mapleSimSubFilters.innerHTML = '';
+        mapleSimSubFilters.style.display = 'none';
+        return;
+      }
+      mapleSimSubFilters.style.display = 'flex';
+
+      let html = `<button type="button" class="persona-preset-chip ${mapleBrowserState.subCategory === 'all' ? 'active' : ''}" data-sub="all" style="${mapleBrowserState.subCategory === 'all' ? 'background:#ea580c;color:#fff;border-color:#ea580c' : ''}">전체</button>`;
+      Array.from(subCats).slice(0, 25).forEach(sub => {
+        const isOn = mapleBrowserState.subCategory === sub;
+        html += `<button type="button" class="persona-preset-chip" data-sub="${sub}" style="${isOn ? 'background:#ea580c;color:#fff;border-color:#ea580c' : ''}">${sub}</button>`;
+      });
+      mapleSimSubFilters.innerHTML = html;
+      mapleSimSubFilters.querySelectorAll('[data-sub]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          mapleBrowserState.subCategory = btn.dataset.sub;
+          renderMapleSubFilters();
+          filterMapleParts();
+        });
+      });
+    }
+
+    function renderMaplePartsChunk() {
+      if (!mapleSimPartsGrid) return;
+      const agent = modularAgents.find(a => a.id === selectedId);
+      const equippedIds = new Set(Object.values(agent?.mapleEquipped || {}));
+      const start = (mapleBrowserState.currentPage - 1) * mapleBrowserState.pageSize;
+      const end = start + mapleBrowserState.pageSize;
+      const chunk = mapleBrowserState.filtered.slice(start, end);
+
+      const frag = document.createDocumentFragment();
+      chunk.forEach(part => {
+        const isEq = equippedIds.has(part.id);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `maples-item-card${isEq ? ' active' : ''}`;
+        btn.dataset.mapleId = String(part.id);
+
+        let iconHtml = '';
+        if (part.category === 'skin') {
+          const bg = SKIN_COLORS[part.id] || '#fce3cc';
+          iconHtml = `<span style="display:block;width:28px;height:28px;border-radius:6px;background:${bg};border:1px solid #cbd5e1"></span>`;
+        } else {
+          const localSrc = getMaplePartLocalIcon(part);
+          iconHtml = `<img src="${localSrc}" alt="${part.name}" loading="lazy" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated" onerror="if(this.src!=='${part.iconUrl || ''}') this.src='${part.iconUrl || ''}'" />`;
+        }
+
+        btn.innerHTML = `
+          <div class="sim-part-icon-box">${iconHtml}</div>
+          <span class="item-title" title="${part.name}">${part.name}</span>
+          <span class="item-code">${part.subCategory || part.category} · #${part.id}</span>
+        `;
+        btn.addEventListener('click', () => toggleEquipMaplePart(part));
+        frag.appendChild(btn);
+      });
+
+      mapleSimPartsGrid.appendChild(frag);
+
+      const displayed = Math.min(end, mapleBrowserState.filtered.length);
+      if (mapleSimLoadMoreWrap) {
+        if (displayed < mapleBrowserState.filtered.length) {
+          mapleSimLoadMoreWrap.style.display = 'flex';
+          if (mapleSimLoadMoreInfo) {
+            mapleSimLoadMoreInfo.textContent = `표시 중: ${displayed.toLocaleString()} / 전체 ${mapleBrowserState.filtered.length.toLocaleString()}개`;
+          }
+        } else {
+          mapleSimLoadMoreWrap.style.display = 'none';
+        }
+      }
+    }
+
+    function filterMapleParts() {
+      if (!mapleSimPartsGrid) return;
+      mapleBrowserState.currentPage = 1;
+      const q = mapleBrowserState.searchQuery.toLowerCase();
+      const agent = modularAgents.find(a => a.id === selectedId);
+      const equippedIds = new Set(Object.values(agent?.mapleEquipped || {}));
+
+      mapleBrowserState.filtered = allMapleParts.filter(p => {
+        if (mapleBrowserState.category !== 'all' && p.category !== mapleBrowserState.category) return false;
+        if (mapleBrowserState.subCategory !== 'all' && p.subCategory !== mapleBrowserState.subCategory) return false;
+        if (q) {
+          const matchName = (p.name || '').toLowerCase().includes(q);
+          const matchId = String(p.id).includes(q);
+          const matchSub = (p.subCategory || '').toLowerCase().includes(q);
+          if (!matchName && !matchId && !matchSub) return false;
+        }
+        if (mapleBrowserState.onlyEquipped && !equippedIds.has(p.id)) return false;
+        return true;
+      });
+
+      if (mapleSimCategoryTitle) {
+        mapleSimCategoryTitle.textContent = CATEGORY_NAMES[mapleBrowserState.category] || '아이템 목록';
+      }
+      if (mapleSimResultCount) {
+        mapleSimResultCount.textContent = `${mapleBrowserState.filtered.length.toLocaleString()} Items`;
+      }
+
+      mapleSimPartsGrid.innerHTML = '';
+      if (mapleBrowserState.filtered.length === 0) {
+        mapleSimPartsGrid.innerHTML = `<div style="grid-column:1/-1;padding:24px;text-align:center;color:#94a3b8;font-size:10.5px">🔍 조건에 맞는 KMS v389 파츠가 없습니다.</div>`;
+        if (mapleSimLoadMoreWrap) mapleSimLoadMoreWrap.style.display = 'none';
+        return;
+      }
+      renderMaplePartsChunk();
+    }
+
+    btnMapleSimLoadMore?.addEventListener('click', () => {
+      if (mapleBrowserState.currentPage * mapleBrowserState.pageSize < mapleBrowserState.filtered.length) {
+        mapleBrowserState.currentPage++;
+        renderMaplePartsChunk();
+      }
     });
 
-    // [이벤트] 동공 렌즈 컬러 스와치 클릭
-    document.querySelectorAll('#eyePalette .maples-swatch').forEach(swatch => {
-      swatch.addEventListener('click', () => {
-        const agent = modularAgents.find(a => a.id === selectedId);
-        if (!agent) return;
-        agent.eyeColor = swatch.dataset.color;
-        renderDirectory();
-        updateCustomizer();
+    mapleSimPartsGrid?.addEventListener('scroll', () => {
+      if (mapleSimPartsGrid.scrollTop + mapleSimPartsGrid.clientHeight >= mapleSimPartsGrid.scrollHeight - 120) {
+        if (mapleBrowserState.currentPage * mapleBrowserState.pageSize < mapleBrowserState.filtered.length) {
+          mapleBrowserState.currentPage++;
+          renderMaplePartsChunk();
+        }
+      }
+    });
+
+    let mapleSearchTimer = null;
+    mapleSimSearchInput?.addEventListener('input', (e) => {
+      clearTimeout(mapleSearchTimer);
+      mapleSearchTimer = setTimeout(() => {
+        mapleBrowserState.searchQuery = (e.target.value || '').trim();
+        if (btnMapleSimClearSearch) btnMapleSimClearSearch.style.display = mapleBrowserState.searchQuery ? 'block' : 'none';
+        filterMapleParts();
+      }, 140);
+    });
+
+    btnMapleSimClearSearch?.addEventListener('click', () => {
+      if (mapleSimSearchInput) mapleSimSearchInput.value = '';
+      mapleBrowserState.searchQuery = '';
+      btnMapleSimClearSearch.style.display = 'none';
+      filterMapleParts();
+    });
+
+    mapleSimOnlyEquipped?.addEventListener('change', (e) => {
+      mapleBrowserState.onlyEquipped = e.target.checked;
+      filterMapleParts();
+    });
+
+    // [이벤트] 캐릭터 시뮬레이터 파츠 카테고리 탭 전환
+    document.querySelectorAll('.maples-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const parentBar = tab.closest('.maples-tab-bar');
+        if (parentBar) {
+          parentBar.querySelectorAll('.maples-tab').forEach(t => t.classList.remove('active'));
+        } else {
+          document.querySelectorAll('.maples-tab').forEach(t => t.classList.remove('active'));
+        }
+        tab.classList.add('active');
+        if (tab.dataset.tab) {
+          const targetPanel = document.getElementById(tab.dataset.tab);
+          if (targetPanel) targetPanel.classList.add('active');
+        }
+        if (tab.dataset.mapleCat) {
+          mapleBrowserState.category = tab.dataset.mapleCat;
+          mapleBrowserState.subCategory = 'all';
+          renderMapleSubFilters();
+          filterMapleParts();
+        }
       });
     });
 
     // [이벤트] 방향 좌우 반전
     btnFlipDir?.addEventListener('click', () => {
       isFlipped = !isFlipped;
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (agent) {
+        agent.mapleFlipped = isFlipped;
+        persistCharacterAiConfig(agent);
+      }
+      renderDirectory();
       updateCustomizer();
     });
 
     // [이벤트] 모션/스탠스 변경
     selStance?.addEventListener('change', (e) => {
       currentStance = e.target.value;
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (agent && currentStance !== 'sit' && agent.mapleEquipped?.furniture) {
+        delete agent.mapleEquipped.furniture;
+      }
+      if (agent) persistCharacterAiConfig(agent);
+      renderDirectory();
+      updateCustomizer();
+    });
+
+    // [이벤트] ▶ 모션 재생 / ⏸ 정지 토글
+    btnSimMotionPlay?.addEventListener('click', () => {
+      isMotionAnimated = !isMotionAnimated;
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (agent) {
+        agent.mapleAnimated = isMotionAnimated;
+        persistCharacterAiConfig(agent);
+      }
       updateCustomizer();
     });
 
@@ -1149,124 +1698,162 @@
       canvasArea.classList.add(backdrops[backdropIdx]);
     });
 
-    // [이벤트] 🎲 랜덤 코디 생성 (maples.im Randomize)
+    // [이벤트] 🎲 랜덤 코디 생성 (29,218개 KMS v389 파츠 무작위 조합)
     btnRandomize?.addEventListener('click', () => {
       const agent = modularAgents.find(a => a.id === selectedId);
-      if (!agent) return;
-      const pick = arr => arr[Math.floor(Math.random() * arr.length)];
-
-      const skins = ['#fff0e6', '#fde2d2', '#f8cfbe', '#ebb99a', '#cf9571', '#e3e8ee'];
-      const hairColors = ['#1e1e24', '#4a3525', '#7c4a2d', '#d4a359', '#f472b6', '#3b82f6', '#94a3b8', '#10b981'];
-      const eyeColors = ['#1e293b', '#2563eb', '#059669', '#dc2626', '#d97706', '#9333ea'];
-      const hairs = ['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08'];
-      const faces = ['F01', 'F02', 'F03', 'F04', 'F05', 'F06'];
-      const outfits = ['O01', 'O02', 'O03', 'O04', 'O05', 'O06', 'O07'];
-      const bottoms = ['B01', 'B02', 'B03', 'B04'];
-      const accs = ['A00', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07'];
-
-      agent.skin = pick(skins);
-      agent.hairColor = pick(hairColors);
-      agent.eyeColor = pick(eyeColors);
-      agent.parts.hair = pick(hairs);
-      agent.parts.face = pick(faces);
-      agent.parts.outfit = pick(outfits);
-      agent.parts.bottom = pick(bottoms);
-      agent.parts.acc = pick(accs);
-
-      // 전체 레이어 숨김 해제
-      Object.keys(hiddenLayers).forEach(k => hiddenLayers[k] = false);
-
+      if (!agent || !allMapleParts.length) return;
+      const pickRandom = (cat, sub = null) => {
+        const items = allMapleParts.filter(p => p.category === cat && (!sub || p.subCategory === sub));
+        if (!items.length) return null;
+        return items[Math.floor(Math.random() * items.length)].id;
+      };
+      const shouldChair = Math.random() < 0.25;
+      const nextEq = {
+        skin: pickRandom('skin') || 2000,
+        hair: pickRandom('hair'),
+        face: pickRandom('face'),
+        overall: pickRandom('clothes', 'Overall'),
+        shoes: pickRandom('shoes'),
+        hat: pickRandom('accessories', 'Hat'),
+        cape: pickRandom('accessories', 'Cape'),
+        faceAccessory: pickRandom('accessories', 'Face Accessory'),
+        effect: pickRandom('decoration', 'Effect'),
+        furniture: shouldChair ? pickRandom('furniture') : null,
+        pet: pickRandom('pet', 'Pet'),
+        building: pickRandom('building')
+      };
+      Object.keys(nextEq).forEach(k => { if (!nextEq[k]) delete nextEq[k]; });
+      agent.mapleEquipped = nextEq;
+      currentStance = nextEq.furniture ? 'sit' : 'stand1';
+      if (selStance) selStance.value = currentStance;
+      persistCharacterAiConfig(agent);
       renderDirectory();
       updateCustomizer();
-
-      // 경쾌한 주사위 클릭 피드백
-      stageEl.style.transition = 'transform 0.15s ease';
-      stageEl.style.transform = `scale(${currentZoom * 1.15})`;
-      setTimeout(() => { stageEl.style.transform = `scale(${currentZoom})`; }, 150);
+      updateMapleCardEquippedHighlight();
     });
 
-    // [이벤트] ⭐ 메이플 시뮬레이터 기본 캐릭터 로드 (Default Character)
+    // [이벤트] ⭐ 기본 코디 로드
     btnLoadDefault?.addEventListener('click', () => {
       const agent = modularAgents.find(a => a.id === selectedId);
       if (!agent) return;
-      let defType = 'male';
-      if (agent.parts.base === 'BASE_PIXEL') {
-        defType = 'pixel';
-      } else if (agent.gender === '여성') {
-        defType = 'female';
-      }
-      const def = (window.MapleDefaultCharacter && window.MapleDefaultCharacter.getPreset(defType)) || {
-        skin: agent.gender === '여성' ? '#fff0e6' : '#fde2d2',
-        hairColor: agent.gender === '여성' ? '#7c4a2d' : '#4a3525',
-        eyeColor: '#1e293b',
-        parts: {
-          base: agent.gender === '여성' ? 'BASE_F' : 'BASE_M',
-          hair: agent.gender === '여성' ? 'H01' : 'H02',
-          face: 'F01',
-          outfit: 'O07',
-          bottom: agent.gender === '여성' ? 'B03' : 'B02',
-          acc: 'A03'
-        }
-      };
-
-      agent.skin = def.skin;
-      agent.hairColor = def.hairColor;
-      agent.eyeColor = def.eyeColor;
-      agent.parts = Object.assign({}, def.parts);
-      Object.keys(hiddenLayers).forEach(k => hiddenLayers[k] = false);
-
+      agent.mapleEquipped = { ...(DEFAULT_MAPLE_EQUIPPED_BY_ID[agent.id] || { skin: 2000, hair: 30000, face: 20000, overall: 1050018, shoes: 1072000, hat: 1002140 }) };
+      currentStance = 'stand1';
+      if (selStance) selStance.value = 'stand1';
+      persistCharacterAiConfig(agent);
       renderDirectory();
       updateCustomizer();
-
-      // 시각적 피드백
-      stageEl.style.transition = 'transform 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
-      stageEl.style.transform = `scale(${currentZoom * 1.1})`;
-      setTimeout(() => { stageEl.style.transform = `scale(${currentZoom})`; }, 180);
+      updateMapleCardEquippedHighlight();
     });
 
-    // [이벤트] 🔄 초기화 (기본 프리셋으로 복원)
+    // [이벤트] 🔄 초기화
     btnResetParts?.addEventListener('click', () => {
       const agent = modularAgents.find(a => a.id === selectedId);
       if (!agent) return;
-      agent.parts.hair = 'H02';
-      agent.parts.face = 'F02';
-      agent.parts.outfit = 'O01';
-      agent.parts.bottom = 'B01';
-      agent.parts.acc = 'A03';
-      agent.skin = '#f8cfbe';
-      agent.hairColor = '#4a3525';
-      agent.eyeColor = '#1e293b';
-      Object.keys(hiddenLayers).forEach(k => hiddenLayers[k] = false);
+      agent.mapleEquipped = { skin: 2000, hair: 30000, face: 20000, overall: 1050018, shoes: 1072000, hat: 1002140 };
+      currentStance = 'stand1';
+      isMotionAnimated = false;
+      isFlipped = false;
+      agent.mapleFlipped = false;
+      if (selStance) selStance.value = 'stand1';
+      persistCharacterAiConfig(agent);
       renderDirectory();
       updateCustomizer();
+      updateMapleCardEquippedHighlight();
     });
 
-    // [이벤트] 💾 PNG 투명 배경 다운로드 (HTML5 Canvas 직렬화)
-    btnExportPng?.addEventListener('click', () => {
-      const svgEl = stageEl.querySelector('svg');
-      if (!svgEl) return;
-      const svgData = new XMLSerializer().serializeToString(svgEl);
-      const canvas = document.createElement('canvas');
-      canvas.width = 384;
-      canvas.height = 468;
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(svgBlob);
-      img.onload = () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (isFlipped) {
-          ctx.translate(canvas.width, 0);
-          ctx.scale(-1, 1);
+    // [이벤트] 💾 캐릭터 시뮬레이터 코디 저장 & 오피스 적용 (개별 / 전체)
+    const btnSaveSimCharacter = document.getElementById('btnSaveSimCharacter');
+    const btnSaveAllSimCharacters = document.getElementById('btnSaveAllSimCharacters');
+    const simSaveStatusBanner = document.getElementById('simSaveStatusBanner');
+    const simSaveStatusText = document.getElementById('simSaveStatusText');
+
+    btnSaveSimCharacter?.addEventListener('click', async () => {
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (!agent) return;
+      agent.mapleAnim = currentStance;
+      agent.mapleAnimated = isMotionAnimated;
+      agent.mapleFlipped = isFlipped;
+      const origLabel = btnSaveSimCharacter.innerHTML;
+      btnSaveSimCharacter.disabled = true;
+      btnSaveSimCharacter.textContent = '⏳ 저장 및 적용 중...';
+
+      await saveCharacterConfigsToServer(agent);
+      renderDirectory();
+      updateCustomizer();
+
+      const slotCnt = Object.keys(agent.mapleEquipped || {}).length;
+      btnSaveSimCharacter.textContent = `✓ #${agent.id} ${agent.name} 코디 적용 완료!`;
+      if (simSaveStatusBanner) simSaveStatusBanner.classList.add('saved');
+      if (simSaveStatusText) {
+        simSaveStatusText.innerHTML = `<strong>✓ 저장 완료:</strong> <strong>#${agent.id} ${agent.name}</strong>의 KMS v389 파츠(${slotCnt}슬롯 · 모션: ${currentStance})가 <strong>AI 직원 디렉토리 · 서버 · <a href="office.html" style="color:#047857;text-decoration:underline">가상 오피스 ↗</a></strong>에 즉시 적용되었습니다.`;
+      }
+      setTimeout(() => {
+        btnSaveSimCharacter.disabled = false;
+        btnSaveSimCharacter.innerHTML = origLabel;
+      }, 1800);
+    });
+
+    btnSaveAllSimCharacters?.addEventListener('click', async () => {
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (agent) {
+        agent.mapleAnim = currentStance;
+        agent.mapleAnimated = isMotionAnimated;
+        agent.mapleFlipped = isFlipped;
+      }
+      const origLabel = btnSaveAllSimCharacters.innerHTML;
+      btnSaveAllSimCharacters.disabled = true;
+      btnSaveAllSimCharacters.textContent = '⏳ 저장 중...';
+
+      await saveCharacterConfigsToServer(null);
+      renderDirectory();
+      updateCustomizer();
+
+      btnSaveAllSimCharacters.textContent = `✓ 전체 ${modularAgents.length}명 저장됨`;
+      if (simSaveStatusBanner) simSaveStatusBanner.classList.add('saved');
+      if (simSaveStatusText) {
+        simSaveStatusText.innerHTML = `<strong>✓ 전체 일괄 저장 완료:</strong> 등록된 <strong>전체 AI 직원 ${modularAgents.length}명</strong>의 코디 및 설정이 서버(<code>data/character_configs.json</code>)와 <a href="office.html" style="color:#047857;text-decoration:underline">가상 오피스 ↗</a>에 모두 반영되었습니다.`;
+      }
+      setTimeout(() => {
+        btnSaveAllSimCharacters.disabled = false;
+        btnSaveAllSimCharacters.innerHTML = origLabel;
+      }, 1800);
+    });
+
+    window.addEventListener('nexus:character-configs-updated', () => {
+      const agent = modularAgents.find(a => a.id === selectedId);
+      if (agent) {
+        currentStance = agent.mapleAnim || 'stand1';
+        isMotionAnimated = Boolean(agent.mapleAnimated);
+        isFlipped = Boolean(agent.mapleFlipped);
+        if (selStance) selStance.value = currentStance;
+      }
+      renderDirectory();
+      updateCustomizer();
+      updateMapleCardEquippedHighlight();
+    });
+
+    // [이벤트] 🖼️ 아바타 이미지 다운로드 (PNG / GIF)
+    btnExportPng?.addEventListener('click', async () => {
+      const imgEl = stageEl?.querySelector('img');
+      if (imgEl && imgEl.src) {
+        try {
+          const res = await fetch(imgEl.src);
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const ext = isMotionAnimated ? 'gif' : 'png';
+          a.href = url;
+          a.download = `maple_kms389_agent_${selectedId}_${currentStance}.${ext}`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          return;
+        } catch (_) {
+          window.open(imgEl.src, '_blank');
+          return;
         }
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        URL.revokeObjectURL(url);
-        const a = document.createElement('a');
-        a.download = `maples_office_agent_${selectedId}.png`;
-        a.href = canvas.toDataURL('image/png');
-        a.click();
-      };
-      img.src = url;
+      }
     });
 
     // [이벤트] JSON 복사
@@ -1282,149 +1869,30 @@
 
     floorFilter?.addEventListener('change', renderDirectory);
 
+    // 만약 window.__MAPLE_DATA__가 아직 로드되지 않았을 경우 fetch 폴백
+    if (!allMapleParts.length) {
+      fetch('maplestory-characters-scraper/data/parts.json')
+        .then(r => r.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            allMapleParts = data.filter(p => !isExcludedMaplePart(p));
+            maplePartById.clear();
+            allMapleParts.forEach(p => maplePartById.set(p.id, p));
+            updateMapleTabCategoryCounts();
+            renderMapleSubFilters();
+            filterMapleParts();
+            updateCustomizer();
+          }
+        })
+        .catch(() => {});
+    } else {
+      updateMapleTabCategoryCounts();
+      renderMapleSubFilters();
+      filterMapleParts();
+    }
+
     renderDirectory();
     updateCustomizer();
-
-    // 외부 파츠(F07.json, F08.json, F09.json, F10.json 등) 수정 시 실시간 화면 갱신
-    function getActiveFaceKey() {
-      const agent = modularAgents.find(a => a.id === selectedId);
-      return agent?.parts?.face || 'F07';
-    }
-
-    function updateF07Badge() {
-      const badge = document.getElementById('f07CoordBadge');
-      if (!badge || !window.PixelChibiParts) return;
-      const key = getActiveFaceKey();
-      const off = window.PixelChibiParts.getOffset('face', key);
-      badge.textContent = `[${key}] X: ${off.x}, Y: ${off.y}`;
-    }
-
-    document.querySelectorAll('.f07-move-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (!window.PixelChibiParts) return;
-        const key = getActiveFaceKey();
-        const axis = btn.dataset.axis;
-        const delta = parseInt(btn.dataset.delta, 10) || 0;
-        const off = window.PixelChibiParts.getOffset('face', key);
-        const nx = axis === 'x' ? off.x + delta : off.x;
-        const ny = axis === 'y' ? off.y + delta : off.y;
-        window.PixelChibiParts.setOffset('face', key, nx, ny);
-        updateF07Badge();
-        renderDirectory();
-        updateCustomizer();
-      });
-    });
-
-    document.querySelector('.f07-reset-btn')?.addEventListener('click', () => {
-      if (!window.PixelChibiParts) return;
-      const key = getActiveFaceKey();
-      window.PixelChibiParts.setOffset('face', key, 0, 0);
-      updateF07Badge();
-      renderDirectory();
-      updateCustomizer();
-    });
-
-    window.addEventListener('chibi-part-updated', () => {
-      updateF07Badge();
-      renderDirectory();
-      updateCustomizer();
-    });
-    updateF07Badge();
-
-    // ========================================================================
-    // [매니페스트 기반 파츠 디스커버리 (404 없는 클린 로더)]
-    // avatar/data/parts/manifest.json에 등록된 실제 존재 파일만 로드합니다.
-    // ========================================================================
-    const scannedCache = new Map();
-
-    async function loadPartFromManifest(category, id) {
-      const grid = document.querySelector(`.maples-item-grid[data-part="${category}"]`);
-      if (!grid) return;
-      const prefix = id.slice(0, 1);
-      const num = parseInt(id.slice(1), 10);
-      const url = `avatar/data/parts/${category}/${id}.json`;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) return;
-        const text = await res.text();
-        if (text === scannedCache.get(id)) return;
-        scannedCache.set(id, text);
-
-        let data;
-        try { data = JSON.parse(text); } catch (e) { return; }
-
-        if (window.PixelChibiParts?.registerPart) {
-          window.PixelChibiParts.registerPart(category, id, data);
-        }
-
-        let btn = grid.querySelector(`button[data-val="${id}"]`);
-        const title = data.meta?.title || data.meta?.name || `${id} 신규 파츠`;
-        const pixelsCount = data.meta?.totalPixels || (Array.isArray(data.pixels) ? data.pixels.length : '');
-        const pxLabel = pixelsCount ? ` (${pixelsCount}px)` : '';
-
-        if (!btn) {
-          btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'maples-item-card auto-added-part';
-          btn.dataset.val = id;
-          btn.innerHTML = `<span class="item-code">${id}</span><span class="item-title">${title}${pxLabel}</span>`;
-          btn.title = `자동 등록된 신규 에셋: ${title}`;
-
-          const allButtons = [...grid.querySelectorAll('.maples-item-card')];
-          let inserted = false;
-          for (const existing of allButtons) {
-            const existVal = existing.dataset.val || '';
-            if (existVal.startsWith(prefix)) {
-              const existNum = parseInt(existVal.slice(prefix.length), 10);
-              if (!isNaN(num) && existNum > num) {
-                grid.insertBefore(btn, existing);
-                inserted = true;
-                break;
-              }
-            }
-          }
-          if (!inserted) grid.appendChild(btn);
-
-          const subhead = grid.parentElement?.querySelector('.maples-subhead em');
-          if (subhead) {
-            const total = grid.querySelectorAll('.maples-item-card').length;
-            const unit = category === 'face' ? 'Faces' : (category === 'hair' ? 'Styles' : 'Items');
-            subhead.textContent = `${total} ${unit}`;
-          }
-        } else {
-          const titleEl = btn.querySelector('.item-title');
-          if (titleEl && !titleEl.textContent.includes('px') && pixelsCount) {
-            titleEl.textContent = `${title}${pxLabel}`;
-          }
-        }
-
-        const activeAgent = modularAgents.find(a => a.id === selectedId);
-        if (activeAgent?.parts?.[category] === id) {
-          updateF07Badge();
-          renderDirectory();
-          updateCustomizer();
-        }
-      } catch (_) {}
-    }
-
-    async function runAutoDiscovery() {
-      if (page !== 'agents') return;
-      try {
-        const res = await fetch('avatar/data/parts/manifest.json', { cache: 'no-store' });
-        if (!res.ok) return;
-        const manifest = await res.json();
-        const tasks = [];
-        for (const [category, ids] of Object.entries(manifest || {})) {
-          if (Array.isArray(ids)) {
-            ids.forEach(id => tasks.push(loadPartFromManifest(category, id)));
-          }
-        }
-        await Promise.all(tasks);
-      } catch (_) {}
-    }
-
-    // 초기 1회 매니페스트 로드 (무차별 404 폴링 제거)
-    runAutoDiscovery();
   }
 
   // ==========================================================================
