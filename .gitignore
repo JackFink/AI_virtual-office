@@ -35,3 +35,4 @@ config/cli/login_scripts/*.cmd
 # Trash (Unused / Legacy Archive Folder)
 trash/
 /trash/
+.grok/

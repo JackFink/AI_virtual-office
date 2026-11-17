@@ -1,16 +1,5 @@
 [
   {
-    "key": "claude",
-    "base_type": "claude",
-    "domain": "ANTHROPIC",
-    "cli": "claude",
-    "label": "Claude Code",
-    "model": "claude-code-cli",
-    "login_cmd": "claude login",
-    "install_cmd": "npm install -g @anthropic-ai/claude-code",
-    "profile_dir": null
-  },
-  {
     "key": "antigravity",
     "base_type": "antigravity",
     "domain": "GOOGLE",
@@ -41,17 +30,6 @@
     "model": "codex-cli",
     "login_cmd": "codex login",
     "install_cmd": "npm install -g @openai/codex",
-    "profile_dir": null
-  },
-  {
-    "key": "grok",
-    "base_type": "grok",
-    "domain": "XAI",
-    "cli": "grok",
-    "label": "xAI Grok",
-    "model": "grok-cli",
-    "login_cmd": "grok (XAI_API_KEY / ~/.grok/user-settings.json)",
-    "install_cmd": "npm install -g @vibe-kit/grok-cli",
     "profile_dir": null
   }
 ]
