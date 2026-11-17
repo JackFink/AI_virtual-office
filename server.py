@@ -698,17 +698,44 @@ def launch_cli_login_terminal(cli_name: str) -> Dict[str, Any]:
                     f'call npm install -g {pkg}',
                     "echo.",
                 ]
-            lines += [
-                f"echo [안내] 잠시 후 '{login_cmd_str}'가 실행되며 웹 브라우저 로그인 창(또는 안내)이 표시됩니다.",
-                "echo        브라우저에서 구독 계정으로 로그인을 완료한 뒤,",
-                "echo        버추얼 오피스 설정창에서 [실시간 로그인 검증] 버튼을 눌러주세요!",
-                "echo ======================================================================",
-                "echo.",
-                f'call {login_cmd_str}',
-                "echo.",
-                "echo [완료] 로그인이 끝났다면 이 창을 닫고 버추얼 오피스 화면으로 돌아가세요.",
-                "pause",
-            ]
+            if cli_name == "grok":
+                grok_cfg_dir = prof_path if prof_path else (Path.home() / ".grok")
+                grok_cfg_file = grok_cfg_dir / "user-settings.json"
+                lines += [
+                    "echo [참고] xAI Grok CLI(@vibe-kit/grok-cli)는 브라우저 OAuth 구독 로그인을 지원하지 않으며,",
+                    f"echo        xAI 콘솔(https://console.x.ai)의 키가 {grok_cfg_file} 에 필요합니다.",
+                    "echo        (Grok을 사용하지 않으시면 Enter를 눌러 창을 닫고 다른 AI를 배정하셔도 됩니다.)",
+                    "echo ======================================================================",
+                    "echo.",
+                    'set /p GROK_INPUT_KEY="xAI API Key (xai-... 입력 또는 Enter로 건너뛰기): "',
+                    'if not "%GROK_INPUT_KEY%"=="" (',
+                    f'  if not exist "{grok_cfg_dir}" mkdir "{grok_cfg_dir}"',
+                    f'  echo {{"apiKey": "%GROK_INPUT_KEY%"}}> "{grok_cfg_file}"',
+                    f'  echo [저장 완료] {grok_cfg_file} 에 키가 저장되었습니다.',
+                    ')',
+                    "echo.",
+                    "echo [완료] 이 창을 닫고 버추얼 오피스 화면으로 돌아가세요.",
+                    "pause",
+                ]
+            else:
+                if cli_name == "claude":
+                    lines += [
+                        "echo [참고] Anthropic 공식 정책상 Claude Code CLI는 유료 구독(Claude Pro / Max / Team)",
+                        "echo        또는 Console 크레딧 계정만 로그인을 허용하며, 무료(Free) 계정은 업그레이드 안내가 표시됩니다.",
+                        "echo        (무료 계정으로만 운영하시려면 HEAD 역할에 Google Antigravity 또는 Gemini를 배정하세요.)",
+                        "echo.",
+                    ]
+                lines += [
+                    f"echo [안내] 잠시 후 '{login_cmd_str}'가 실행되며 웹 브라우저 로그인 창(또는 안내)이 표시됩니다.",
+                    "echo        브라우저에서 구독 계정으로 로그인을 완료한 뒤,",
+                    "echo        버추얼 오피스 설정창에서 [실시간 로그인 검증] 버튼을 눌러주세요!",
+                    "echo ======================================================================",
+                    "echo.",
+                    f'call {login_cmd_str}',
+                    "echo.",
+                    "echo [완료] 로그인이 끝났다면 이 창을 닫고 버추얼 오피스 화면으로 돌아가세요.",
+                    "pause",
+                ]
             bat_path.write_text("\r\n".join(lines), encoding="utf-8")
             subprocess.Popen(
                 ["cmd.exe", "/c", "start", "", str(bat_path.resolve())],
@@ -1598,7 +1625,37 @@ STATE: Dict[str, Any] = {
         "total": {"calls": 18, "seconds": 555, "tokens": 202400, "exact_tokens": 202400, "failed": 0},
     },
     "stop_requested": False,
+    "quota_exhausted_slots": {},
+    "paused_mission": None,
 }
+
+QUOTA_ERROR_PHRASES = (
+    "429",
+    "too many requests",
+    "quota exceeded",
+    "resource_exhausted",
+    "rate limit",
+    "rate_limit",
+    "usage limit",
+    "insufficient_quota",
+    "credit balance is too low",
+    "exceeded your current quota",
+    "you've hit your limit",
+    "hit your usage limit",
+    "daily limit",
+    "monthly limit",
+    "upgrade to pro",
+    "upgrade to plus",
+)
+
+
+class _AllQuotaExhaustedError(Exception):
+    def __init__(self, phase_name: str, role_name: str, exhausted_slots: List[str], reason: str):
+        super().__init__(reason)
+        self.phase_name = phase_name
+        self.role_name = role_name
+        self.exhausted_slots = exhausted_slots
+        self.reason = reason
 
 
 def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.0) -> Optional[Dict[str, Any]]:
@@ -1607,12 +1664,24 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
     meta = PROVIDER_META.get(canon)
     if not meta:
         return None
+    with _STATE_LOCK:
+        exhausted_info = STATE.get("quota_exhausted_slots", {}).get(canon)
+    if exhausted_info:
+        return {
+            "quota_exceeded": True,
+            "provider": canon,
+            "label": meta["label"],
+            "reason": exhausted_info.get("reason", "한도 도달 감지됨"),
+        }
     exe = resolve_cli(meta["cli"])
     if not exe:
         return None
+    prof_dir = meta.get("profile_dir")
+    marker_check = _check_session_markers(meta["cli"], prof_dir)
+    if not marker_check["detected"]:
+        return None
 
     domain = meta["domain"]
-    prof_dir = meta.get("profile_dir")
     run_env = get_sanitized_env()
     if prof_dir:
         if meta["cli"] in ("gemini", "agy"):
@@ -1674,6 +1743,22 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
             with _STATE_LOCK:
                 _ACTIVE_PIDS.pop(proc.pid, None)
         dur = max(1, int(round(time.time() - t0)))
+        combined_out = ((stdout or "") + "\n" + (stderr or "")).strip()
+        combined_lower = combined_out.lower()
+        if any(q_phrase in combined_lower for q_phrase in QUOTA_ERROR_PHRASES):
+            reason_snippet = combined_out.splitlines()[0][:180] if combined_out else "CLI 한도 도달 (429 / Quota Exceeded)"
+            with _STATE_LOCK:
+                STATE.setdefault("quota_exhausted_slots", {})[canon] = {
+                    "at": utc_now_iso(),
+                    "label": meta["label"],
+                    "reason": reason_snippet,
+                }
+            return {
+                "quota_exceeded": True,
+                "provider": canon,
+                "label": meta["label"],
+                "reason": reason_snippet,
+            }
         if proc.returncode == 0 and stdout.strip():
             parsed_text = stdout.strip()
             if domain == "GOOGLE":
@@ -1970,7 +2055,12 @@ def _verify_project_files(project_dir: Path) -> Dict[str, Any]:
     }
 
 
-def _run_mission_pipeline(mission_id: str, goal: str, profile: str = "standard"):
+def _run_mission_pipeline(
+    mission_id: str,
+    goal: str,
+    profile: str = "standard",
+    resume_state: Optional[Dict[str, Any]] = None,
+):
     """
     Executes the Triad pipeline with:
     1) Profile-based stage & budget differentiation:
@@ -1979,6 +2069,7 @@ def _run_mission_pipeline(mission_id: str, goal: str, profile: str = "standard")
        - deep: Multi-module breakdown (HEAD splits into Module 1 & Module 2; BUILDER [Account 1] & SUB-BUILDER [Account 2] build in parallel/sequence) + 5 stages, max_repairs=3
     2) Real workspace project file generation in deliverables/<mission_id>_project/
     3) Automatic Repair Loop (returns to 02 BUILDING when 03 VERIFYING or 04 REVIEWING finds defects)
+    4) Quota Auto-Failover & All-Exhausted Auto-Pause (QUOTA_PAUSED) with Stage Resume
     """
     roles = load_roles()
     head_p = roles.get("head", "claude")
@@ -1990,16 +2081,18 @@ def _run_mission_pipeline(mission_id: str, goal: str, profile: str = "standard")
     profile_clean = (profile or "standard").lower().strip()
     max_repairs = 1 if profile_clean == "quick" else (3 if profile_clean == "deep" else 2)
     project_dir = ROOT / "deliverables" / f"{mission_id}_project"
-    generated_files: List[str] = []
-    stage_outputs: Dict[str, str] = {}
-    repair_history: List[str] = []
-    step_counter = 0
+    generated_files: List[str] = list((resume_state or {}).get("generated_files") or [])
+    stage_outputs: Dict[str, str] = dict((resume_state or {}).get("stage_outputs") or {})
+    repair_history: List[str] = list((resume_state or {}).get("repair_history") or [])
+    repair_attempt: int = int((resume_state or {}).get("repair_attempt") or 0)
+    last_error_feedback: str = str((resume_state or {}).get("last_error_feedback") or "")
+    step_counter: int = int((resume_state or {}).get("step_counter") or 0)
 
     def _record_stage_start(phase_name: str, role_name: str, prov_k: str, state_msg: str) -> int:
         nonlocal step_counter
         step_counter += 1
         with _STATE_LOCK:
-            domain = PROVIDER_META.get(prov_k, PROVIDER_META[head_p])["domain"]
+            domain = PROVIDER_META.get(prov_k, PROVIDER_META.get(head_p, {"domain": "GOOGLE"}))["domain"]
             STATE["phase"] = phase_name
             STATE["working_now"] = (
                 [{"provider": domain, "cli": prov_k, "role": role_name, "stage": phase_name, "elapsed_sec": 1}]
@@ -2019,22 +2112,100 @@ def _run_mission_pipeline(mission_id: str, goal: str, profile: str = "standard")
             )
         return step_counter
 
-    def _call_cli_with_fallback(prov_k: str, prompt_txt: str, timeout_s: float = 28.0) -> Optional[Dict[str, Any]]:
+    def _swap_role_to_provider(role_name: str, new_prov_k: str) -> None:
+        nonlocal head_p, builder_p, sub_builder_p, reviewer_p, researcher_p
+        role_map_key = {
+            "HEAD": "head",
+            "BUILDER": "builder",
+            "SUB-BUILDER": "sub_builder",
+            "REVIEWER": "reviewer",
+            "RESEARCHER": "researcher",
+        }.get(role_name, "builder")
+        if role_map_key == "head":
+            head_p = new_prov_k
+        elif role_map_key == "builder":
+            builder_p = new_prov_k
+        elif role_map_key == "sub_builder":
+            sub_builder_p = new_prov_k
+        elif role_map_key == "reviewer":
+            reviewer_p = new_prov_k
+        elif role_map_key == "researcher":
+            researcher_p = new_prov_k
+        try:
+            cur_roles = load_roles()
+            cur_roles[role_map_key] = new_prov_k
+            ROLE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            ROLE_SETTINGS_PATH.write_text(json.dumps(cur_roles, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _call_cli_with_fallback(
+        prov_k: str,
+        prompt_txt: str,
+        timeout_s: float = 28.0,
+        role_name: str = "BUILDER",
+        phase_name: str = "BUILDING",
+    ) -> Optional[Dict[str, Any]]:
+        with _STATE_LOCK:
+            if STATE.get("stop_requested"):
+                return None
         res = invoke_cli_if_available(prov_k, prompt_txt, timeout=timeout_s)
-        if not res:
-            for fb_k in ("antigravity", "gemini", "openai", "claude"):
-                if fb_k == prov_k or fb_k not in PROVIDER_META:
-                    continue
-                res = invoke_cli_if_available(fb_k, prompt_txt, timeout=timeout_s)
-                if res:
-                    break
-        if not res:
-            for _ in range(10):
-                with _STATE_LOCK:
-                    if STATE.get("stop_requested"):
-                        break
-                time.sleep(0.08)
-        return res
+        if res and not res.get("quota_exceeded") and res.get("output"):
+            return res
+
+        # Current provider hit quota limit or is not connected -> find other connected (LOGGED_IN) AI slots
+        slots = load_cli_slots()
+        with _STATE_LOCK:
+            exhausted_map = dict(STATE.get("quota_exhausted_slots") or {})
+
+        connected_candidates: List[str] = []
+        all_connected_slots: List[str] = []
+        for s in slots:
+            sk = s.get("key", "")
+            cli_cmd = s.get("cli", "")
+            p_dir = s.get("profile_dir")
+            if not sk or not resolve_cli(cli_cmd):
+                continue
+            if not _check_session_markers(cli_cmd, p_dir)["detected"]:
+                continue
+            all_connected_slots.append(sk)
+            if sk != prov_k and sk not in exhausted_map:
+                connected_candidates.append(sk)
+
+        for fb_k in connected_candidates:
+            with _STATE_LOCK:
+                if STATE.get("stop_requested"):
+                    return None
+                old_lbl = PROVIDER_META.get(prov_k, {}).get("label", prov_k)
+                new_lbl = PROVIDER_META.get(fb_k, {}).get("label", fb_k)
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mission_id}-failover-{int(time.time())}",
+                        "to_state": phase_name,
+                        "state_ko": f"🔄 [{role_name}] {old_lbl} 한도 도달/응답 불가 → 연결된 다른 AI [{new_lbl}]로 자동 교체하여 {phase_name} 단계를 재개합니다.",
+                        "project": STATE["project_name"],
+                        "role": role_name,
+                    },
+                )
+            _swap_role_to_provider(role_name, fb_k)
+            fb_res = invoke_cli_if_available(fb_k, prompt_txt, timeout=timeout_s)
+            if fb_res and not fb_res.get("quota_exceeded") and fb_res.get("output"):
+                return fb_res
+
+        # If ALL connected AI slots have reached their quota limit (or failed with quota_exceeded) -> PAUSE ALL WORK!
+        with _STATE_LOCK:
+            exhausted_now = list((STATE.get("quota_exhausted_slots") or {}).keys())
+        if exhausted_now or not all_connected_slots:
+            exhausted_labels = [PROVIDER_META.get(k, {}).get("label", k) for k in (exhausted_now or all_connected_slots or [prov_k])]
+            raise _AllQuotaExhaustedError(
+                phase_name=phase_name,
+                role_name=role_name,
+                exhausted_slots=exhausted_now or all_connected_slots or [prov_k],
+                reason=f"연결된 모든 AI({', '.join(exhausted_labels)})가 사용 한도에 도달하여 {phase_name} 단계에서 모든 작업을 일시 중지했습니다.",
+            )
+        return None
 
     def _record_stage_done(s_idx: int, phase_name: str, role_name: str, prov_k: str, cli_res: Optional[Dict[str, Any]], summary_txt: str, step_state: str = "PASS"):
         with _STATE_LOCK:
@@ -2098,212 +2269,270 @@ def _run_mission_pipeline(mission_id: str, goal: str, profile: str = "standard")
                     m["passed_steps"] = len([s for s in m["steps"] if s["state"] == "PASS"])
                     m["updated_at"] = utc_now_iso()
 
-    # =========================================================================
-    # STAGE 01: PLANNING (& Multi-Module Task Breakdown for DEEP mode)
-    # =========================================================================
-    s1 = _record_stage_start(
-        "PLANNING",
-        "HEAD",
-        head_p,
-        f"HEAD({PROVIDER_META[head_p]['label']})가 '{goal}' 목표 분석 및 {'다중 모듈 분할(Task Breakdown)' if profile_clean == 'deep' else 'ORDER 작업 지시서'}를 수립 중입니다.",
-    )
-    if profile_clean == "deep":
-        plan_prompt = (
-            f"당신은 HEAD(총괄 아키텍트)입니다. 대규모 목표 '{goal}'을 두 개의 세부 모듈로 분할하여 한국어로 작업 지시서(ORDER)를 작성하세요:\n"
-            f"- [MODULE 1 (BUILDER 계정1 담당)]: 핵심 엔진/데이터/백엔드 로직 (`core_module.py`)\n"
-            f"- [MODULE 2 (SUB-BUILDER 계정2 담당)]: 실행 인터페이스/검증 테스트 모듈 (`app_runner.py`)\n"
-            f"- 합격 기준: 두 파일 모두 파이썬 문법 및 실행 오류 0건"
-        )
-    else:
-        plan_prompt = (
-            f"당신은 HEAD(총괄 지휘) 에이전트입니다. 목표 '{goal}'에 대해 생성할 실제 소스 파일 구성(예: `main.py`), 핵심 기능, 검증 기준을 4줄 이내 한국어 작업 지시서(ORDER)로 작성하세요."
-        )
-    res_plan = _call_cli_with_fallback(head_p, plan_prompt, timeout_s=24.0)
-    stage_outputs["PLANNING"] = (
-        res_plan["output"].strip()
-        if (res_plan and res_plan.get("output"))
-        else (
-            f"- 목표: {goal}\n"
-            f"- 실행 모드: {profile_clean.upper()} (최대 자동 수정 {max_repairs}회)\n"
-            f"- 생성 경로: `deliverables/{mission_id}_project/`\n"
-            f"- 모듈 분할: {'MODULE 1(core_module.py · BUILDER) + MODULE 2(app_runner.py · SUB-BUILDER)' if profile_clean == 'deep' else '단일 핵심 모듈(main.py · BUILDER)'}"
-        )
-    )
-    _record_stage_done(s1, "PLANNING", "HEAD", head_p, res_plan, stage_outputs["PLANNING"])
+    resume_from_stage = (resume_state or {}).get("interrupted_stage")
 
-    # =========================================================================
-    # STAGE 02 ~ 04: BUILDING -> VERIFYING -> REVIEWING (with Automatic Repair Loop!)
-    # =========================================================================
-    repair_attempt = 0
-    last_error_feedback = ""
+    try:
+        # =========================================================================
+        # STAGE 01: PLANNING (& Multi-Module Task Breakdown for DEEP mode)
+        # =========================================================================
+        if not stage_outputs.get("PLANNING") or resume_from_stage == "PLANNING":
+            s1 = _record_stage_start(
+                "PLANNING",
+                "HEAD",
+                head_p,
+                f"HEAD({PROVIDER_META[head_p]['label']})가 '{goal}' 목표 분석 및 {'다중 모듈 분할(Task Breakdown)' if profile_clean == 'deep' else 'ORDER 작업 지시서'}를 수립 중입니다.",
+            )
+            if profile_clean == "deep":
+                plan_prompt = (
+                    f"당신은 HEAD(총괄 아키텍트)입니다. 대규모 목표 '{goal}'을 두 개의 세부 모듈로 분할하여 한국어로 작업 지시서(ORDER)를 작성하세요:\n"
+                    f"- [MODULE 1 (BUILDER 계정1 담당)]: 핵심 엔진/데이터/백엔드 로직 (`core_module.py`)\n"
+                    f"- [MODULE 2 (SUB-BUILDER 계정2 담당)]: 실행 인터페이스/검증 테스트 모듈 (`app_runner.py`)\n"
+                    f"- 합격 기준: 두 파일 모두 파이썬 문법 및 실행 오류 0건"
+                )
+            else:
+                plan_prompt = (
+                    f"당신은 HEAD(총괄 지휘) 에이전트입니다. 목표 '{goal}'에 대해 생성할 실제 소스 파일 구성(예: `main.py`), 핵심 기능, 검증 기준을 4줄 이내 한국어 작업 지시서(ORDER)로 작성하세요."
+                )
+            res_plan = _call_cli_with_fallback(head_p, plan_prompt, timeout_s=24.0, role_name="HEAD", phase_name="PLANNING")
+            stage_outputs["PLANNING"] = (
+                res_plan["output"].strip()
+                if (res_plan and res_plan.get("output"))
+                else (
+                    f"- 목표: {goal}\n"
+                    f"- 실행 모드: {profile_clean.upper()} (최대 자동 수정 {max_repairs}회)\n"
+                    f"- 생성 경로: `deliverables/{mission_id}_project/`\n"
+                    f"- 모듈 분할: {'MODULE 1(core_module.py · BUILDER) + MODULE 2(app_runner.py · SUB-BUILDER)' if profile_clean == 'deep' else '단일 핵심 모듈(main.py · BUILDER)'}"
+                )
+            )
+            _record_stage_done(s1, "PLANNING", "HEAD", head_p, res_plan, stage_outputs["PLANNING"])
 
-    while True:
-        with _STATE_LOCK:
-            if STATE.get("stop_requested"):
-                break
+        # =========================================================================
+        # STAGE 02 ~ 04: BUILDING -> VERIFYING -> REVIEWING (with Automatic Repair Loop!)
+        # =========================================================================
+        skip_build_once = bool(resume_from_stage == "REVIEWING" and stage_outputs.get("BUILDING") and stage_outputs.get("VERIFYING"))
 
-        # --- STAGE 02: BUILDING ---
-        is_repair = repair_attempt > 0
-        repair_tag = f" (자동 수정 #{repair_attempt}/{max_repairs})" if is_repair else ""
+        while True:
+            with _STATE_LOCK:
+                if STATE.get("stop_requested"):
+                    break
 
-        if profile_clean == "deep" and not is_repair:
-            # Multi-Builder Split: BUILDER (Account 1) builds Module 1, SUB-BUILDER (Account 2) builds Module 2
-            s2_a = _record_stage_start(
-                "BUILDING",
-                "BUILDER",
-                builder_p,
-                f"BUILDER({PROVIDER_META[builder_p]['label']})가 [MODULE 1 · 핵심 로직] 소스 파일을 생성하고 있습니다.",
-            )
-            b1_prompt = (
-                f"당신은 BUILDER(구현 개발 · 계정 1)입니다. 목표 '{goal}'의 [MODULE 1: 핵심 로직]을 파이썬 코드로 작성하세요.\n"
-                f"반드시 첫 줄에 `### FILE: core_module.py`를 적고 ```python 코드블록으로 완전하고 바로 실행 가능한 코드를 작성하세요.\n\n"
-                f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-            )
-            res_b1 = _call_cli_with_fallback(builder_p, b1_prompt, timeout_s=28.0)
-            out_b1 = res_b1["output"].strip() if (res_b1 and res_b1.get("output")) else ""
-            files_b1 = _extract_and_write_project_files(mission_id, f"{goal} (Core Module)", out_b1, project_dir, default_prefix="core_module")
-            for f in files_b1:
-                if f not in generated_files:
-                    generated_files.append(f)
-            _record_stage_done(s2_a, "BUILDING", "BUILDER", builder_p, res_b1, f"[MODULE 1 생성 완료] {', '.join(files_b1)}\n{out_b1[:400]}")
+            is_repair = repair_attempt > 0
+            repair_tag = f" (자동 수정 #{repair_attempt}/{max_repairs})" if is_repair else ""
 
-            s2_b = _record_stage_start(
-                "BUILDING",
-                "SUB-BUILDER",
-                sub_builder_p,
-                f"SUB-BUILDER({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})가 [MODULE 2 · 실행/테스트 모듈] 소스 파일을 분담 생성하고 있습니다.",
-            )
-            b2_prompt = (
-                f"당신은 SUB-BUILDER(분담 개발 · 계정 2)입니다. 목표 '{goal}'의 [MODULE 2: 실행 및 검증 테스트]를 독립 실행 가능한 파이썬 코드로 작성하세요.\n"
-                f"반드시 첫 줄에 `### FILE: app_runner.py`를 적고 ```python 코드블록으로 외부 입력(`input()`) 없이 즉시 실행·출력되는 완전한 코드를 작성하세요.\n\n"
-                f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-            )
-            res_b2 = _call_cli_with_fallback(sub_builder_p, b2_prompt, timeout_s=28.0)
-            out_b2 = res_b2["output"].strip() if (res_b2 and res_b2.get("output")) else ""
-            files_b2 = _extract_and_write_project_files(mission_id, f"{goal} (App Runner)", out_b2, project_dir, default_prefix="app_runner")
-            for f in files_b2:
-                if f not in generated_files:
-                    generated_files.append(f)
-            stage_outputs["BUILDING"] = (
-                f"### [MODULE 1 · BUILDER ({PROVIDER_META[builder_p]['label']})]\n{out_b1 or 'core_module.py 생성 완료'}\n\n"
-                f"### [MODULE 2 · SUB-BUILDER ({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})]\n{out_b2 or 'app_runner.py 생성 완료'}"
-            )
-            _record_stage_done(s2_b, "BUILDING", "SUB-BUILDER", sub_builder_p, res_b2, f"[MODULE 2 생성 완료] {', '.join(files_b2)}\n{out_b2[:400]}")
-        else:
-            active_builder = sub_builder_p if (is_repair and repair_attempt % 2 == 1 and sub_builder_p in PROVIDER_META) else builder_p
-            s2 = _record_stage_start(
-                "BUILDING",
-                "BUILDER",
-                active_builder,
-                f"BUILDER({PROVIDER_META[active_builder]['label']})가 '{goal}' 프로젝트 소스 파일을 생성 중입니다.{repair_tag}",
-            )
-            repair_clause = (
-                f"\n\n[⚠️ 이전 단계 검증/검수 결함 내역 — 반드시 수정하여 완전한 코드를 다시 출력하세요]:\n{last_error_feedback}"
-                if is_repair and last_error_feedback
-                else ""
-            )
-            b_prompt = (
-                f"당신은 BUILDER(구현 개발) 에이전트입니다. 목표 '{goal}'에 대해 실제 동작하는 소스 파일을 작성하세요.\n"
-                f"반드시 `### FILE: main.py` 형식으로 파일명을 명시한 뒤 ```python 코드블록 안에 `input()` 대기 없이 즉시 실행·검증 가능한 전체 코드를 작성하세요.{repair_clause}\n\n"
-                f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
-            )
-            res_build = _call_cli_with_fallback(active_builder, b_prompt, timeout_s=28.0)
-            out_build = res_build["output"].strip() if (res_build and res_build.get("output")) else ""
-            files_b = _extract_and_write_project_files(mission_id, goal, out_build, project_dir, default_prefix="main")
-            for f in files_b:
-                if f not in generated_files:
-                    generated_files.append(f)
-            stage_outputs["BUILDING"] = out_build or f"생성된 프로젝트 파일: {', '.join(files_b)}"
-            _record_stage_done(s2, "BUILDING", "BUILDER", active_builder, res_build, f"생성 파일: {', '.join(files_b)}\n{stage_outputs['BUILDING'][:400]}")
+            if not skip_build_once:
+                # --- STAGE 02: BUILDING ---
+                if profile_clean == "deep" and not is_repair:
+                    s2_a = _record_stage_start(
+                        "BUILDING",
+                        "BUILDER",
+                        builder_p,
+                        f"BUILDER({PROVIDER_META[builder_p]['label']})가 [MODULE 1 · 핵심 로직] 소스 파일을 생성하고 있습니다.",
+                    )
+                    b1_prompt = (
+                        f"당신은 BUILDER(구현 개발 · 계정 1)입니다. 목표 '{goal}'의 [MODULE 1: 핵심 로직]을 파이썬 코드로 작성하세요.\n"
+                        f"반드시 첫 줄에 `### FILE: core_module.py`를 적고 ```python 코드블록으로 완전하고 바로 실행 가능한 코드를 작성하세요.\n\n"
+                        f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                    )
+                    res_b1 = _call_cli_with_fallback(builder_p, b1_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING")
+                    out_b1 = res_b1["output"].strip() if (res_b1 and res_b1.get("output")) else ""
+                    files_b1 = _extract_and_write_project_files(mission_id, f"{goal} (Core Module)", out_b1, project_dir, default_prefix="core_module")
+                    for f in files_b1:
+                        if f not in generated_files:
+                            generated_files.append(f)
+                    _record_stage_done(s2_a, "BUILDING", "BUILDER", builder_p, res_b1, f"[MODULE 1 생성 완료] {', '.join(files_b1)}\n{out_b1[:400]}")
 
-        # Quick mode (2 stages): run fast verification and finish immediately!
-        if profile_clean == "quick":
-            v_quick = _verify_project_files(project_dir)
-            stage_outputs["VERIFYING"] = v_quick["summary"]
-            stage_outputs["DECIDING"] = f"⚡ QUICK 2단계 고속 미션 완료 · 생성 파일({len(generated_files)}개): {', '.join(generated_files)}"
+                    s2_b = _record_stage_start(
+                        "BUILDING",
+                        "SUB-BUILDER",
+                        sub_builder_p,
+                        f"SUB-BUILDER({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})가 [MODULE 2 · 실행/테스트 모듈] 소스 파일을 분담 생성하고 있습니다.",
+                    )
+                    b2_prompt = (
+                        f"당신은 SUB-BUILDER(분담 개발 · 계정 2)입니다. 목표 '{goal}'의 [MODULE 2: 실행 및 검증 테스트]를 독립 실행 가능한 파이썬 코드로 작성하세요.\n"
+                        f"반드시 첫 줄에 `### FILE: app_runner.py`를 적고 ```python 코드블록으로 외부 입력(`input()`) 없이 즉시 실행·출력되는 완전한 코드를 작성하세요.\n\n"
+                        f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                    )
+                    res_b2 = _call_cli_with_fallback(sub_builder_p, b2_prompt, timeout_s=28.0, role_name="SUB-BUILDER", phase_name="BUILDING")
+                    out_b2 = res_b2["output"].strip() if (res_b2 and res_b2.get("output")) else ""
+                    files_b2 = _extract_and_write_project_files(mission_id, f"{goal} (App Runner)", out_b2, project_dir, default_prefix="app_runner")
+                    for f in files_b2:
+                        if f not in generated_files:
+                            generated_files.append(f)
+                    stage_outputs["BUILDING"] = (
+                        f"### [MODULE 1 · BUILDER ({PROVIDER_META[builder_p]['label']})]\n{out_b1 or 'core_module.py 생성 완료'}\n\n"
+                        f"### [MODULE 2 · SUB-BUILDER ({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})]\n{out_b2 or 'app_runner.py 생성 완료'}"
+                    )
+                    _record_stage_done(s2_b, "BUILDING", "SUB-BUILDER", sub_builder_p, res_b2, f"[MODULE 2 생성 완료] {', '.join(files_b2)}\n{out_b2[:400]}")
+                else:
+                    active_builder = sub_builder_p if (is_repair and repair_attempt % 2 == 1 and sub_builder_p in PROVIDER_META) else builder_p
+                    s2 = _record_stage_start(
+                        "BUILDING",
+                        "BUILDER",
+                        active_builder,
+                        f"BUILDER({PROVIDER_META[active_builder]['label']})가 '{goal}' 프로젝트 소스 파일을 생성 중입니다.{repair_tag}",
+                    )
+                    repair_clause = (
+                        f"\n\n[⚠️ 이전 단계 검증/검수 결함 내역 — 반드시 수정하여 완전한 코드를 다시 출력하세요]:\n{last_error_feedback}"
+                        if is_repair and last_error_feedback
+                        else ""
+                    )
+                    b_prompt = (
+                        f"당신은 BUILDER(구현 개발) 에이전트입니다. 목표 '{goal}'에 대해 실제 동작하는 소스 파일을 작성하세요.\n"
+                        f"반드시 `### FILE: main.py` 형식으로 파일명을 명시한 뒤 ```python 코드블록 안에 `input()` 대기 없이 즉시 실행·검증 가능한 전체 코드를 작성하세요.{repair_clause}\n\n"
+                        f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
+                    )
+                    res_build = _call_cli_with_fallback(active_builder, b_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING")
+                    out_build = res_build["output"].strip() if (res_build and res_build.get("output")) else ""
+                    files_b = _extract_and_write_project_files(mission_id, goal, out_build, project_dir, default_prefix="main")
+                    for f in files_b:
+                        if f not in generated_files:
+                            generated_files.append(f)
+                    stage_outputs["BUILDING"] = out_build or f"생성된 프로젝트 파일: {', '.join(files_b)}"
+                    _record_stage_done(s2, "BUILDING", "BUILDER", active_builder, res_build, f"생성 파일: {', '.join(files_b)}\n{stage_outputs['BUILDING'][:400]}")
+
+                # Quick mode (2 stages): run fast verification and finish immediately!
+                if profile_clean == "quick":
+                    v_quick = _verify_project_files(project_dir)
+                    stage_outputs["VERIFYING"] = v_quick["summary"]
+                    stage_outputs["DECIDING"] = f"⚡ QUICK 2단계 고속 미션 완료 · 생성 파일({len(generated_files)}개): {', '.join(generated_files)}"
+                    break
+
+                # --- STAGE 03: VERIFYING (Mechanical Scope Guard + Real Code Execution) ---
+                s3 = _record_stage_start(
+                    "VERIFYING",
+                    "DIRECTOR",
+                    head_p,
+                    f"DIRECTOR Scope Guard 및 생성된 프로젝트 파일({len(generated_files)}개) 실제 문법·실행 테스트를 수행 중입니다.{repair_tag}",
+                )
+                v_result = _verify_project_files(project_dir)
+                stage_outputs["VERIFYING"] = v_result["summary"]
+                _record_stage_done(
+                    s3,
+                    "VERIFYING",
+                    "DIRECTOR",
+                    head_p,
+                    None,
+                    stage_outputs["VERIFYING"],
+                    step_state="PASS" if v_result["passed"] else "REPAIR",
+                )
+
+                # If mechanical verification failed and we have repair budget left -> loop back to 02 BUILDING!
+                if not v_result["passed"] and repair_attempt < max_repairs:
+                    repair_attempt += 1
+                    last_error_feedback = "\n".join(v_result["errors"])
+                    repair_history.append(f"자동 수정 #{repair_attempt}: 03 VERIFYING 오류 감지 ({last_error_feedback[:180]}) → 02 BUILDING 재실행")
+                    continue
+
+            skip_build_once = False
+
+            # --- STAGE 04: REVIEWING (Independent Cross-AI Audit) ---
+            s4 = _record_stage_start(
+                "REVIEWING",
+                "REVIEWER",
+                reviewer_p,
+                f"REVIEWER({PROVIDER_META[reviewer_p]['label']})가 생성된 소스 파일({len(generated_files)}개)과 실행 결과를 독립 검수 중입니다.{repair_tag}",
+            )
+            actual_files_dump = []
+            for f_p in sorted(project_dir.rglob("*")):
+                if f_p.is_file() and f_p.name != "README.md":
+                    try:
+                        actual_files_dump.append(f"### FILE: {f_p.relative_to(project_dir).as_posix()}\n```python\n{f_p.read_text(encoding='utf-8', errors='replace')[:2500]}\n```")
+                    except Exception:
+                        pass
+            files_inspect_str = "\n\n".join(actual_files_dump) or stage_outputs.get("BUILDING", "")[:2000]
+
+            rev_prompt = (
+                f"당신은 REVIEWER(독립 감사) 에이전트입니다. 목표 '{goal}'에 대해 BUILDER가 생성한 아래 실제 소스 파일들과 실행 검증 결과를 검수하세요.\n"
+                f"치명적 결함(P0/P1)이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2줄 검수 평을 작성하세요.\n\n"
+                f"[실제 생성된 소스 파일 내용]:\n{files_inspect_str}\n\n"
+                f"[03 VERIFYING 실제 실행 결과]:\n{stage_outputs.get('VERIFYING', '')}"
+            )
+            res_rev = _call_cli_with_fallback(reviewer_p, rev_prompt, timeout_s=24.0, role_name="REVIEWER", phase_name="REVIEWING")
+            rev_text = (
+                res_rev["output"].strip()
+                if (res_rev and res_rev.get("output"))
+                else f"VERDICT: PASS (P0: 0건, P1: 0건)\n- 생성된 프로젝트 파일({', '.join(generated_files)})의 실행 검증 및 안전 규칙 준수를 확인했습니다."
+            )
+            stage_outputs["REVIEWING"] = rev_text
+            rev_failed = ("verdict: fail" in rev_text.lower()) or ("p0: 1" in rev_text.lower())
+            _record_stage_done(s4, "REVIEWING", "REVIEWER", reviewer_p, res_rev, rev_text, step_state="REPAIR" if rev_failed else "PASS")
+
+            if rev_failed and repair_attempt < max_repairs:
+                repair_attempt += 1
+                last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}"
+                repair_history.append(f"자동 수정 #{repair_attempt}: 04 REVIEWING 반려 → 02 BUILDING 재실행")
+                continue
+
+            # --- STAGE 05: DECIDING ---
+            s5 = _record_stage_start(
+                "DECIDING",
+                "HEAD",
+                head_p,
+                f"HEAD({PROVIDER_META[head_p]['label']})가 최종 PASS 판정 및 프로젝트 파일({len(generated_files)}개) 반영을 확정했습니다.",
+            )
+            repair_note = f" (자동 수정 루프 {repair_attempt}회 거쳐 검증 통과)" if repair_attempt > 0 else " (1차 무결점 통과)"
+            stage_outputs["DECIDING"] = (
+                f"- 최종 판정: **PASS**{repair_note}\n"
+                f"- 생성된 프로젝트 폴더: `deliverables/{mission_id}_project/`\n"
+                f"- 생성된 실제 소스 파일 ({len(generated_files)}개): {', '.join(f'`{f}`' for f in generated_files)}\n"
+                f"- 통합 리포트: `deliverables/{mission_id}.md`"
+            )
+            _record_stage_done(s5, "DECIDING", "HEAD", head_p, None, stage_outputs["DECIDING"])
             break
 
-        # --- STAGE 03: VERIFYING (Mechanical Scope Guard + Real Code Execution) ---
-        s3 = _record_stage_start(
-            "VERIFYING",
-            "DIRECTOR",
-            head_p,
-            f"DIRECTOR Scope Guard 및 생성된 프로젝트 파일({len(generated_files)}개) 실제 문법·실행 테스트를 수행 중입니다.{repair_tag}",
-        )
-        v_result = _verify_project_files(project_dir)
-        stage_outputs["VERIFYING"] = v_result["summary"]
-        _record_stage_done(
-            s3,
-            "VERIFYING",
-            "DIRECTOR",
-            head_p,
-            None,
-            stage_outputs["VERIFYING"],
-            step_state="PASS" if v_result["passed"] else "REPAIR",
-        )
+    except _AllQuotaExhaustedError as q_err:
+        with _STATE_LOCK:
+            STATE["phase"] = "QUOTA_PAUSED"
+            STATE["working_now"] = []
+            STATE["paused_mission"] = {
+                "mission_id": mission_id,
+                "goal": goal,
+                "profile": profile_clean,
+                "interrupted_stage": q_err.phase_name,
+                "interrupted_role": q_err.role_name,
+                "stage_outputs": dict(stage_outputs),
+                "generated_files": list(generated_files),
+                "repair_attempt": repair_attempt,
+                "last_error_feedback": last_error_feedback,
+                "repair_history": list(repair_history),
+                "step_counter": step_counter,
+                "exhausted_slots": list(q_err.exhausted_slots),
+                "reason": q_err.reason,
+                "paused_at": utc_now_iso(),
+            }
+            for m in STATE["missions"]:
+                if m["mission_id"] == mission_id:
+                    m["live"] = False
+                    m["status"] = "QUOTA_PAUSED"
+                    m["paused_stage"] = q_err.phase_name
+                    m["updated_at"] = utc_now_iso()
+            STATE["events"].insert(
+                0,
+                {
+                    "at": utc_now_iso(),
+                    "run_id": f"{mission_id}-quota-pause",
+                    "to_state": "QUOTA_PAUSED",
+                    "state_ko": f"⏸ [한도 도달 일시중지] {q_err.reason} (중단 단계: {q_err.phase_name})",
+                    "project": STATE["project_name"],
+                    "role": q_err.role_name,
+                },
+            )
+            next_chat_id = max((c["id"] for c in STATE["chat_messages"]), default=0) + 1
+            STATE["chat_messages"].append(
+                {
+                    "id": next_chat_id,
+                    "role": "SYSTEM",
+                    "content": (
+                        f"⏸ [한도 도달 일시중지] {q_err.reason}\n"
+                        f"다른 AI 계정을 연결하거나 교체한 뒤 [▶ 중단된 단계({q_err.phase_name})에서 작업 재개] 버튼을 눌러주세요."
+                    ),
+                    "at": utc_now_iso(),
+                }
+            )
+        return
 
-        # If mechanical verification failed and we have repair budget left -> loop back to 02 BUILDING!
-        if not v_result["passed"] and repair_attempt < max_repairs:
-            repair_attempt += 1
-            last_error_feedback = "\n".join(v_result["errors"])
-            repair_history.append(f"자동 수정 #{repair_attempt}: 03 VERIFYING 오류 감지 ({last_error_feedback[:180]}) → 02 BUILDING 재실행")
-            continue
-
-        # --- STAGE 04: REVIEWING (Independent Cross-AI Audit) ---
-        s4 = _record_stage_start(
-            "REVIEWING",
-            "REVIEWER",
-            reviewer_p,
-            f"REVIEWER({PROVIDER_META[reviewer_p]['label']})가 생성된 소스 파일({len(generated_files)}개)과 실행 결과를 독립 검수 중입니다.{repair_tag}",
-        )
-        # Read actual generated file contents from disk for accurate REVIEWER inspection
-        actual_files_dump = []
-        for f_p in sorted(project_dir.rglob("*")):
-            if f_p.is_file() and f_p.name != "README.md":
-                try:
-                    actual_files_dump.append(f"### FILE: {f_p.relative_to(project_dir).as_posix()}\n```python\n{f_p.read_text(encoding='utf-8', errors='replace')[:2500]}\n```")
-                except Exception:
-                    pass
-        files_inspect_str = "\n\n".join(actual_files_dump) or stage_outputs["BUILDING"][:2000]
-
-        rev_prompt = (
-            f"당신은 REVIEWER(독립 감사) 에이전트입니다. 목표 '{goal}'에 대해 BUILDER가 생성한 아래 실제 소스 파일들과 실행 검증 결과를 검수하세요.\n"
-            f"치명적 결함(P0/P1)이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2줄 검수 평을 작성하세요.\n\n"
-            f"[실제 생성된 소스 파일 내용]:\n{files_inspect_str}\n\n"
-            f"[03 VERIFYING 실제 실행 결과]:\n{stage_outputs['VERIFYING']}"
-        )
-        res_rev = _call_cli_with_fallback(reviewer_p, rev_prompt, timeout_s=24.0)
-        rev_text = (
-            res_rev["output"].strip()
-            if (res_rev and res_rev.get("output"))
-            else f"VERDICT: PASS (P0: 0건, P1: 0건)\n- 생성된 프로젝트 파일({', '.join(generated_files)})의 실행 검증 및 안전 규칙 준수를 확인했습니다."
-        )
-        stage_outputs["REVIEWING"] = rev_text
-        rev_failed = ("verdict: fail" in rev_text.lower()) or ("p0: 1" in rev_text.lower())
-        _record_stage_done(s4, "REVIEWING", "REVIEWER", reviewer_p, res_rev, rev_text, step_state="REPAIR" if rev_failed else "PASS")
-
-        if rev_failed and repair_attempt < max_repairs:
-            repair_attempt += 1
-            last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}"
-            repair_history.append(f"자동 수정 #{repair_attempt}: 04 REVIEWING 반려 → 02 BUILDING 재실행")
-            continue
-
-        # --- STAGE 05: DECIDING ---
-        s5 = _record_stage_start(
-            "DECIDING",
-            "HEAD",
-            head_p,
-            f"HEAD({PROVIDER_META[head_p]['label']})가 최종 PASS 판정 및 프로젝트 파일({len(generated_files)}개) 반영을 확정했습니다.",
-        )
-        repair_note = f" (자동 수정 루프 {repair_attempt}회 거쳐 검증 통과)" if repair_attempt > 0 else " (1차 무결점 통과)"
-        stage_outputs["DECIDING"] = (
-            f"- 최종 판정: **PASS**{repair_note}\n"
-            f"- 생성된 프로젝트 폴더: `deliverables/{mission_id}_project/`\n"
-            f"- 생성된 실제 소스 파일 ({len(generated_files)}개): {', '.join(f'`{f}`' for f in generated_files)}\n"
-            f"- 통합 리포트: `deliverables/{mission_id}.md`"
-        )
-        _record_stage_done(s5, "DECIDING", "HEAD", head_p, None, stage_outputs["DECIDING"])
-        break
+    with _STATE_LOCK:
+        STATE["paused_mission"] = None
 
     # Write README.md inside project_dir as well
     try:
@@ -2402,13 +2631,14 @@ def stop_active_missions(reason: str = "사용자 정지 요청") -> Dict[str, A
             _ACTIVE_PIDS.pop(pid, None)
         stopped_ids = []
         for m in STATE["missions"]:
-            if m.get("live") or m.get("status") == "RUNNING":
+            if m.get("live") or m.get("status") in ("RUNNING", "QUOTA_PAUSED"):
                 m["live"] = False
                 m["status"] = "STOPPED"
                 m["updated_at"] = utc_now_iso()
                 stopped_ids.append(m["mission_id"])
         STATE["phase"] = "IDLE"
         STATE["working_now"] = []
+        STATE["paused_mission"] = None
         STATE["events"].insert(
             0,
             {
@@ -2460,6 +2690,8 @@ def build_activity_payload() -> Dict[str, Any]:
             },
             "recent_calls": STATE["recent_calls"][:12],
             "events": STATE["events"][:15],
+            "paused_mission": STATE.get("paused_mission"),
+            "quota_exhausted_slots": dict(STATE.get("quota_exhausted_slots") or {}),
         }
 
 
@@ -2841,6 +3073,9 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 payload = json.loads(raw.decode("utf-8") or "{}")
                 saved = save_roles(payload)
                 with _STATE_LOCK:
+                    # When the user swaps roles to a different AI, clear quota lock for newly assigned slots
+                    for assigned_slot in saved.values():
+                        STATE.get("quota_exhausted_slots", {}).pop(assigned_slot, None)
                     STATE["events"].insert(
                         0,
                         {
@@ -2866,6 +3101,70 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 return self._send_json({"error": str(exc)}, 400)
             except Exception as exc:
                 return self._send_json({"error": f"역할 저장 실패: {exc}"}, 500)
+
+        if path == "/ops/missions/resume":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+            except Exception:
+                payload = {}
+            with _STATE_LOCK:
+                paused = STATE.get("paused_mission")
+                if not paused:
+                    return self._send_json({"status": "error", "error": "현재 일시 중지된 미션이 없습니다."}, 404)
+                if STATE["working_now"]:
+                    return self._send_json({"status": "busy", "error": "이미 실행 중인 작업이 있습니다."}, 409)
+                # Clear exhausted flags so newly connected or swapped AI slots can run
+                if payload.get("new_provider") and paused.get("interrupted_role"):
+                    role_map_key = {
+                        "HEAD": "head",
+                        "BUILDER": "builder",
+                        "SUB-BUILDER": "sub_builder",
+                        "REVIEWER": "reviewer",
+                        "RESEARCHER": "researcher",
+                    }.get(paused["interrupted_role"], "builder")
+                    try:
+                        cur_roles = load_roles()
+                        cur_roles[role_map_key] = str(payload["new_provider"]).strip()
+                        ROLE_SETTINGS_PATH.write_text(json.dumps(cur_roles, ensure_ascii=False, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
+                STATE["quota_exhausted_slots"] = {}
+                STATE["stop_requested"] = False
+                mission_id = paused["mission_id"]
+                goal = paused["goal"]
+                profile = paused.get("profile", "standard")
+                interrupted_stage = paused.get("interrupted_stage", "BUILDING")
+                for m in STATE["missions"]:
+                    if m["mission_id"] == mission_id:
+                        m["live"] = True
+                        m["status"] = "RUNNING"
+                        m["updated_at"] = utc_now_iso()
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mission_id}-resume",
+                        "to_state": interrupted_stage,
+                        "state_ko": f"▶ [작업 재개] 미션({mission_id})을 중단된 {interrupted_stage} 단계부터 이어서 재개합니다.",
+                        "project": STATE["project_name"],
+                        "role": paused.get("interrupted_role", "HEAD"),
+                    },
+                )
+            t = threading.Thread(
+                target=_run_mission_pipeline,
+                args=(mission_id, goal, profile, paused),
+                daemon=True,
+            )
+            t.start()
+            return self._send_json(
+                {
+                    "status": "resumed",
+                    "mission_id": mission_id,
+                    "interrupted_stage": interrupted_stage,
+                    "message": f"미션({mission_id})을 중단된 {interrupted_stage} 단계부터 재개했습니다.",
+                },
+                200,
+            )
 
         if path == "/chat":
             try:

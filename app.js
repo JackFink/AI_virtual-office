@@ -2770,7 +2770,57 @@
         const replyRole = document.getElementById('triadReplyRole');
         const replyText = document.getElementById('triadReplyText');
         const replyMeta = document.getElementById('triadReplyMeta');
-        if (latestMission.live || latestMission.status === 'RUNNING') {
+        if (latestMission.status === 'QUOTA_PAUSED' || data.phase === 'QUOTA_PAUSED') {
+          const paused = data.paused_mission || {};
+          const intStage = paused.interrupted_stage || latestMission.paused_stage || 'BUILDING';
+          const intRole = paused.interrupted_role || 'BUILDER';
+          const reasonTxt = paused.reason || '연결되어 있는 모든 AI가 사용 한도에 도달하여 모든 작업을 일시 중지했습니다.';
+          if (replyRole) replyRole.textContent = `[⏸ 한도 도달 일시중지 · ${intStage} 단계 대기 중 (${latestMission.mission_id})]`;
+          if (replyMeta) replyMeta.textContent = `QUOTA_PAUSED · ${intStage}`;
+          if (replyText && !replyText.querySelector('#btnResumePausedMission')) {
+            const provMap = data.diagnostics?.providers || lastDiagnostics?.providers || {};
+            const slotOpts = Object.entries(provMap)
+              .map(([k, p]) => `<option value="${k}">${p.label || k} (${p.auth_state === 'LOGGED_IN' ? '로그인됨' : '미로그인'})</option>`)
+              .join('');
+            replyText.innerHTML = `
+              <div style="margin-top:4px;padding:10px 12px;background:#fff7ed;border:1px solid #fdba74;border-radius:9px;color:#9a3412;font-size:11.5px;line-height:1.55">
+                <div style="font-weight:800;margin-bottom:4px">⏸ ${reasonTxt}</div>
+                <div style="font-size:10.5px;color:#7c2d12;margin-bottom:8px">중단 위치: <strong>${intStage}</strong> (담당 역할: <strong>${intRole}</strong>) · 이전 단계 산출물은 안전하게 보존되어 있습니다.</div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <select id="resumeProviderSelect" class="triad-cli-select" style="height:28px;font-size:10.5px">${slotOpts}</select>
+                  <button type="button" id="btnResumePausedMission" class="btn small primary" style="background:#ea580c;border-color:#ea580c">▶ 선택한 AI로 교체 후 ${intStage} 단계부터 재개</button>
+                  <button type="button" id="btnAbortPausedMission" class="btn small">■ 작업 완전 종료</button>
+                </div>
+              </div>
+            `;
+            replyText.querySelector('#btnResumePausedMission')?.addEventListener('click', async (ev) => {
+              const btn = ev.currentTarget;
+              const selProv = replyText.querySelector('#resumeProviderSelect')?.value || '';
+              btn.disabled = true;
+              btn.textContent = '재개 중...';
+              try {
+                await apiFetch('/ops/missions/resume', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ new_provider: selProv })
+                });
+                pollOrchestrator();
+              } catch (_) {
+                btn.disabled = false;
+              }
+            });
+            replyText.querySelector('#btnAbortPausedMission')?.addEventListener('click', async () => {
+              try {
+                await apiFetch('/ops/missions/stop', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ reason: '한도 일시중지 상태에서 사용자 종료' })
+                });
+                pollOrchestrator();
+              } catch (_) {}
+            });
+          }
+        } else if (latestMission.live || latestMission.status === 'RUNNING') {
           const curStep = (latestMission.steps || [])[latestMission.steps.length - 1];
           if (replyRole) replyRole.textContent = `[1-Cycle 미션 진행 중 · ${data.phase || 'RUNNING'} (${latestMission.passed_steps || 0}/5)]`;
           if (replyText) {
