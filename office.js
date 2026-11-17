@@ -227,25 +227,60 @@
     return { index: bestIdx, dist: bestDist, slot: seats[bestIdx] || MASTER_SEAT_CATALOG[0] };
   }
 
-  function getAgentAvatarSvg(studioAgent, view = 'front') {
+  function getAgentAvatarSvg(studioAgent, view = 'front', options = {}) {
     if (studioAgent && window.CharacterEngine && typeof window.CharacterEngine.render === 'function') {
-      const pixelAgent = {
-        ...studioAgent,
-        parts: {
-          ...(studioAgent.parts || {}),
-          base: 'BASE_PIXEL',
-          hair: (!studioAgent.parts?.hair || studioAgent.parts.hair === 'H00') ? 'H02' : studioAgent.parts.hair
-        }
-      };
-      return window.CharacterEngine.render(pixelAgent, { view });
+      const stance = options.stance || studioAgent.mapleAnim || 'stand1';
+      const animated = options.animated !== undefined
+        ? options.animated
+        : (!paused && Boolean(studioAgent.mapleAnimated));
+      const flipped = options.flipped !== undefined
+        ? options.flipped
+        : Boolean(studioAgent.mapleFlipped);
+      return window.CharacterEngine.render(studioAgent, { view, stance, animated, flipped });
     }
     return '';
+  }
+
+  function loadSavedCharAiMap() {
+    try {
+      return JSON.parse(localStorage.getItem('nexus-character-ai-configs-v1') || '{}') || {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  async function persistOfficeCharAppearance(studioAgent) {
+    if (!studioAgent) return;
+    try {
+      const saved = loadSavedCharAiMap();
+      saved[studioAgent.id] = {
+        ...(saved[studioAgent.id] || {}),
+        id: studioAgent.id,
+        name: studioAgent.name,
+        floor: studioAgent.floor,
+        dept: studioAgent.dept,
+        triadRole: studioAgent.triadRole,
+        cliProvider: studioAgent.cliProvider,
+        mapleEquipped: studioAgent.mapleEquipped ? { ...studioAgent.mapleEquipped } : {},
+        mapleAnim: studioAgent.mapleAnim || 'stand1',
+        mapleAnimated: Boolean(studioAgent.mapleAnimated),
+        mapleFlipped: Boolean(studioAgent.mapleFlipped),
+        updatedAt: new Date().toISOString()
+      };
+      localStorage.setItem('nexus-character-ai-configs-v1', JSON.stringify(saved));
+      await officeApiFetch('/ops/character-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ configs: saved })
+      });
+    } catch (_) {}
   }
 
   function buildAgentSpecsFromStudio() {
     const studioList = Array.isArray(window.modularAgents) && window.modularAgents.length
       ? window.modularAgents
       : [];
+    const savedCharMap = loadSavedCharAiMap();
 
     const specs = [];
     studioList.forEach((sa, idx) => {
@@ -253,6 +288,15 @@
       const floorSeats = getFloorSeats(saved.floorId);
       const seatIdx = Math.min(Math.max(0, saved.seatIndex ?? 0), Math.max(0, floorSeats.length - 1));
       const slot = floorSeats[seatIdx] || MASTER_SEAT_CATALOG[0];
+
+      const svCfg = savedCharMap[sa.id];
+      if (svCfg) {
+        if (svCfg.mapleAnim) sa.mapleAnim = svCfg.mapleAnim;
+        if (svCfg.mapleAnimated !== undefined) sa.mapleAnimated = Boolean(svCfg.mapleAnimated);
+        if (svCfg.mapleFlipped !== undefined) sa.mapleFlipped = Boolean(svCfg.mapleFlipped);
+      }
+      const hasCustomFlip = svCfg && svCfg.mapleFlipped !== undefined;
+      const effectiveFlip = hasCustomFlip ? Boolean(sa.mapleFlipped) : Boolean(slot.flip);
 
       const triadRole = sa.triadRole || (idx % 3 === 0 ? 'HEAD' : idx % 3 === 1 ? 'BUILDER' : 'REVIEWER');
       const cliKey = sa.cliProvider || (triadRole === 'HEAD' ? currentRoles.head : triadRole === 'BUILDER' ? currentRoles.builder : currentRoles.reviewer);
@@ -272,7 +316,9 @@
         xPct: slot.xPct,
         yPct: slot.yPct,
         facing: slot.facing || 'front',
-        flip: slot.flip,
+        flip: effectiveFlip,
+        mapleAnim: sa.mapleAnim || 'stand1',
+        mapleAnimated: Boolean(sa.mapleAnimated),
         seatIndex: seatIdx,
         seatLabel: slot.label,
         floorId: saved.floorId || 1
@@ -386,13 +432,22 @@
 
       const actorsHtml = assigned.map(spec => {
         const viewMode = spec.facing === 'back' ? 'back' : 'front';
-        const svg = getAgentAvatarSvg(spec.studioAgent, viewMode);
+        const svg = getAgentAvatarSvg(spec.studioAgent, viewMode, {
+          stance: spec.mapleAnim || 'stand1',
+          animated: !paused && Boolean(spec.mapleAnimated),
+          flipped: false
+        });
+        const petId = spec.studioAgent?.mapleEquipped?.pet;
+        const petHtml = petId
+          ? `<img src="character-images/images/pet/${petId}.png" alt="동행 펫" style="position:absolute;right:-16px;bottom:14px;width:24px;height:24px;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.3));pointer-events:none" onerror="this.style.display='none'" />`
+          : '';
         const cliShort = CLI_SHORT[spec.cliKey] || spec.cliKey;
         const isSel = spec.id === selectedAgentId;
         const isThink = spec.id === thinkingAgentId;
         const rowClass = spec.facing === 'back' ? ' is-front-row' : ' is-back-row';
         const bulbIcon = isThink ? '💭' : spec.triadRole === 'HEAD' ? '💡' : spec.triadRole === 'BUILDER' ? '🔨' : '🔍';
         const dirBadge = spec.facing === 'back' ? '뒷면(마주보기)' : '앞면';
+        const flipLabel = spec.flip ? '우향' : '좌향';
 
         return `
           <div class="maple-2d-actor${rowClass}${isSel ? ' is-selected' : ''}${isThink ? ' is-thinking' : ''}${spec.flip ? ' flip-x' : ''}"
@@ -400,9 +455,9 @@
                data-char-id="${spec.charId}"
                data-floor-id="${fl.id}"
                style="left:${spec.xPct}%;top:${spec.yPct}%;${paused ? 'animation-play-state:paused' : ''}"
-               title="#${spec.charId} ${spec.name} · ${spec.seatLabel} [${dirBadge}] (드래그하여 자리 이동)">
+               title="#${spec.charId} ${spec.name} · ${spec.seatLabel} [${dirBadge} · ${spec.mapleAnim || 'stand1'} · ${flipLabel}] (드래그하여 자리 이동)">
             <div class="maple-2d-quest-bulb">${bulbIcon}</div>
-            <div class="maple-2d-sprite" style="${paused ? 'animation:none' : ''}">${svg}</div>
+            <div class="maple-2d-sprite" style="position:relative;${paused ? 'animation:none' : ''}">${svg}${petHtml}</div>
             <div class="maple-2d-nametag">
               <span class="maple-2d-name-line">${spec.name}</span>
               <span class="maple-2d-guild-line role-${spec.triadRole}">«#${spec.seatIndex + 1} ${spec.triadRole} · ${cliShort}»</span>
@@ -925,6 +980,22 @@
             </select>
           </strong>
         </div>
+        <div class="detail-line">
+          <span>모션 &amp; 방향 (시뮬레이터 연동)</span>
+          <strong style="display:flex;align-items:center;gap:4px">
+            <select id="officeStanceSelect" class="triad-cli-select" style="height:24px;font-size:10px;padding:0 4px">
+              <option value="stand1" ${(spec.mapleAnim || 'stand1') === 'stand1' ? 'selected' : ''}>기본 서기 (stand1)</option>
+              <option value="sit" ${spec.mapleAnim === 'sit' ? 'selected' : ''}>의자 앉기 (sit)</option>
+              <option value="walk1" ${spec.mapleAnim === 'walk1' ? 'selected' : ''}>걷기 (walk1)</option>
+              <option value="alert" ${spec.mapleAnim === 'alert' ? 'selected' : ''}>경계 (alert)</option>
+              <option value="jump" ${spec.mapleAnim === 'jump' ? 'selected' : ''}>점프 (jump)</option>
+              <option value="fly" ${spec.mapleAnim === 'fly' ? 'selected' : ''}>비행 (fly)</option>
+              <option value="prone" ${spec.mapleAnim === 'prone' ? 'selected' : ''}>엎드리기 (prone)</option>
+            </select>
+            <button type="button" id="officeFlipToggleBtn" class="btn small" style="height:24px;padding:0 6px;font-size:9.5px" title="좌우 바라보는 방향 반전">${spec.flip ? '우향 ▶' : '◀ 좌향'}</button>
+            <button type="button" id="officeAnimToggleBtn" class="btn small" style="height:24px;padding:0 6px;font-size:9.5px;background:${spec.mapleAnimated ? '#dcfce7' : '#f8fafc'};color:${spec.mapleAnimated ? '#15803d' : '#475569'}" title="실시간 GIF 모션 재생/정지">${spec.mapleAnimated ? '⏸ 모션' : '▶ 정지'}</button>
+          </strong>
+        </div>
         <div style="padding:6px 0;border-top:1px solid #f0f3f6">
           <div style="font-size:9.5px;color:#8c99a8;margin-bottom:4px;display:flex;justify-content:space-between"><span>장착 스킬 (${skills.length}개)</span><a href="agents.html#characters" style="color:#ea580c;font-weight:700">+ 스킬/페르소나 편집</a></div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">${skillsHtml}</div>
@@ -973,6 +1044,40 @@
           charPlacements[occupant[0]] = { floorId: spec.floorId, seatIndex: prevSeatIdx };
         }
         rebalanceOverflowCharacters(spec.charId);
+        agentSpecs = buildAgentSpecsFromStudio();
+        buildOffice();
+        renderFloorAgents();
+        selectAgent(id, false);
+      });
+
+      document.getElementById('officeStanceSelect')?.addEventListener('change', async (e) => {
+        const newStance = e.target.value || 'stand1';
+        if (spec.studioAgent) {
+          spec.studioAgent.mapleAnim = newStance;
+          await persistOfficeCharAppearance(spec.studioAgent);
+        }
+        agentSpecs = buildAgentSpecsFromStudio();
+        buildOffice();
+        renderFloorAgents();
+        selectAgent(id, false);
+      });
+
+      document.getElementById('officeFlipToggleBtn')?.addEventListener('click', async () => {
+        if (spec.studioAgent) {
+          spec.studioAgent.mapleFlipped = !spec.flip;
+          await persistOfficeCharAppearance(spec.studioAgent);
+        }
+        agentSpecs = buildAgentSpecsFromStudio();
+        buildOffice();
+        renderFloorAgents();
+        selectAgent(id, false);
+      });
+
+      document.getElementById('officeAnimToggleBtn')?.addEventListener('click', async () => {
+        if (spec.studioAgent) {
+          spec.studioAgent.mapleAnimated = !spec.mapleAnimated;
+          await persistOfficeCharAppearance(spec.studioAgent);
+        }
         agentSpecs = buildAgentSpecsFromStudio();
         buildOffice();
         renderFloorAgents();
