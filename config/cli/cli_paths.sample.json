@@ -1,0 +1,8 @@
+{
+  "_comment": "PC의 PATH에서 자동 감지되지 않는 CLI가 있을 때만 수동 실행 파일 절대 경로를 지정합니다.",
+  "claude": "C:\\Users\\<사용자명>\\AppData\\Roaming\\npm\\claude.cmd",
+  "agy": "C:\\Users\\<사용자명>\\.gemini\\bin\\agy.exe",
+  "gemini": "C:\\Users\\<사용자명>\\AppData\\Roaming\\npm\\gemini.cmd",
+  "codex": "C:\\Users\\<사용자명>\\AppData\\Roaming\\npm\\codex.cmd",
+  "grok": "C:\\Users\\<사용자명>\\AppData\\Roaming\\npm\\grok.cmd"
+}

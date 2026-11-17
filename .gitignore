@@ -30,3 +30,8 @@ desktop.ini
 __pycache__/
 *.pyc
 data/login_helper_*.cmd
+config/cli/login_scripts/*.cmd
+
+# Trash (Unused / Legacy Archive Folder)
+trash/
+/trash/

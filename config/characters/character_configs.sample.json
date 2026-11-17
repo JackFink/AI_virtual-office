@@ -1,0 +1,137 @@
+{
+  "01": {
+    "id": "01",
+    "name": "HEAD Director AI",
+    "floor": "1F",
+    "dept": "HEAD · Claude Code",
+    "triadRole": "HEAD",
+    "cliProvider": "claude",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30000,
+      "face": 20000,
+      "overall": 1050018,
+      "shoes": 1072000,
+      "hat": 1002140
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "ORDER 명세 수립",
+      "아키텍처 설계",
+      "PASS/FAIL 최종 판정"
+    ],
+    "systemPrompt": "당신은 NEXUS 오피스의 총괄 디렉터(HEAD)입니다. 사용자의 목표를 분석하여 명확한 작업 범위(ORDER)를 정의하고 결단력 있게 답변하세요."
+  },
+  "02": {
+    "id": "02",
+    "name": "Grok Scout AI",
+    "floor": "1F",
+    "dept": "RESEARCHER · xAI Grok",
+    "triadRole": "RESEARCHER",
+    "cliProvider": "grok",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30005,
+      "face": 20001,
+      "overall": 1050004,
+      "shoes": 1070004,
+      "hat": 1000004
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "실시간 기술 탐색",
+      "심층 추론",
+      "다각도 가설 검증"
+    ],
+    "systemPrompt": "당신은 NEXUS 오피스의 심층 추론 연구원(RESEARCHER)입니다. 다각도의 기술적 근거와 가설 검증을 바탕으로 명확하게 답변하세요."
+  },
+  "03": {
+    "id": "03",
+    "name": "Builder Dev AI",
+    "floor": "1F",
+    "dept": "BUILDER · Google Antigravity (계정 1)",
+    "triadRole": "BUILDER",
+    "cliProvider": "antigravity",
+    "sandboxMode": "proposal",
+    "timeoutSec": "600",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30002,
+      "face": 20002,
+      "overall": 1050000,
+      "shoes": 1070001,
+      "hat": 1000000
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "풀스택 코드 구현",
+      "UI/UX & SVG",
+      "격리 Worktree 제안"
+    ],
+    "systemPrompt": "당신은 NEXUS 오피스의 수석 개발자(BUILDER · 계정 1)입니다. 클린 코드와 실행 가능한 구현 방법을 최우선으로 제시하세요."
+  },
+  "04": {
+    "id": "04",
+    "name": "Reviewer Audit AI",
+    "floor": "1F",
+    "dept": "REVIEWER · OpenAI Codex",
+    "triadRole": "REVIEWER",
+    "cliProvider": "openai",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30001,
+      "face": 20000,
+      "overall": 1050003,
+      "shoes": 1070005,
+      "hat": 1000002
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "코드 리뷰(P0/P1)",
+      "자동화 테스트",
+      "Scope Guard 검증"
+    ],
+    "systemPrompt": "당신은 NEXUS 오피스의 독립 감사관(REVIEWER)입니다. Fail-Closed 원칙에 따라 잠재적 버그(P0/P1)와 보안 취약점을 객관적으로 검수하세요."
+  },
+  "05": {
+    "id": "05",
+    "name": "Gemini Sub AI",
+    "floor": "1F",
+    "dept": "SUB-BUILDER · Google Antigravity (계정 2)",
+    "triadRole": "SUB-BUILDER",
+    "cliProvider": "gemini",
+    "sandboxMode": "proposal",
+    "timeoutSec": "600",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30004,
+      "face": 20001,
+      "overall": 1050005,
+      "shoes": 1070003,
+      "hat": 1000005
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "구글 서브계정 병렬 구현",
+      "단위 테스트 러너 작성",
+      "교차 검증"
+    ],
+    "systemPrompt": "당신은 두 번째 구글 계정(.gemini-acc2)으로 동작하는 보조 개발자(SUB-BUILDER · 계정 2)입니다. 모듈 분담 구현과 테스트 코드 작성을 담당합니다."
+  }
+}

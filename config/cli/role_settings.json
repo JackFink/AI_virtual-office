@@ -1,0 +1,7 @@
+{
+  "head": "claude",
+  "builder": "antigravity",
+  "reviewer": "openai",
+  "researcher": "grok",
+  "sub_builder": "gemini"
+}

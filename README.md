@@ -59,4 +59,5 @@ python -m http.server 8080
 
 ## 4. 참조 링크
 
-- **GitHub**: [digilogd-cmd/ai-dev-director](https://github.com/digilogd-cmd/ai-dev-director) — 다중 AI 코딩 CLI(Claude Code, OpenAI Codex, Google Antigravity) 기반 로컬 개발 감독관 프로젝트
+- **GitHub (AI Dev Director)**: [digilogd-cmd/ai-dev-director](https://github.com/digilogd-cmd/ai-dev-director) — 다중 AI 코딩 CLI(Claude Code, OpenAI Codex, Google Antigravity) 기반 로컬 개발 감독관 프로젝트
+- **MapleStory.io (KMS v389 캐릭터 & 파츠 이미지/API)**: [https://maplestory.io](https://maplestory.io) ([API 문서](https://maplestory.io/api)) — 가상 오피스 AI 직원 캐릭터 전신 스프라이트 및 캐릭터 시뮬레이터 파츠(`character-images/` 내 헤어·성형·의상·신발·악세사리·가구·펫·장식 PNG 에셋) 원본 데이터 및 렌더링 참조

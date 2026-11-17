@@ -1,0 +1,127 @@
+{
+  "01": {
+    "id": "01",
+    "name": "HEAD Director AI",
+    "floor": "1F",
+    "dept": "HEAD · 총괄 지휘 (Codex)",
+    "triadRole": "HEAD",
+    "cliProvider": "claude",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300",
+    "mapleEquipped": {
+      "skin": 2000,
+      "face": 20000,
+      "shoes": 1072000,
+      "hair": 30061,
+      "effect": 5010180,
+      "title": 3700001,
+      "faceAccessory": 1010007,
+      "top": 1040119,
+      "bottom": 1060076
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "ORDER 명세 수립",
+      "아키텍처 설계",
+      "PASS/FAIL 최종 판정"
+    ],
+    "systemPrompt": "당신은 1F 소속 'HEAD Director AI' (HEAD 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
+    "updatedAt": "2026-11-17T04:23:56.997Z"
+  },
+  "02": {
+    "id": "02",
+    "name": "ORDER Planner AI",
+    "floor": "1F",
+    "dept": "HEAD · Claude Code",
+    "triadRole": "HEAD",
+    "cliProvider": "claude",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300",
+    "systemPrompt": "당신은 1F 소속 'ORDER Planner AI' (HEAD 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요."
+  },
+  "03": {
+    "id": "03",
+    "name": "Builder Dev AI",
+    "floor": "1F",
+    "dept": "BUILDER · 구현 (Antigravity)",
+    "triadRole": "BUILDER",
+    "cliProvider": "antigravity",
+    "sandboxMode": "proposal",
+    "timeoutSec": "600",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30047,
+      "face": 20002,
+      "overall": 1050000,
+      "shoes": 1070001
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "풀스택 코드 구현",
+      "UI/UX & SVG",
+      "격리 Worktree 제안"
+    ],
+    "systemPrompt": "당신은 1F 소속 'Builder Dev AI' (BUILDER 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
+    "updatedAt": "2026-11-16T12:25:18.574Z"
+  },
+  "06": {
+    "id": "06",
+    "name": "HEAD Proxy Autopilot",
+    "floor": "2F",
+    "dept": "HEAD · 자율 프록시 제어",
+    "triadRole": "HEAD",
+    "cliProvider": "claude",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30005,
+      "face": 20000,
+      "overall": 1050005,
+      "shoes": 1070005,
+      "hat": 1000005,
+      "effect": 5010038
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "ORDER 명세 수립",
+      "아키텍처 설계",
+      "PASS/FAIL 최종 판정"
+    ],
+    "systemPrompt": "당신은 2F 소속 'HEAD Proxy Autopilot' (HEAD 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
+    "updatedAt": "2026-11-17T02:24:24.012Z"
+  },
+  "04": {
+    "id": "04",
+    "name": "Reviewer Audit AI",
+    "floor": "1F",
+    "dept": "REVIEWER · 독립 검수 (Codex)",
+    "triadRole": "REVIEWER",
+    "cliProvider": "openai",
+    "sandboxMode": "read-only",
+    "timeoutSec": "300",
+    "mapleEquipped": {
+      "skin": 2000,
+      "hair": 30030,
+      "face": 20000,
+      "overall": 1050003,
+      "shoes": 1070005
+    },
+    "mapleAnim": "stand1",
+    "mapleAnimated": false,
+    "mapleFlipped": false,
+    "skills": [
+      "코드 리뷰(P0/P1)",
+      "자동화 테스트",
+      "Scope Guard 검증"
+    ],
+    "systemPrompt": "당신은 1F 소속 'Reviewer Audit AI' (REVIEWER 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
+    "updatedAt": "2026-11-17T06:01:41.237Z"
+  }
+}

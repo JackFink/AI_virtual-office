@@ -1,7 +1,0 @@
-{
-  "head": "openai",
-  "builder": "openai",
-  "reviewer": "openai",
-  "researcher": "openai",
-  "sub_builder": "openai"
-}

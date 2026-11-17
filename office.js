@@ -70,32 +70,15 @@
     if (slot.facing === 'front') {
       return `
         <div class="maple-seat-pod facing-front" style="left:${slot.xPct}%;top:${slot.yPct + 3.8}%">
-          <svg viewBox="0 0 120 82">
-            <rect x="41" y="4" width="38" height="32" rx="6" fill="#495057" stroke="#212529" stroke-width="2.2"/>
-            <rect x="8" y="34" width="104" height="40" rx="2" fill="#d4a373" stroke="#2b2d38" stroke-width="2.2"/>
-            <rect x="4" y="30" width="112" height="8" rx="2" fill="#e6ccb2" stroke="#2b2d38" stroke-width="2.2"/>
-            <rect x="20" y="16" width="34" height="20" rx="2" fill="#3b4252" stroke="#1e2028" stroke-width="2"/>
-            <rect x="23" y="19" width="28" height="14" fill="#74c0fc"/>
-            <rect x="66" y="16" width="34" height="20" rx="2" fill="#3b4252" stroke="#1e2028" stroke-width="2"/>
-            <rect x="69" y="19" width="28" height="14" fill="#63e6be"/>
-            <text x="104" y="68" text-anchor="end" font-size="9" font-weight="800" fill="#5c3c24">#${seatIdx + 1}</text>
-          </svg>
+          <img src="assets/seat-pod-front.png" alt="좌석 #${seatIdx + 1}" />
+          <span class="maple-seat-pod-num front">#${seatIdx + 1}</span>
         </div>
       `;
     }
     return `
       <div class="maple-seat-pod facing-back" style="left:${slot.xPct}%;top:${slot.yPct + 2.2}%">
-        <svg viewBox="0 0 120 82">
-          <line x1="60" y1="48" x2="60" y2="72" stroke="#212529" stroke-width="4.5"/>
-          <line x1="40" y1="72" x2="80" y2="72" stroke="#212529" stroke-width="4" stroke-linecap="round"/>
-          <circle cx="42" cy="76" r="3" fill="#1e2028"/>
-          <circle cx="60" cy="76" r="3" fill="#1e2028"/>
-          <circle cx="78" cy="76" r="3" fill="#1e2028"/>
-          <rect x="36" y="42" width="48" height="9" rx="4" fill="#343a40" stroke="#212529" stroke-width="2"/>
-          <rect x="40" y="12" width="40" height="34" rx="6" fill="#495057" stroke="#212529" stroke-width="2.2"/>
-          <rect x="46" y="17" width="28" height="22" rx="3" fill="#5c646d"/>
-          <text x="60" y="31" text-anchor="middle" font-size="8.5" font-weight="800" fill="#dee2e6">#${seatIdx + 1}</text>
-        </svg>
+        <img src="assets/seat-pod-back.png" alt="좌석 #${seatIdx + 1}" />
+        <span class="maple-seat-pod-num back">#${seatIdx + 1}</span>
       </div>
     `;
   }
@@ -439,7 +422,7 @@
             <span>F${String(fl.id).padStart(2, '0')} · ${fl.name}</span>
             <em>(마주보는 ${fl.seatCount}석 · 클릭 시 중앙 정렬)</em>
           </div>
-          <img src="assets/maple-gm-office.svg?v=triad16" alt="${fl.name} GM Office SVG 배경" class="maple-2d-bg">
+          <img src="assets/maple-gm-office.png?v=triad39" alt="${fl.name} GM Office PNG 배경" class="maple-2d-bg">
           <div class="maple-2d-layer" data-layer-floor="${fl.id}">
             ${podsHtml}
             ${pinsHtml}

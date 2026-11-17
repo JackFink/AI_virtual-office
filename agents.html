@@ -1,6 +1,6 @@
-<!doctype html>
+?
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · AI 직원 & Triad 역할 관리</title><link rel="stylesheet" href="styles.css?v=triad26"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · AI 직원 & Triad 역할 관리</title><link rel="stylesheet" href="styles.css?v=triad37"></head>
 <body data-page="agents">
 <div class="app"><aside class="sidebar"><a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI DEV DIRECTOR</div></div></a><div class="nav-label">WORKSPACE</div><nav class="nav-group"><a class="nav-link" href="index.html"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a><a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">3D 가상 오피스</span><span class="nav-pill">LIVE</span></a><a class="nav-link active" href="agents.html" aria-current="page"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a><a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">AI 설정 & 질문</span></a><a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a></nav><div class="nav-label" style="margin-top:30px">MANAGEMENT</div><nav class="nav-group"><a class="nav-link" href="logs.html"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a></nav><div class="sidebar-bottom"><div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption">Claude · Codex · Antigravity · Gemini 2 · Grok<br>HEAD / BUILDER / SUB-BUILDER / REVIEWER / RESEARCHER</div><div class="usage"><span>미션 단계 예산</span><strong>5 / 6</strong></div><div class="usage-track"><span style="width:83%"></span></div></div><div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div></div></aside>
 <main class="main"><header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>AI 직원 관리 · Triad 역할 체계</strong></div><div class="top-actions"><div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">TRIAD STANDBY · 구독 CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
@@ -271,9 +271,9 @@
                 <span>⇄</span> <span>좌우 반전</span>
               </button>
               <div class="zoom-pill-group">
-                <button type="button" class="zoom-btn active" data-zoom="1">1x</button>
-                <button type="button" class="zoom-btn" data-zoom="1.4">1.5x</button>
-                <button type="button" class="zoom-btn" data-zoom="1.8">2x</button>
+                <button type="button" class="zoom-btn active" data-zoom="1.8">1x</button>
+                <button type="button" class="zoom-btn" data-zoom="2.3">1.5x</button>
+                <button type="button" class="zoom-btn" data-zoom="2.8">2x</button>
               </div>
               <button type="button" class="sim-btn" id="btnBackdrop" title="배경 전환" style="height:28px;white-space:nowrap">
                 <span>🏁</span> <span>배경 전환</span>
@@ -282,13 +282,13 @@
           </div>
 
           <!-- Canvas Box -->
-          <div class="maples-canvas-area backdrop-checker" id="simCanvasArea" style="height:220px;position:relative;overflow:hidden">
+          <div class="maples-canvas-area backdrop-checker" id="simCanvasArea" style="height:250px;position:relative;overflow:hidden">
             <div id="simBgLayer" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;overflow:hidden">
               <img id="simBgImg" src="" alt="건물 배경" style="width:100%;height:100%;object-fit:cover;opacity:0.88" />
               <span id="simBgBadge" style="position:absolute;top:6px;left:8px;z-index:2;background:rgba(15,23,42,0.75);color:#fff;font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:999px">🏛️ 배경</span>
             </div>
             <div id="simPetBox" style="display:none;position:absolute;bottom:14px;left:18px;z-index:3;flex-direction:column;align-items:center;gap:2px;pointer-events:none">
-              <img id="simPetImg" src="" alt="동행 펫" style="width:36px;height:36px;object-fit:contain;image-rendering:pixelated" />
+              <img id="simPetImg" src="" alt="동행 펫" style="width:48px;height:48px;object-fit:contain;image-rendering:pixelated" />
               <span id="simPetName" style="background:rgba(15,23,42,0.72);color:#fde047;font-size:7.5px;font-weight:700;padding:1px 5px;border-radius:4px">펫</span>
             </div>
             <div class="customizer-stage stance-stand1" id="customizerStage" style="position:relative;z-index:2"></div>
@@ -352,7 +352,7 @@
       <!-- 우측: KMS v389 전용 대화면 파츠 브라우저 -->
       <div class="simulator-browser-col">
         <div class="sim-category-tab-grid" id="mapleCategoryTabBar" role="tablist">
-          <button type="button" class="maples-tab active" data-tab="tab-maple-parts" data-maple-cat="all" role="tab">✨ 전체 (<span data-maple-count="all">29,218</span>)</button>
+          <button type="button" class="maples-tab active" data-tab="tab-maple-parts" data-maple-cat="all" role="tab">✨ 전체 (<span data-maple-count="all">27,552</span>)</button>
           <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="hair" role="tab">💇 헤어 (<span data-maple-count="hair">9,473</span>)</button>
           <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="face" role="tab">👀 성형 (<span data-maple-count="face">5,913</span>)</button>
           <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="clothes" role="tab">👗 의상 (<span data-maple-count="clothes">3,193</span>)</button>
@@ -360,15 +360,14 @@
           <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="shoes" role="tab">👟 신발 (<span data-maple-count="shoes">1,319</span>)</button>
           <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="furniture" role="tab">🪑 가구/의자 (<span data-maple-count="furniture">1,153</span>)</button>
           <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="pet" role="tab">🐾 펫 (<span data-maple-count="pet">958</span>)</button>
-          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="building" role="tab">🏛️ 건물/공간 (<span data-maple-count="building">1,076</span>)</button>
-          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="decoration" role="tab">✨ 이펙트/장식 (<span data-maple-count="decoration">1,343</span>)</button>
+          <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="decoration" role="tab">💍 장식 (<span data-maple-count="decoration">753</span>)</button>
           <button type="button" class="maples-tab" data-tab="tab-maple-parts" data-maple-cat="skin" role="tab">🎨 피부 (<span data-maple-count="skin">13</span>)</button>
         </div>
 
         <div class="maples-panel active" id="tab-maple-parts" style="gap:10px">
           <div class="sim-search-toolbar">
             <div style="position:relative;flex:1;min-width:0">
-              <input type="text" id="mapleSimSearchInput" class="studio-ai-input" style="width:100%;height:36px;padding:0 30px 0 12px;font-size:11px" placeholder="🔍 KMS v389 파츠·가구·펫·이펙트 이름 또는 ID 검색..." />
+              <input type="text" id="mapleSimSearchInput" class="studio-ai-input" style="width:100%;height:36px;padding:0 30px 0 12px;font-size:11px" placeholder="🔍 KMS v389 파츠·가구·펫·장식 이름 또는 ID 검색..." />
               <button type="button" id="btnMapleSimClearSearch" style="display:none;position:absolute;right:9px;top:8px;border:0;background:transparent;color:#94a3b8;font-size:12px;cursor:pointer">✕</button>
             </div>
             <label class="sim-equipped-only-toggle">
@@ -382,7 +381,7 @@
 
           <div class="maples-subhead" style="margin-top:2px;padding:0 2px">
             <span id="mapleSimCategoryTitle" style="font-size:11px;font-weight:800;color:#1e293b">전체 항목 목록</span>
-            <em id="mapleSimResultCount" style="font-size:10px;font-weight:700;color:#ea580c">29,218 Items</em>
+            <em id="mapleSimResultCount" style="font-size:10px;font-weight:700;color:#ea580c">27,552 Items</em>
           </div>
 
           <!-- 로컬 이미지 기반 고속 파츠 그리드 (와이드 다단 그리드) -->
@@ -396,4 +395,4 @@
       </div>
     </div>
   </section></div>
-</main></div><script src="avatar/scripts/pixel-character.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-base.js?v=1007"></script><script src="avatar/scripts/pixel-chibi-parts.js?v=1007"></script><script src="avatar/scripts/avatar-loader.js?v=1007"></script><script src="avatar/scripts/default-character.js?v=1007"></script><script src="maplestory-characters-scraper/dashboard/data.js?v=390"></script><script src="app.js?v=triad35"></script></body></html>
+</main></div><script src="character-images/data/data.js?v=393"></script><script src="app.js?v=triad41"></script></body></html>

@@ -2,551 +2,39 @@
   const page = document.body.dataset.page;
 
   // ==========================================================================
-  // [1] maples.im 스타일 모듈형 캐릭터 엔진 (Base Body + 5개 레이어 + 스탠스)
+  // [1] KMS v389 PNG 캐릭터 렌더링 엔진 (레거시 SVG 코드 제거 및 PNG 전용 경량화)
   // ==========================================================================
   const CharacterEngine = {
-    parts: {
-      // 1-1. 베이스 신체 레이어 (2등신 메이플 치비 바디 & 볼터치 & 이너웨어)
-      base: {
-        BASE_PIXEL: (skin) => {
-          if (typeof window !== 'undefined' && window.AgentChibiBase && typeof window.AgentChibiBase.render === 'function') {
-            return window.AgentChibiBase.render(skin, { offsetX: 10.5, offsetY: 4.5 });
-          }
-          return '';
-        },
-        BASE_M: (skin) => `
-          <g class="layer-base-male">
-            <!-- 목 & 두상 (둥글고 귀여운 치비 두상) -->
-            <path d="M15 22 C13 9 51 9 49 22 C50 32 45 37 32 37 C19 37 14 32 15 22 Z" fill="${skin}"/>
-            <rect x="29.5" y="34.5" width="5" height="4" rx="1.5" fill="${skin}"/>
-            <!-- 귀 & 핑크 볼터치 (홍조) -->
-            <circle cx="13.5" cy="23" r="2.8" fill="${skin}"/>
-            <circle cx="50.5" cy="23" r="2.8" fill="${skin}"/>
-            <ellipse cx="19" cy="28" rx="3.5" ry="2" fill="#ff7f7f" opacity="0.45"/>
-            <ellipse cx="45" cy="28" rx="3.5" ry="2" fill="#ff7f7f" opacity="0.45"/>
-            <!-- 앙증맞은 상체 (Torso) & 기본 이너웨어 -->
-            <rect x="20" y="37" width="24" height="15" rx="4" fill="${skin}"/>
-            <rect x="22" y="38" width="20" height="9" rx="3" fill="#3b4252" opacity="0.6"/>
-            <!-- 기본 이너웨어 하의 -->
-            <rect x="21" y="49" width="22" height="6" rx="2" fill="#2e3440"/>
-            <!-- 통통한 양팔 & 손 -->
-            <rect x="14" y="38" width="6.5" height="12" rx="3" fill="${skin}"/>
-            <circle cx="17.2" cy="49" r="3" fill="${skin}"/>
-            <rect x="43.5" y="38" width="6.5" height="12" rx="3" fill="${skin}"/>
-            <circle cx="46.8" cy="49" r="3" fill="${skin}"/>
-            <!-- 귀여운 숏다리 & 기본 신발 -->
-            <rect x="22" y="52" width="8" height="14" rx="2.5" fill="${skin}"/>
-            <rect x="34" y="52" width="8" height="14" rx="2.5" fill="${skin}"/>
-            <rect x="20" y="64" width="10.5" height="6" rx="3" fill="#1e293b"/>
-            <rect x="33.5" y="64" width="10.5" height="6" rx="3" fill="#1e293b"/>
-            <rect x="20.5" y="68" width="9.5" height="2" rx="1" fill="#475569"/>
-            <rect x="34" y="68" width="9.5" height="2" rx="1" fill="#475569"/>
-          </g>
-        `,
-        BASE_F: (skin) => `
-          <g class="layer-base-female">
-            <!-- 목 & 두상 (슬림하고 부드러운 치비 두상) -->
-            <path d="M15.5 22 C13.5 9.5 50.5 9.5 48.5 22 C49.5 31.5 44.5 36.5 32 36.5 C19.5 36.5 14.5 31.5 15.5 22 Z" fill="${skin}"/>
-            <rect x="29.5" y="34.5" width="5" height="4" rx="1.5" fill="${skin}"/>
-            <!-- 귀 & 선명한 로지 핑크 볼터치 -->
-            <circle cx="14" cy="23" r="2.6" fill="${skin}"/>
-            <circle cx="50" cy="23" r="2.6" fill="${skin}"/>
-            <ellipse cx="19" cy="28" rx="3.5" ry="2" fill="#ff6b81" opacity="0.55"/>
-            <ellipse cx="45" cy="28" rx="3.5" ry="2" fill="#ff6b81" opacity="0.55"/>
-            <!-- 슬림 치비 상체 & 기본 이너웨어 -->
-            <path d="M21 37 Q32 39 43 37 L41.5 51.5 Q32 53 22.5 51.5 Z" fill="${skin}"/>
-            <rect x="23" y="38" width="18" height="9" rx="3" fill="#4c566a" opacity="0.6"/>
-            <!-- 기본 이너웨어 하의 -->
-            <rect x="22" y="49" width="20" height="6" rx="2" fill="#334155"/>
-            <!-- 슬림 양팔 & 손 -->
-            <rect x="14.5" y="38" width="6" height="12" rx="3" fill="${skin}"/>
-            <circle cx="17.5" cy="49" r="2.8" fill="${skin}"/>
-            <rect x="43.5" y="38" width="6" height="12" rx="3" fill="${skin}"/>
-            <circle cx="46.5" cy="49" r="2.8" fill="${skin}"/>
-            <!-- 슬림 다리 & 기본 슈즈 -->
-            <rect x="22.5" y="52" width="7.5" height="14" rx="2.5" fill="${skin}"/>
-            <rect x="34" y="52" width="7.5" height="14" rx="2.5" fill="${skin}"/>
-            <rect x="21" y="64" width="9.5" height="6" rx="3" fill="#1e293b"/>
-            <rect x="33.5" y="64" width="9.5" height="6" rx="3" fill="#1e293b"/>
-            <rect x="21.5" y="68" width="8.5" height="2" rx="1" fill="#475569"/>
-            <rect x="34" y="68" width="8.5" height="2" rx="1" fill="#475569"/>
-          </g>
-        `
-      },
+    parts: {},
 
-      // 1-2. 하의 레이어 (치비 핏 슬랙스, 데님, 플리츠 스커트, 치노 + 슈즈)
-      bottom: {
-        B00: () => '', // 없음 (베이스 이너웨어 노출)
-        B01: () => `
-          <!-- [B01] 핏 슬랙스 & 광택 더비 슈즈 -->
-          <rect x="20.5" y="48.5" width="23" height="5" rx="2" fill="#1e293b"/>
-          <rect x="21" y="51" width="9.5" height="14" rx="2" fill="#2c3a4b"/>
-          <rect x="33.5" y="51" width="9.5" height="14" rx="2" fill="#2c3a4b"/>
-          <rect x="19.5" y="63" width="11.5" height="7" rx="3" fill="#0f172a"/>
-          <rect x="33" y="63" width="11.5" height="7" rx="3" fill="#0f172a"/>
-          <rect x="20" y="67.5" width="10.5" height="2" rx="1" fill="#475569"/>
-          <rect x="33.5" y="67.5" width="10.5" height="2" rx="1" fill="#475569"/>
-        `,
-        B02: () => `
-          <!-- [B02] 롤업 인디고 진 & 화이트 스니커즈 -->
-          <rect x="20.5" y="48.5" width="23" height="5" rx="2" fill="#27466b"/>
-          <rect x="21" y="51" width="9.5" height="12" rx="2" fill="#3b597b"/>
-          <rect x="33.5" y="51" width="9.5" height="12" rx="2" fill="#3b597b"/>
-          <rect x="21" y="60.5" width="9.5" height="2.5" rx="1" fill="#cbd5e1"/>
-          <rect x="33.5" y="60.5" width="9.5" height="2.5" rx="1" fill="#cbd5e1"/>
-          <rect x="19.5" y="63" width="11.5" height="7" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="33" y="63" width="11.5" height="7" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="19.5" y="67.5" width="11.5" height="2.2" rx="1" fill="#ef4444"/>
-          <rect x="33" y="67.5" width="11.5" height="2.2" rx="1" fill="#ef4444"/>
-        `,
-        B03: () => `
-          <!-- [B03] 플리츠 오피스 미니스커트 & 메리제인 슈즈 -->
-          <path d="M19 48.5 H45 L48 60 H16 Z" fill="#334155"/>
-          <line x1="25" y1="49" x2="24" y2="60" stroke="#1e293b" stroke-width="1.2"/>
-          <line x1="32" y1="49" x2="32" y2="60" stroke="#1e293b" stroke-width="1.2"/>
-          <line x1="39" y1="49" x2="40" y2="60" stroke="#1e293b" stroke-width="1.2"/>
-          <rect x="20.5" y="63" width="10.5" height="7" rx="3" fill="#0f172a"/>
-          <rect x="33" y="63" width="10.5" height="7" rx="3" fill="#0f172a"/>
-          <rect x="20.5" y="63.5" width="10.5" height="1.8" fill="#e2e8f0"/>
-          <rect x="33" y="63.5" width="10.5" height="1.8" fill="#e2e8f0"/>
-        `,
-        B04: () => `
-          <!-- [B04] 베이지 치노 팬츠 & 브라운 로퍼 -->
-          <rect x="20.5" y="48.5" width="23" height="5" rx="2" fill="#c7a783"/>
-          <rect x="21" y="51" width="9.5" height="13" rx="2" fill="#d9be9e"/>
-          <rect x="33.5" y="51" width="9.5" height="13" rx="2" fill="#d9be9e"/>
-          <rect x="19.5" y="63.5" width="11" height="6.5" rx="2.5" fill="#582f0e"/>
-          <rect x="33.5" y="63.5" width="11" height="6.5" rx="2.5" fill="#582f0e"/>
-          <rect x="21.5" y="64" width="7" height="2" rx="1" fill="#7f4f24"/>
-          <rect x="35.5" y="64" width="7" height="2" rx="1" fill="#7f4f24"/>
-        `
-      },
-
-      // 1-3. 상의 레이어 (치비 수트, 후디, 셔츠, 랩코트, 티셔츠)
-      outfit: {
-        O00: () => '', // 없음 (베이스 이너웨어 노출)
-        O01: () => `
-          <!-- [O01] 치비 포멀 수트 & 레드 넥타이 -->
-          <rect x="17.5" y="36.5" width="29" height="16" rx="4" fill="#1e293b"/>
-          <rect x="13.5" y="37.5" width="6.5" height="10" rx="2.5" fill="#1e293b"/>
-          <rect x="44" y="37.5" width="6.5" height="10" rx="2.5" fill="#1e293b"/>
-          <polygon points="27.5,36.5 36.5,36.5 32,46" fill="#ffffff"/>
-          <polygon points="31,38 33,38 33.5,46 32,48 30.5,46" fill="#dc2626"/>
-          <rect x="20.5" y="42" width="4.5" height="1.2" rx="0.5" fill="#ffffff"/>
-        `,
-        O02: () => `
-          <!-- [O02] 개발자 오버핏 후드 (캥거루 포켓 & 스트링) -->
-          <rect x="16.5" y="36" width="31" height="18" rx="5" fill="#475569"/>
-          <rect x="13" y="37" width="7" height="11" rx="3" fill="#475569"/>
-          <rect x="44" y="37" width="7" height="11" rx="3" fill="#475569"/>
-          <path d="M22 36.5 Q32 41 42 36.5" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round"/>
-          <line x1="28" y1="39" x2="27" y2="44" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
-          <line x1="36" y1="39" x2="37" y2="44" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
-          <rect x="22" y="44" width="20" height="7.5" rx="2" fill="#334155"/>
-        `,
-        O03: () => `
-          <!-- [O03] 스마트 셔츠 & 포근 니트 -->
-          <rect x="17.5" y="36.5" width="29" height="16" rx="4" fill="#b48c66"/>
-          <rect x="13.5" y="37.5" width="6.5" height="10" rx="2.5" fill="#b48c66"/>
-          <rect x="44" y="37.5" width="6.5" height="10" rx="2.5" fill="#b48c66"/>
-          <polygon points="26.5,36.5 37.5,36.5 32,43" fill="#ffffff"/>
-          <line x1="32" y1="40" x2="32" y2="43" stroke="#94a3b8" stroke-width="1"/>
-        `,
-        O04: () => `
-          <!-- [O04] R&D 연구실 랩가운 (화이트 코트 & 블루 이너) -->
-          <rect x="16.5" y="36" width="31" height="19" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-          <rect x="13" y="37" width="7" height="11" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="44" y="37" width="7" height="11" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="28.5" y="36" width="7" height="19" fill="#3b82f6"/>
-          <rect x="20" y="42" width="5" height="5" rx="1" fill="none" stroke="#cbd5e1" stroke-width="0.8"/>
-          <line x1="22" y1="40.5" x2="22" y2="43" stroke="#0ea5e9" stroke-width="1.2"/>
-        `,
-        O05: () => `
-          <!-- [O05] 크리에이티브 에메랄드 워크웨어 -->
-          <rect x="17" y="36.5" width="30" height="17" rx="4" fill="#2d6a59"/>
-          <rect x="13.5" y="37.5" width="6.5" height="10" rx="2.5" fill="#2d6a59"/>
-          <rect x="44" y="37.5" width="6.5" height="10" rx="2.5" fill="#2d6a59"/>
-          <polygon points="25,36.5 39,36.5 32,42" fill="#1b4d3e"/>
-          <circle cx="32" cy="45" r="1.2" fill="#f59e0b"/>
-          <circle cx="32" cy="49" r="1.2" fill="#f59e0b"/>
-        `,
-        O06: () => `
-          <!-- [O06] 글로벌 클래식 트렌치코트 -->
-          <rect x="16.5" y="36" width="31" height="20" rx="4" fill="#8d6e49"/>
-          <rect x="13" y="37" width="7" height="11" rx="3" fill="#8d6e49"/>
-          <rect x="44" y="37" width="7" height="11" rx="3" fill="#8d6e49"/>
-          <rect x="27.5" y="36" width="9" height="20" fill="#1e293b"/>
-          <rect x="16.5" y="47" width="31" height="3" fill="#715535"/>
-          <rect x="30" y="46.5" width="4" height="4" rx="1" fill="#f59e0b"/>
-        `,
-        O07: () => `
-          <!-- [O07] 캐주얼 로고 반팔티 -->
-          <rect x="18" y="36.5" width="28" height="15" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="14" y="37" width="6" height="7" rx="2" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="44" y="37" width="6" height="7" rx="2" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.8"/>
-          <!-- 가슴 NEXUS 로고 -->
-          <rect x="28" y="41" width="8" height="5" rx="1.5" fill="#ea580c"/>
-          <line x1="30" y1="43.5" x2="34" y2="43.5" stroke="#ffffff" stroke-width="0.8"/>
-        `
-      },
-
-      // 1-4. 표정 레이어 (메이플 대표 성형 + 동공 렌즈 색상 지원)
-      face: {
-        F00: () => '', // 투명 (스프라이트 자체 표정 노출)
-        F01: (eyeColor = '#1e293b') => `
-          <!-- [F01] 아잉 / 방긋 미소 -->
-          <path d="M19.5 21.5 Q24 16 28.5 21.5" fill="none" stroke="${eyeColor}" stroke-width="2.5" stroke-linecap="round"/>
-          <path d="M35.5 21.5 Q40 16 44.5 21.5" fill="none" stroke="${eyeColor}" stroke-width="2.5" stroke-linecap="round"/>
-          <path d="M29 27 Q32 31.5 35 27" fill="#f43f5e" stroke="${eyeColor}" stroke-width="1.2" stroke-linecap="round"/>
-        `,
-        F02: (eyeColor = '#1e293b') => `
-          <!-- [F02] 조용한 눈 (Chic Eyes & 듀얼 하이라이트) -->
-          <path d="M18.5 20 Q24 18 29 21.5" fill="none" stroke="#0f172a" stroke-width="2.4" stroke-linecap="round"/>
-          <rect x="21" y="20.5" width="7" height="6.5" rx="2.5" fill="${eyeColor}"/>
-          <circle cx="23" cy="22" r="1.5" fill="#ffffff"/>
-          <circle cx="26" cy="24.5" r="0.9" fill="#93c5fd"/>
-          
-          <path d="M35 21.5 Q40 18 45.5 20" fill="none" stroke="#0f172a" stroke-width="2.4" stroke-linecap="round"/>
-          <rect x="36" y="20.5" width="7" height="6.5" rx="2.5" fill="${eyeColor}"/>
-          <circle cx="38" cy="22" r="1.5" fill="#ffffff"/>
-          <circle cx="41" cy="24.5" r="0.9" fill="#93c5fd"/>
-          <line x1="30" y1="29.5" x2="34" y2="29.5" stroke="#475569" stroke-width="1.4" stroke-linecap="round"/>
-        `,
-        F03: (eyeColor = '#1e293b') => `
-          <!-- [F03] 당당한 윙크 -->
-          <path d="M19 20 Q24 18.5 28.5 21" fill="none" stroke="#0f172a" stroke-width="2.2" stroke-linecap="round"/>
-          <rect x="21" y="21" width="6.5" height="6" rx="2" fill="${eyeColor}"/>
-          <circle cx="23" cy="22.5" r="1.4" fill="#ffffff"/>
-          <circle cx="25.5" cy="24.5" r="0.8" fill="#fde047"/>
-          
-          <path d="M36 21.5 Q40 25.5 44.5 21.5" fill="none" stroke="#0f172a" stroke-width="2.4" stroke-linecap="round"/>
-          <path d="M29 28.5 Q32 30.5 35.5 27.5" fill="none" stroke="#1f2937" stroke-width="1.5" stroke-linecap="round"/>
-        `,
-        F04: (eyeColor = '#1e293b') => `
-          <!-- [F04] 멍한 인형 눈 -->
-          <ellipse cx="24" cy="22.5" rx="4.2" ry="4.8" fill="${eyeColor}"/>
-          <circle cx="22.5" cy="21" r="1.6" fill="#ffffff"/>
-          <circle cx="25.5" cy="23.5" r="1" fill="#67e8f9"/>
-          
-          <ellipse cx="40" cy="22.5" rx="4.2" ry="4.8" fill="${eyeColor}"/>
-          <circle cx="38.5" cy="21" r="1.6" fill="#ffffff"/>
-          <circle cx="41.5" cy="23.5" r="1" fill="#67e8f9"/>
-          <ellipse cx="32" cy="29" rx="1.6" ry="1.8" fill="#f43f5e"/>
-        `,
-        F05: (eyeColor = '#1e293b') => `
-          <!-- [F05] 초롱초롱 호기심 눈 -->
-          <ellipse cx="23.5" cy="22" rx="4.8" ry="5.2" fill="${eyeColor}"/>
-          <polygon points="23.5,19 24.5,21 26.5,21 25,22.5 25.5,24.5 23.5,23 21.5,24.5 22,22.5 20.5,21 22.5,21" fill="#ffffff"/>
-          <circle cx="25.5" cy="24.5" r="1.2" fill="#ffffff"/>
-          
-          <ellipse cx="40.5" cy="22" rx="4.8" ry="5.2" fill="${eyeColor}"/>
-          <polygon points="40.5,19 41.5,21 43.5,21 42,22.5 42.5,24.5 40.5,23 38.5,24.5 39,22.5 37.5,21 39.5,21" fill="#ffffff"/>
-          <circle cx="42.5" cy="24.5" r="1.2" fill="#ffffff"/>
-          <path d="M29.5 28 Q32 31 34.5 28" fill="none" stroke="#f43f5e" stroke-width="1.5" stroke-linecap="round"/>
-        `,
-        F06: (eyeColor = '#1e293b') => `
-          <!-- [F06] 샤프 분석 눈빛 -->
-          <path d="M18 19.5 L28.5 21" stroke="#0f172a" stroke-width="2.6" stroke-linecap="round"/>
-          <rect x="21" y="21" width="6.5" height="5" rx="1.8" fill="${eyeColor}"/>
-          <circle cx="23" cy="22.5" r="1.3" fill="#ffffff"/>
-          
-          <path d="M46 19.5 L35.5 21" stroke="#0f172a" stroke-width="2.6" stroke-linecap="round"/>
-          <rect x="36.5" y="21" width="6.5" height="5" rx="1.8" fill="${eyeColor}"/>
-          <circle cx="38.5" cy="22.5" r="1.3" fill="#ffffff"/>
-          <line x1="30" y1="28.5" x2="34" y2="28.5" stroke="#334155" stroke-width="1.3" stroke-linecap="round"/>
-        `,
-        F07: (eyeColor = '#1e293b') => {
-          if (typeof window !== 'undefined' && window.PixelChibiParts) {
-            return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('face', 'F07', eyeColor) + `</g>`;
-          }
-          return `
-            <path d="M19 20 Q24 19 28 21" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/>
-            <rect x="21" y="21" width="6.5" height="5.5" rx="2" fill="${eyeColor}"/>
-            <circle cx="23" cy="22" r="1.3" fill="#ffffff"/>
-            <path d="M36 21 Q40 19 45 20" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/>
-            <rect x="36.5" y="21" width="6.5" height="5.5" rx="2" fill="${eyeColor}"/>
-            <circle cx="38.5" cy="22" r="1.3" fill="#ffffff"/>
-            <line x1="30" y1="28.5" x2="34" y2="28.5" stroke="#a34c44" stroke-width="1.6" stroke-linecap="round"/>
-          `;
-        },
-        F08: (eyeColor = '#1e293b') => {
-          if (typeof window !== 'undefined' && window.PixelChibiParts) {
-            return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('face', 'F08', eyeColor) + `</g>`;
-          }
-          return '';
-        },
-        F09: (eyeColor = '#1e293b') => {
-          if (typeof window !== 'undefined' && window.PixelChibiParts) {
-            return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('face', 'F09', eyeColor) + `</g>`;
-          }
-          return '';
-        }
-      },
-
-      // 1-5. 헤어 레이어 (메이플 로얄 헤어 스타일)
-      hair: {
-        H00: () => '', // 스킨헤드 (베이스 두상 노출)
-        H01: (c) => `
-          <!-- [H01] 단발 보브컷 -->
-          <path d="M13 22 C13 7 51 7 51 22 L51 32 C51 34 46.5 34 45.5 30 L45 22 C45 19 39 18 32 18 C25 18 19 19 19 22 L18.5 30 C17.5 34 13 34 13 32 Z" fill="${c}"/>
-          <path d="M19 13 Q32 8.5 45 13" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2.2" stroke-linecap="round"/>
-          <path d="M22 18 L26 22 L30 18 L34 22 L38 18" stroke="rgba(0,0,0,0.25)" stroke-width="1.2" fill="none"/>
-        `,
-        H02: (c) => `
-          <!-- [H02] 모던 댄디 숏컷 -->
-          <path d="M14 20 C14 8 50 8 50 20 L50 27 L46 25 L45 18 C43 16 38 15 32 15 C26 15 21 16 19 18 L18 25 L14 27 Z" fill="${c}"/>
-          <path d="M24 10 L28 7 L32 10 L36 7 L40 10" fill="${c}"/>
-          <path d="M21 12 Q32 8 43 12" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2" stroke-linecap="round"/>
-        `,
-        H03: (c) => `
-          <!-- [H03] 로맨틱 웨이브 롱 -->
-          <path d="M12 22 C12 6 52 6 52 22 L53 43 C53 45 47 45 46 41 L45 22 C45 19 39 18 32 18 C25 18 19 19 19 22 L18 41 C17 45 11 45 11 43 Z" fill="${c}"/>
-          <path d="M19 13 Q32 8.5 45 13" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2.2" stroke-linecap="round"/>
-          <circle cx="16" cy="38" r="3" fill="${c}"/>
-          <circle cx="48" cy="38" r="3" fill="${c}"/>
-        `,
-        H04: (c) => `
-          <!-- [H04] 클래식 가르마 포마드 -->
-          <path d="M14 20 C14 8 50 8 50 20 L49 25 L44 24 L44 17 C41 15 36 15 34 16 L31 19 L28 16 C25 15 22 15 20 17 L20 24 L15 25 Z" fill="${c}"/>
-          <path d="M22 11 Q28 6 34 9" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-linecap="round"/>
-          <path d="M35 11 Q41 7 46 11" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-linecap="round"/>
-        `,
-        H05: (c) => `
-          <!-- [H05] 큐티 하이 포니테일 -->
-          <path d="M14 21 C14 8 50 8 50 21 L50 29 L46 27 L45 20 C45 18 39 17 32 17 C25 17 19 18 19 20 L18 27 L14 29 Z" fill="${c}"/>
-          <circle cx="46" cy="9.5" r="3.2" fill="#ec4899"/>
-          <path d="M46 9.5 Q55 8 54 21 Q51 22 47 12 Z" fill="${c}"/>
-          <path d="M20 13 Q32 8 44 13" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2" stroke-linecap="round"/>
-        `,
-        H06: (c) => `
-          <!-- [H06] 복슬복슬 플러피 펌 -->
-          <path d="M13 21 C13 7 51 7 51 21 L50 28 L46 25 L45 18 C45 17 39 16 32 16 C25 16 19 17 19 18 L18 25 L14 28 Z" fill="${c || '#94a3b8'}"/>
-          <circle cx="20" cy="10" r="4.5" fill="${c || '#94a3b8'}"/>
-          <circle cx="28" cy="7.5" r="5" fill="${c || '#94a3b8'}"/>
-          <circle cx="36" cy="7.5" r="5" fill="${c || '#94a3b8'}"/>
-          <circle cx="44" cy="10" r="4.5" fill="${c || '#94a3b8'}"/>
-        `,
-        H07: (c) => `
-          <!-- [H07] 샤기 울프컷 -->
-          <path d="M13 20 C13 7 51 7 51 20 L52 28 L48 26 L47 18 C44 16 38 15 32 15 C26 15 20 16 17 18 L16 26 L12 28 Z" fill="${c}"/>
-          <polygon points="12,28 15,35 18,30" fill="${c}"/>
-          <polygon points="46,30 49,35 52,28" fill="${c}"/>
-          <polygon points="26,8 29,4 32,8 35,4 38,8" fill="${c}"/>
-        `,
-        H08: (c) => `
-          <!-- [H08] 시니어 그레이 / 점잖은 가르마 -->
-          <path d="M14 20 C14 8 50 8 50 20 L48 26 L45 18 C42 16 37 15 32 15 C27 15 22 16 19 18 L16 26 Z" fill="${c || '#cbd5e1'}"/>
-          <circle cx="16" cy="22" r="3" fill="${c || '#cbd5e1'}"/>
-          <circle cx="48" cy="22" r="3" fill="${c || '#cbd5e1'}"/>
-        `
-      },
-
-      // 1-6. 액세서리 레이어 (동글이 안경, 헤드셋, 사원증, 랩탑, 서류가방, 텀블러, 펜)
-      acc: {
-        A00: () => '',
-        A01: () => `
-          <!-- [A01] 동글이 오피스 안경 -->
-          <circle cx="24" cy="22.5" r="5.2" fill="none" stroke="#1e293b" stroke-width="1.6"/>
-          <circle cx="40" cy="22.5" r="5.2" fill="none" stroke="#1e293b" stroke-width="1.6"/>
-          <line x1="29.2" y1="22.5" x2="34.8" y2="22.5" stroke="#1e293b" stroke-width="1.6"/>
-          <line x1="22" y1="20" x2="25" y2="20" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
-          <line x1="38" y1="20" x2="41" y2="20" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
-        `,
-        A02: () => `
-          <!-- [A02] 무선 CS 헤드셋 -->
-          <path d="M12 21 C12 6 52 6 52 21" fill="none" stroke="#1e293b" stroke-width="2.6"/>
-          <rect x="10" y="19" width="4.5" height="9" rx="2" fill="#10b981"/>
-          <rect x="49.5" y="19" width="4.5" height="9" rx="2" fill="#10b981"/>
-          <path d="M12 26 Q19 32 27 30" fill="none" stroke="#1e293b" stroke-width="1.5" stroke-linecap="round"/>
-          <circle cx="28" cy="29.5" r="1.5" fill="#10b981"/>
-        `,
-        A03: () => `
-          <!-- [A03] 사원증 목걸이 & 스마트폰 -->
-          <path d="M28 36 L31.5 42 L35 36" fill="none" stroke="#10b981" stroke-width="1.4"/>
-          <rect x="29.5" y="42" width="5" height="7" rx="1" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="29.5" y="42" width="5" height="2" rx="0.5" fill="#3b82f6"/>
-          <rect x="42" y="42" width="9" height="13" rx="1.5" fill="#1e293b" stroke="#94a3b8" stroke-width="1"/>
-          <rect x="43" y="43" width="7" height="10" rx="1" fill="#38bdf8"/>
-        `,
-        A04: () => `
-          <!-- [A04] 슬림 랩탑 노트북 -->
-          <rect x="40" y="42" width="13" height="10" rx="1.5" fill="#94a3b8" stroke="#334155" stroke-width="1"/>
-          <circle cx="46.5" cy="47" r="1.4" fill="#ffffff"/>
-        `,
-        A05: () => `
-          <!-- [A05] 클래식 브라운 서류 가방 -->
-          <rect x="43" y="52" width="13" height="11" rx="1.5" fill="#78350f" stroke="#451a03" stroke-width="1"/>
-          <rect x="48" y="55" width="3" height="2" rx="0.5" fill="#f59e0b"/>
-          <path d="M47 52 V49 H52 V52" fill="none" stroke="#451a03" stroke-width="1.4"/>
-        `,
-        A06: () => `
-          <!-- [A06] 모닝 커피 텀블러 -->
-          <path d="M44 45 L45 56 H50 L51 45 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.8"/>
-          <rect x="44" y="48" width="7" height="4" fill="#2d6a59"/>
-          <rect x="43.5" y="43.5" width="8" height="2" rx="1" fill="#1e293b"/>
-        `,
-        A07: () => `
-          <!-- [A07] 스타일러스 펜 & 태블릿 -->
-          <rect x="41" y="43" width="11" height="13" rx="1.5" fill="#1e293b" stroke="#64748b" stroke-width="0.8"/>
-          <rect x="42.5" y="44.5" width="8" height="10" rx="1" fill="#0ea5e9"/>
-          <line x1="39" y1="42" x2="43" y2="47" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
-        `
-      }
-    },
-
-    // 레이어 순서대로 SVG 합성 렌더링 (maples.im 스타일 스탠스, 뒷모습 view='back', 레이어 숨김 지원)
     render(agent, options = {}) {
-      const { hiddenLayers = {}, view = 'front' } = options;
-      const { skin = '#f8cfbe', hairColor = '#2d2926', eyeColor = '#1e293b', parts = {} } = agent;
-
-      // [0] KMS v389 (maplestory-characters-scraper) 렌더링 최우선 적용 (디렉토리 · 가상 오피스 전 좌석 · 사이드바 공통)
-      if (agent && agent.mapleEquipped && Object.keys(agent.mapleEquipped).length > 0) {
-        const eq = agent.mapleEquipped;
-        const skinId = eq.skin || 2000;
-        const anim = options.stance || agent.mapleAnim || 'stand1';
-        const isAnimated = Boolean(options.animated !== undefined ? options.animated : agent.mapleAnimated);
-        const isFlip = Boolean(options.flipped !== undefined ? options.flipped : agent.mapleFlipped);
-        const visualSlots = [
-          'hair', 'face', 'overall', 'top', 'bottom', 'shoes',
-          'hat', 'faceAccessory', 'eyeDecoration', 'earrings', 'cape', 'glove',
-          'furniture', 'effect', 'ring', 'title', 'decoration', 'petEquip'
-        ];
-        const itemIds = [];
-        visualSlots.forEach(s => {
-          if (s === 'furniture' && anim !== 'sit') return;
-          if (eq[s]) itemIds.push(eq[s]);
-        });
-        const itemsParam = itemIds.join(',');
-        const kmsUrl = `https://maplestory.io/api/KMS/389/Character${isAnimated ? '/animated' : ''}/${skinId}/${itemsParam}/${anim}/0`;
-        const flipStyle = isFlip ? 'transform:scaleX(-1);' : '';
-        return `
-          <div class="kms389-avatar-wrap" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative">
-            <img src="${kmsUrl}" alt="${agent.name || 'Avatar'}" style="max-width:100%;max-height:100%;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 3px 6px rgba(15,23,42,0.18));${flipStyle}" />
-          </div>
-        `.trim();
-      }
-
-      // [0-2] 폴백: 뒷모습(Back View) 렌더링
-      if (view === 'back') {
-        const pParts = typeof window !== 'undefined' ? window.PixelChibiParts : null;
-        const pBase = !hiddenLayers.base && window.AgentChibiBase ? window.AgentChibiBase.render(skin, { raw: true }) : '';
-        const pBottom = (!hiddenLayers.bottom && pParts) ? pParts.render('bottom', parts.bottom) : '';
-        const pOutfit = (!hiddenLayers.outfit && pParts) ? pParts.render('outfit', parts.outfit) : '';
-        const pHair = (!hiddenLayers.hair && pParts) ? pParts.render('hair', parts.hair, hairColor) : '';
-
-        return `
-          <svg viewBox="0 0 64 78" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="pixel-chibi-svg is-back-view">
-            <ellipse cx="32" cy="73" rx="16" ry="3" fill="rgba(24,37,54,0.14)"/>
-            <g class="layer-pixel-chibi-composite" transform="translate(10.5, 4.5)" shape-rendering="crispEdges">
-              ${pBase}
-              ${pBottom}
-              ${pOutfit}
-              <!-- 등판 칼라 & 재킷 뒷면 솔기 디테일 (앞면 넥타이/셔츠 가림) -->
-              <rect x="13" y="37" width="17" height="3" fill="#1e293b"/>
-              <rect x="14" y="40" width="15" height="12" fill="${hairColor === '#1e1e24' ? '#27384e' : '#334155'}"/>
-              <rect x="21" y="40" width="1" height="12" fill="rgba(0,0,0,0.28)"/>
-              ${pHair}
-              <!-- 뒤통수 전체를 덮는 풍성한 픽셀 후면 헤어 캡 (얼굴/눈 완전 가림) -->
-              <rect x="7" y="6" width="29" height="23" fill="${hairColor}"/>
-              <rect x="5" y="10" width="33" height="18" fill="${hairColor}"/>
-              <rect x="8" y="28" width="27" height="5" fill="${hairColor}"/>
-              <rect x="9" y="8" width="25" height="3" fill="rgba(255,255,255,0.16)"/>
-              <rect x="7" y="26" width="29" height="4" fill="rgba(0,0,0,0.22)"/>
-            </g>
-          </svg>
-        `.trim();
-      }
-
-      // [1] 정밀 픽셀 치비 바디(BASE_PIXEL): 43x68 정밀 픽셀 파츠 시스템(PixelChibiParts)으로 100% 도트 아트 합성
-      if (parts.base === 'BASE_PIXEL' && typeof window !== 'undefined' && window.PixelChibiParts) {
-        const pParts = window.PixelChibiParts;
-        const pBase = !hiddenLayers.base && window.AgentChibiBase ? window.AgentChibiBase.render(skin, { raw: true }) : '';
-        const pBottom = !hiddenLayers.bottom ? pParts.render('bottom', parts.bottom) : '';
-        const pOutfit = !hiddenLayers.outfit ? pParts.render('outfit', parts.outfit) : '';
-        const pFace = !hiddenLayers.face ? pParts.render('face', parts.face, eyeColor) : '';
-        const pHair = !hiddenLayers.hair ? pParts.render('hair', parts.hair, hairColor) : '';
-        const pAcc = !hiddenLayers.acc ? pParts.render('acc', parts.acc) : '';
-
-        return `
-          <svg viewBox="0 0 64 78" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="pixel-chibi-svg">
-            <!-- 그림자 레이어 -->
-            <ellipse cx="32" cy="73" rx="16" ry="3" fill="rgba(24,37,54,0.14)"/>
-            
-            <!-- 43x68 정밀 픽셀 파츠 합성 컨테이너 (crispEdges) -->
-            <g class="layer-pixel-chibi-composite" transform="translate(10.5, 4.5)" shape-rendering="crispEdges">
-              <!-- [Layer 1] 신체 베이스 -->
-              ${pBase}
-              <!-- [Layer 2] 하의 & 신발 -->
-              ${pBottom}
-              <!-- [Layer 3] 상의 & 의상 -->
-              ${pOutfit}
-              <!-- [Layer 4] 눈 & 표정 -->
-              ${pFace}
-              <!-- [Layer 5] 헤어 & 염색 -->
-              ${pHair}
-              <!-- [Layer 6] 소품 & 장식 -->
-              ${pAcc}
-            </g>
-          </svg>
-        `.trim();
-      }
-
-      // [2] 클래식 벡터 베이스(BASE_M, BASE_F) 렌더링
-      const baseFn = this.parts.base[parts.base] || this.parts.base.BASE_M;
-      const bottomFn = this.parts.bottom[parts.bottom] || (() => {
-        if (typeof window !== 'undefined' && window.PixelChibiParts) {
-          return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('bottom', parts.bottom) + `</g>`;
-        }
-        return '';
+      const eq = (agent && agent.mapleEquipped && Object.keys(agent.mapleEquipped).length > 0)
+        ? agent.mapleEquipped
+        : { skin: 2000, hair: 30000, face: 20000, top: 1040036, bottom: 1060026, shoes: 1072001 };
+      const skinId = eq.skin || 2000;
+      const anim = options.stance || (agent && agent.mapleAnim) || 'stand1';
+      const isAnimated = Boolean(options.animated !== undefined ? options.animated : (agent && agent.mapleAnimated));
+      const isFlip = Boolean(options.flipped !== undefined ? options.flipped : (agent && agent.mapleFlipped));
+      const visualSlots = [
+        'hair', 'face', 'overall', 'top', 'bottom', 'shoes',
+        'hat', 'faceAccessory', 'eyeDecoration', 'earrings', 'cape', 'glove',
+        'furniture', 'ring', 'decoration', 'petEquip'
+      ];
+      const itemIds = [];
+      visualSlots.forEach(s => {
+        if (s === 'furniture' && anim !== 'sit') return;
+        if (eq[s]) itemIds.push(eq[s]);
       });
-      const outfitFn = this.parts.outfit[parts.outfit] || (() => {
-        if (typeof window !== 'undefined' && window.PixelChibiParts) {
-          return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('outfit', parts.outfit) + `</g>`;
-        }
-        return '';
-      });
-      const faceFn = this.parts.face[parts.face] || ((eyeColor) => {
-        if (typeof window !== 'undefined' && window.PixelChibiParts) {
-          return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('face', parts.face, eyeColor) + `</g>`;
-        }
-        return '';
-      });
-      const hairFn = this.parts.hair[parts.hair] || ((hairColor) => {
-        if (typeof window !== 'undefined' && window.PixelChibiParts) {
-          return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('hair', parts.hair, hairColor) + `</g>`;
-        }
-        return '';
-      });
-      const accFn = this.parts.acc[parts.acc] || (() => {
-        if (typeof window !== 'undefined' && window.PixelChibiParts) {
-          return `<g transform="translate(10.5, 4.5)">` + window.PixelChibiParts.render('acc', parts.acc) + `</g>`;
-        }
-        return '';
-      });
-
+      const itemsParam = itemIds.join(',');
+      const safeItems = itemIds.length > 0 ? itemIds.join('_') : 'none';
+      const ext = isAnimated ? 'gif' : 'png';
+      const localCharSrc = `character-images/images/characters/${skinId}_${safeItems}_${anim}.${ext}`;
+      const serverSyncSrc = `/ops/maple-avatar?skin=${skinId}&items=${itemsParam}&anim=${anim}&animated=${isAnimated ? 1 : 0}`;
+      const flipStyle = isFlip ? 'transform:scaleX(-1);' : '';
       return `
-        <svg viewBox="0 0 64 78" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <!-- 그림자 레이어 -->
-          <ellipse cx="32" cy="73" rx="16" ry="3" fill="rgba(24,37,54,0.14)"/>
-          
-          <!-- [Layer 1] 기본 베이스 캐릭터 (신체 마네킹) -->
-          ${!hiddenLayers.base ? baseFn(skin) : ''}
-          
-          <!-- [Layer 2] 하의 & 신발 -->
-          ${!hiddenLayers.bottom ? bottomFn() : ''}
-          
-          <!-- [Layer 3] 상의 & 아우터 -->
-          ${!hiddenLayers.outfit ? outfitFn() : ''}
-          
-          <!-- [Layer 4] 표정 & 렌즈 -->
-          ${!hiddenLayers.face ? faceFn(eyeColor) : ''}
-          
-          <!-- [Layer 5] 헤어 & 염색 -->
-          ${!hiddenLayers.hair ? hairFn(hairColor) : ''}
-          
-          <!-- [Layer 6] 액세서리 & 소품 -->
-          ${!hiddenLayers.acc ? accFn() : ''}
-        </svg>
+        <div class="kms389-avatar-wrap" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative">
+          <img src="${localCharSrc}" alt="${(agent && agent.name) || 'Avatar'}" onerror="if(!this.dataset.fb){this.dataset.fb='1';this.src='${serverSyncSrc}';}else if(this.dataset.fb==='1'){this.dataset.fb='2';this.src='character-images/0.png';}" style="max-width:100%;max-height:100%;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 3px 6px rgba(15,23,42,0.18));${flipStyle}" />
+        </div>
       `.trim();
     }
   };
@@ -827,7 +315,7 @@
 
     let selectedId = '01';
     let isFlipped = false;
-    let currentZoom = 1;
+    let currentZoom = 1.8;
     let currentStance = 'stand1';
     let isMotionAnimated = false;
     const backdrops = ['backdrop-checker', 'backdrop-white', 'backdrop-dark', 'backdrop-henesys'];
@@ -850,14 +338,11 @@
       faceAccessory: { label: '얼굴장식', icon: '🎭', order: 11 },
       eyeDecoration: { label: '눈장식', icon: '👓', order: 12 },
       earrings: { label: '귀고리', icon: '💎', order: 13 },
-      effect: { label: '캐시이펙트', icon: '✨', order: 14 },
       ring: { label: '반지/명찰', icon: '💍', order: 15 },
-      title: { label: '칭호', icon: '🏷️', order: 16 },
       decoration: { label: '설치장식', icon: '🎀', order: 17 },
       furniture: { label: '가구/의자', icon: '🪑', order: 18 },
       pet: { label: '동행 펫', icon: '🐾', order: 19 },
-      petEquip: { label: '펫 장비', icon: '🔔', order: 20 },
-      building: { label: '건물 배경', icon: '🏛️', order: 21 }
+      petEquip: { label: '펫 장비', icon: '🔔', order: 20 }
     };
 
     const CATEGORY_NAMES = {
@@ -869,27 +354,30 @@
       shoes: '👟 신발 (Shoes)',
       furniture: '🪑 가구/의자 (Chair)',
       pet: '🐾 펫/반려동물 (Pet)',
-      building: '🏛️ 건물/실내 배경 (Building)',
-      decoration: '✨ 이펙트/장식 (Decoration)',
+      decoration: '💍 장식 (Ring/Decoration)',
       skin: '🎨 피부 (Skin)'
     };
 
     const SKIN_COLORS = {
-      2000: '#fce3cc', 2001: '#b37c4d', 2002: '#e6eaf0', 2003: '#f7d88b',
-      2004: '#8dc891', 2010: '#fff0e1', 2012: '#d8d4dc', 2015: '#ffe4e6',
-      2016: '#ffccd5', 2018: '#f3e8ff', 2019: '#fae8ff', 2024: '#fed7aa', 2025: '#93c5fd'
+      2000: '#fcd7b6', 2001: '#c99765', 2002: '#8d6139', 2003: '#fff2e6',
+      2004: '#d3d6e2', 2009: '#e8eaed', 2010: '#ffd2c4', 2011: '#dcb897',
+      2012: '#fff1e6', 2013: '#dcd8e6', 2015: '#ffebe6', 2016: '#ffd8de',
+      2018: '#f7f0ff', 2019: '#f3e0ff', 2024: '#d9eb52', 2025: '#ffdd47'
     };
 
-    // 사용자 요청에 따라 파츠/서브필터에서 제거할 10개 항목 목록
+    // 사용자 요청에 따라 파츠/서브필터에서 제거할 항목 목록 (지역명 + 건물/공간 + 이펙트/타이틀)
     const EXCLUDED_MAPLE_TERMS = [
       '메이플로드', '헤네시스', '히든스트리트', '유타네 집', '골렘사원',
       '파르템', '엘리니아', '요정의 숲', '루엔의 집', '페리온'
     ];
     const EXCLUDED_MAPLE_SET = new Set(EXCLUDED_MAPLE_TERMS);
+    const EXCLUDED_DECO_SUBS = new Set(['Effect', 'Title']);
 
     function isExcludedMaplePart(p) {
       if (!p) return true;
+      if (p.category === 'building') return true;
       const sub = (p.subCategory || '').trim();
+      if (EXCLUDED_DECO_SUBS.has(sub)) return true;
       const name = (p.name || '').trim();
       if (EXCLUDED_MAPLE_SET.has(sub) || EXCLUDED_MAPLE_SET.has(name)) return true;
       return EXCLUDED_MAPLE_TERMS.some(term => sub.includes(term) || name.includes(term));
@@ -951,8 +439,8 @@
 
     function getMaplePartLocalIcon(part) {
       if (!part) return '';
-      if (part.icon) return `maplestory-characters-scraper/${part.icon}`;
-      return `maplestory-characters-scraper/images/${part.category}/${part.id}.png`;
+      if (part.icon) return `character-images/${part.icon}`;
+      return `character-images/images/${part.category}/${part.id}.png`;
     }
 
     function getMapleItemSlot(part) {
@@ -1094,7 +582,6 @@
         if (bPart) {
           simBgLayer.style.display = 'flex';
           simBgImg.src = getMaplePartLocalIcon(bPart);
-          simBgImg.onerror = () => { if (bPart.bgUrl || bPart.iconUrl) simBgImg.src = bPart.bgUrl || bPart.iconUrl; };
           simBgBadge.textContent = `🏛️ ${bPart.name}`;
         } else {
           simBgLayer.style.display = 'none';
@@ -1108,7 +595,6 @@
         if (pPart) {
           simPetBox.style.display = 'flex';
           simPetImg.src = getMaplePartLocalIcon(pPart);
-          simPetImg.onerror = () => { if (pPart.iconUrl) simPetImg.src = pPart.iconUrl; };
           simPetName.textContent = `🐾 ${pPart.name}`;
         } else {
           simPetBox.style.display = 'none';
@@ -1380,10 +866,11 @@
 
         let thumbHtml = `<span>${slotDef.icon}</span>`;
         if (slotKey === 'skin') {
-          const bg = SKIN_COLORS[itemId] || '#fce3cc';
-          thumbHtml = `<span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:${bg};border:1px solid #cbd5e1"></span>`;
+          const bg = SKIN_COLORS[itemId] || (part && part.color) || '#fcd7b6';
+          const skinImg = localIcon || `character-images/images/skin/${itemId}.png`;
+          thumbHtml = `<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px"><img src="${skinImg}" alt="${nameText}" style="width:22px;height:22px;object-fit:contain;image-rendering:pixelated" onerror="this.style.display='none'" /><span style="position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;border-radius:50%;background:${bg};border:1px solid #334155"></span></span>`;
         } else if (part) {
-          thumbHtml = `<img src="${localIcon}" alt="${nameText}" style="width:22px;height:22px;object-fit:contain;image-rendering:pixelated" onerror="if(this.src!=='${part.iconUrl || ''}') this.src='${part.iconUrl || ''}'" />`;
+          thumbHtml = `<img src="${localIcon}" alt="${nameText}" style="width:22px;height:22px;object-fit:contain;image-rendering:pixelated" onerror="this.src='character-images/0.png'" />`;
         }
 
         const row = document.createElement('div');
@@ -1527,11 +1014,12 @@
 
         let iconHtml = '';
         if (part.category === 'skin') {
-          const bg = SKIN_COLORS[part.id] || '#fce3cc';
-          iconHtml = `<span style="display:block;width:28px;height:28px;border-radius:6px;background:${bg};border:1px solid #cbd5e1"></span>`;
+          const bg = SKIN_COLORS[part.id] || part.color || '#fcd7b6';
+          const localSrc = getMaplePartLocalIcon(part);
+          iconHtml = `<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px"><img src="${localSrc}" alt="${part.name}" loading="lazy" style="width:30px;height:30px;object-fit:contain;image-rendering:pixelated" onerror="this.style.display='none'" /><span style="position:absolute;right:-2px;bottom:-2px;width:11px;height:11px;border-radius:50%;background:${bg};border:1.5px solid #334155;box-shadow:0 1px 2px rgba(0,0,0,0.2)"></span></span>`;
         } else {
           const localSrc = getMaplePartLocalIcon(part);
-          iconHtml = `<img src="${localSrc}" alt="${part.name}" loading="lazy" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated" onerror="if(this.src!=='${part.iconUrl || ''}') this.src='${part.iconUrl || ''}'" />`;
+          iconHtml = `<img src="${localSrc}" alt="${part.name}" loading="lazy" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated" onerror="this.src='character-images/0.png'" />`;
         }
 
         btn.innerHTML = `
@@ -1690,12 +1178,12 @@
       updateCustomizer();
     });
 
-    // [이벤트] 줌 배율
+    // [이벤트] 줌 배율 (기본 1x 크기를 기존 2배율 크기인 1.8로 상향)
     document.querySelectorAll('.zoom-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.zoom-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        currentZoom = parseFloat(btn.dataset.zoom || '1');
+        currentZoom = parseFloat(btn.dataset.zoom || '1.8');
         updateCustomizer();
       });
     });
@@ -1727,10 +1215,8 @@
         hat: pickRandom('accessories', 'Hat'),
         cape: pickRandom('accessories', 'Cape'),
         faceAccessory: pickRandom('accessories', 'Face Accessory'),
-        effect: pickRandom('decoration', 'Effect'),
         furniture: shouldChair ? pickRandom('furniture') : null,
-        pet: pickRandom('pet', 'Pet'),
-        building: pickRandom('building')
+        pet: pickRandom('pet', 'Pet')
       };
       Object.keys(nextEq).forEach(k => { if (!nextEq[k]) delete nextEq[k]; });
       agent.mapleEquipped = nextEq;
@@ -1881,7 +1367,7 @@
 
     // 만약 window.__MAPLE_DATA__가 아직 로드되지 않았을 경우 fetch 폴백
     if (!allMapleParts.length) {
-      fetch('maplestory-characters-scraper/data/parts.json')
+      fetch('character-images/data/parts.json')
         .then(r => r.json())
         .then(data => {
           if (Array.isArray(data)) {
@@ -3295,12 +2781,32 @@
           if (replyMeta) replyMeta.textContent = `${data.phase || 'RUNNING'} · ${latestMission.mission_id}`;
         } else if (latestMission.status === 'DONE' && latestMission.deliverable_file && lastRenderedMissionId !== latestMission.mission_id) {
           lastRenderedMissionId = latestMission.mission_id;
-          if (replyRole) replyRole.textContent = `[✅ 1-Cycle 미션 완료 · ${latestMission.mission_id}]`;
+          const genFiles = Array.isArray(latestMission.generated_files) ? latestMission.generated_files : [];
+          const repCnt = Number(latestMission.repair_count || 0);
+          const profTag = (latestMission.profile || 'standard').toUpperCase();
+          if (replyRole) replyRole.textContent = `[✅ ${profTag} 미션 완료 · ${latestMission.mission_id}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''}]`;
           if (replyText) {
-            const preview = (latestMission.deliverable_preview || '').slice(0, 360);
-            replyText.innerHTML = `<div style="white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;font-family:monospace;font-size:11px">${preview.replace(/</g, '&lt;')}</div><div style="margin-top:6px"><a href="${latestMission.deliverable_file}" target="_blank" style="color:#0f6848;font-weight:800;text-decoration:underline">📄 전체 5단계 산출물 리포트 열기 (${latestMission.deliverable_file}) ↗</a></div>`;
+            const preview = (latestMission.deliverable_preview || '').slice(0, 380);
+            const filesLinksHtml = genFiles.length
+              ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${genFiles.map(f => `<a href="${f}" target="_blank" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:700">📁 ${f} ↗</a>`).join('')}</div>`
+              : '';
+            replyText.innerHTML = `<div style="white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;font-family:var(--font-mono,monospace);font-size:11px">${preview.replace(/</g, '&lt;')}</div>${filesLinksHtml}<div style="margin-top:6px"><a href="${latestMission.deliverable_file}" target="_blank" style="color:#0f6848;font-weight:800;text-decoration:underline">📄 전체 산출물 리포트 열기 (${latestMission.deliverable_file}) ↗</a></div>`;
           }
-          if (replyMeta) replyMeta.textContent = `5/5 PASS 완료`;
+          if (replyMeta) replyMeta.textContent = `${profTag} PASS (${genFiles.length}파일)`;
+
+          const delivBox = document.getElementById('deliverablesListBox');
+          if (delivBox) {
+            const cardEl = document.createElement('div');
+            cardEl.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px';
+            cardEl.innerHTML = `
+              <a href="${latestMission.deliverable_file}" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800">
+                <span>📄 ${latestMission.deliverable_file} — ${latestMission.goal} (${profTag}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''})</span>
+                <span style="white-space:nowrap">리포트 열기 ↗</span>
+              </a>
+              ${genFiles.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${genFiles.map(f => `<a href="${f}" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 ${f}</a>`).join('')}</div>` : ''}
+            `;
+            delivBox.prepend(cardEl);
+          }
         }
       }
     } catch (_) {}

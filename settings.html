@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NEXUS · AI 설정 & 직원 질문 / 미션 컨트롤</title>
-<link rel="stylesheet" href="styles.css?v=triad26">
+<link rel="stylesheet" href="styles.css?v=triad37">
 </head>
 <body data-page="settings">
 <div class="app">
@@ -201,12 +201,12 @@
             </select>
           </label>
           <label class="settings-select-field">
-            <span>⚙️ 실행 모드 (즉답 질문 / 미션 단계)</span>
+            <span>⚙️ 실행 모드 (1:1 즉답 / Quick 2단계 / Standard 5단계 / Deep 다중 모듈 빌더)</span>
             <select class="triad-cli-select" id="triadProfileSelect" aria-label="실행 모드 선택">
-              <option value="ask" selected>💬 간단 질문 (선택 직원 즉답)</option>
-              <option value="quick">⚡ 개발 미션 Quick (2단계)</option>
-              <option value="standard">🔄 1사이클 미션 Standard (5단계 산출물)</option>
-              <option value="deep">🔬 개발 미션 Deep (심층)</option>
+              <option value="ask" selected>💬 간단 질문 (선택 직원 1:1 즉답)</option>
+              <option value="quick">⚡ Quick 미션 (2단계 고속 · 파일 생성 · 자동수정 1회)</option>
+              <option value="standard">🔄 Standard 미션 (5단계 표준 · 프로젝트 파일 생성 · 자동수정 2회)</option>
+              <option value="deep">🔬 Deep 대규모 프로젝트 빌더 (모듈 분할 · BUILDER 1·2 분담 · 자동수정 3회)</option>
             </select>
           </label>
         </div>
@@ -253,19 +253,29 @@
     <div class="panel">
       <div class="panel-head settings-panel-head">
         <div>
-          <div class="panel-title">생성된 1사이클 미션 산출물 (.md 리포트)</div>
-          <div class="panel-sub">5단계 파이프라인을 통과해 생성된 결과물입니다.</div>
+          <div class="panel-title">생성된 프로젝트 폴더 &amp; 미션 산출물 리포트</div>
+          <div class="panel-sub">실제 생성된 소스 파일(`deliverables/*_project/`) 및 5단계 검증 `.md` 리포트입니다.</div>
         </div>
         <a href="logs.html" class="text-link">실행 기록 ↗</a>
       </div>
-      <div class="settings-panel-body" style="display:flex;flex-direction:column;gap:12px">
+      <div class="settings-panel-body" id="deliverablesListBox" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px">
+          <a href="deliverables/mission-90909.md" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800">
+            <span>📄 deliverables/mission-90909.md — 파이썬 미니 가계부 프로젝트 (DEEP · 모듈 분할 PASS)</span>
+            <span style="white-space:nowrap">리포트 열기 ↗</span>
+          </a>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">
+            <a href="deliverables/mission-90909_project/core_module.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/core_module.py ↗</a>
+            <a href="deliverables/mission-90909_project/app_runner.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/app_runner.py ↗</a>
+          </div>
+        </div>
         <a href="deliverables/mission-20558.md" target="_blank" class="settings-deliverable-card">
           <span>📄 deliverables/mission-20558.md — 파이썬 로또 번호 5세트 자동 추천기 함수 (5/5 PASS)</span>
           <span style="white-space:nowrap;flex-shrink:0">리포트 열기 ↗</span>
         </a>
         <div class="right-note" style="margin:0">
-          <strong>💡 AI 설정 &amp; 질문 페이지 안내</strong>
-          <p>대시보드(Overview)와 AI 직원 관리 화면을 깔끔하게 유지하기 위해, 4대 AI 카드·직원 선택 질문/미션 실행 섹션·CLI 로그인 및 경로 설정을 모두 이 전용 설정 페이지에 통합했습니다.</p>
+          <strong>💡 프로젝트 빌더 &amp; 자동 수정 루프(Auto-Repair) 안내</strong>
+          <p><b>Standard</b> 모드는 실제 소스 파일 생성과 검증 실패 시 최대 2회 자동 재수정을 수행하며, <b>Deep</b> 모드는 큰 목표를 2개 모듈로 분할해 <b>BUILDER(계정 1)</b>와 <b>SUB-BUILDER(계정 2)</b>가 분담 구현하고 최대 3회 자동 수정 루프를 실행합니다.</p>
         </div>
       </div>
     </div>
@@ -335,7 +345,7 @@
 </div>
 </main>
 </div>
-<script src="app.js?v=triad35"></script>
+<script src="app.js?v=triad39"></script>
 </body>
 </html>
 

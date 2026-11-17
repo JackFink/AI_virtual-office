@@ -1,0 +1,57 @@
+[
+  {
+    "key": "claude",
+    "base_type": "claude",
+    "domain": "ANTHROPIC",
+    "cli": "claude",
+    "label": "Claude Code",
+    "model": "claude-code-cli",
+    "login_cmd": "claude login",
+    "install_cmd": "npm install -g @anthropic-ai/claude-code",
+    "profile_dir": null
+  },
+  {
+    "key": "antigravity",
+    "base_type": "antigravity",
+    "domain": "GOOGLE",
+    "cli": "agy",
+    "label": "Google Antigravity (계정 1)",
+    "model": "antigravity-cli",
+    "login_cmd": "agy login",
+    "install_cmd": "Antigravity IDE / CLI (%LOCALAPPDATA%\\agy\\bin\\agy.exe)",
+    "profile_dir": null
+  },
+  {
+    "key": "gemini",
+    "base_type": "antigravity",
+    "domain": "GEMINI2",
+    "cli": "gemini",
+    "label": "Google Antigravity (계정 2)",
+    "model": "gemini-cli-sub",
+    "login_cmd": "gemini (자동 격리: ~/.gemini-acc2)",
+    "install_cmd": "npm install -g @google/gemini-cli",
+    "profile_dir": "~/.gemini-acc2"
+  },
+  {
+    "key": "openai",
+    "base_type": "openai",
+    "domain": "OPENAI",
+    "cli": "codex",
+    "label": "OpenAI Codex",
+    "model": "codex-cli",
+    "login_cmd": "codex login",
+    "install_cmd": "npm install -g @openai/codex",
+    "profile_dir": null
+  },
+  {
+    "key": "grok",
+    "base_type": "grok",
+    "domain": "XAI",
+    "cli": "grok",
+    "label": "xAI Grok",
+    "model": "grok-cli",
+    "login_cmd": "grok (XAI_API_KEY / ~/.grok/user-settings.json)",
+    "install_cmd": "npm install -g @vibe-kit/grok-cli",
+    "profile_dir": null
+  }
+]
