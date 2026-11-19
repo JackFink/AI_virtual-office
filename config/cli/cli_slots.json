@@ -8,7 +8,9 @@
     "model": "antigravity-cli",
     "login_cmd": "agy login",
     "install_cmd": "Antigravity IDE / CLI (%LOCALAPPDATA%\\agy\\bin\\agy.exe)",
-    "profile_dir": null
+    "profile_dir": null,
+    "plan_override": "pro",
+    "selected_model": "gemini-pro-orchestrator-argon"
   },
   {
     "key": "gemini",
@@ -19,7 +21,9 @@
     "model": "gemini-cli-sub",
     "login_cmd": "gemini (자동 격리: ~/.gemini-acc2)",
     "install_cmd": "npm install -g @google/gemini-cli",
-    "profile_dir": "C:\\Users\\blust\\.gemini-acc2"
+    "profile_dir": "C:\\Users\\blust\\.gemini-acc2",
+    "plan_override": "free",
+    "custom_label": true
   },
   {
     "key": "openai",
@@ -30,6 +34,7 @@
     "model": "codex-cli",
     "login_cmd": "codex login",
     "install_cmd": "npm install -g @openai/codex",
-    "profile_dir": null
+    "profile_dir": null,
+    "plan_override": "free"
   }
 ]

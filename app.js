@@ -89,6 +89,10 @@
     openai: 'OpenAI Codex',
     grok: 'xAI Grok'
   };
+  let backendAvailable = true;
+  let lastDiagnostics = null;
+  let latestTeamsSummary = null;
+  let initialQueryTeamApplied = false;
   let savedCharAiConfigs = {};
   try {
     savedCharAiConfigs = JSON.parse(localStorage.getItem(CHAR_AI_STORAGE_KEY) || '{}') || {};
@@ -133,6 +137,7 @@
     a.floor = saved.floor || a.floor;
     a.triadRole = saved.triadRole || a.triadRole || 'HEAD';
     a.cliProvider = saved.cliProvider || defCli;
+    a.cliModel = saved.cliModel || '';
     a.sandboxMode = saved.sandboxMode || defSandbox;
     a.timeoutSec = String(saved.timeoutSec || defTimeout);
     a.mapleEquipped = (saved.mapleEquipped && typeof saved.mapleEquipped === 'object' && Object.keys(saved.mapleEquipped).length > 0)
@@ -158,6 +163,7 @@
       dept: agent.dept,
       triadRole: agent.triadRole,
       cliProvider: agent.cliProvider,
+      cliModel: agent.cliModel || '',
       sandboxMode: agent.sandboxMode,
       timeoutSec: agent.timeoutSec,
       mapleEquipped: agent.mapleEquipped ? { ...agent.mapleEquipped } : {},
@@ -252,6 +258,151 @@
   }
 
   // ==========================================================================
+  // [2-B] 3D 가상 오피스(office.js) 층(Floor) & 좌석(Seat #1~#10) 실시간 배치 동기화 헬퍼
+  // ==========================================================================
+  const OFFICE_FLOORS_KEY = 'nexus-office-floors-v6';
+  const OFFICE_PLACEMENTS_KEY = 'nexus-gm-office-svg-placements-v6';
+  const OFFICE_SEAT_LABELS = [
+    '#1번석 · 좌측 뒷줄 (앞면)',
+    '#2번석 · 좌측 앞줄 (마주보기)',
+    '#3번석 · 중앙 뒷줄 (앞면)',
+    '#4번석 · 중앙 앞줄 (마주보기)',
+    '#5번석 · 우측 뒷줄 (앞면)',
+    '#6번석 · 우측 앞줄 (마주보기)',
+    '#7번석 · 서브A 뒷줄 (확장석)',
+    '#8번석 · 서브A 앞줄 (확장석)',
+    '#9번석 · 서브B 뒷줄 (확장석)',
+    '#10번석 · 서브B 앞줄 (확장석)'
+  ];
+
+  let studioSelectAgentFn = null;
+  let studioRefreshDirectoryFn = null;
+
+  function loadOfficeFloorsMap() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(OFFICE_FLOORS_KEY) || 'null');
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch (_) {}
+    return [
+      { id: 1, name: '1층', description: 'GM 본관 · 마주보는 6석', seatCount: 6 },
+      { id: 2, name: '2층', description: '개발 스튜디오 · 마주보는 6석', seatCount: 6 }
+    ];
+  }
+
+  function loadOfficePlacementsMap() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(OFFICE_PLACEMENTS_KEY) || 'null');
+      if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 1) return parsed;
+    } catch (_) {}
+    const def = {};
+    modularAgents.forEach((ag, idx) => {
+      const fNum = parseInt(String(ag.floor || '1F'), 10) || (Math.floor(idx / 6) + 1);
+      def[ag.id] = { floorId: fNum, seatIndex: idx % 6 };
+    });
+    return def;
+  }
+
+  function getAgentOfficePlacement(agentId, fallbackFloorStr = '1F') {
+    const map = loadOfficePlacementsMap();
+    const p = map[agentId];
+    if (p && Number.isInteger(p.floorId) && typeof p.seatIndex === 'number') {
+      return { floorId: p.floorId, floorStr: `${p.floorId}F`, seatIndex: Math.max(0, Math.min(9, p.seatIndex)) };
+    }
+    const fNum = Math.max(1, Math.min(10, parseInt(String(fallbackFloorStr || '1F'), 10) || 1));
+    return { floorId: fNum, floorStr: `${fNum}F`, seatIndex: 0 };
+  }
+
+  function syncAgentOfficePlacement(agentId, floorStr, preferredSeatIdx = null, persistServer = true) {
+    const fNum = Math.max(1, Math.min(10, parseInt(String(floorStr || '1F'), 10) || 1));
+    const normFloorStr = `${fNum}F`;
+
+    // 1. Ensure target floor exists in nexus-office-floors-v6 (and expand seatCount if seat >= 6)
+    const floors = loadOfficeFloorsMap();
+    for (let i = 1; i <= fNum; i++) {
+      if (!floors.some(f => f.id === i)) {
+        floors.push({ id: i, name: `${i}층`, description: `${i}F 팀 오피스 · 마주보는 6석`, seatCount: 6 });
+      }
+    }
+    floors.sort((a, b) => a.id - b.id);
+    const targetFl = floors.find(f => f.id === fNum);
+
+    // 2. Assign or swap seat cleanly without overlapping two agents
+    const placements = loadOfficePlacementsMap();
+    const prev = placements[agentId] || null;
+    let finalSeat = 0;
+
+    if (preferredSeatIdx !== null && preferredSeatIdx !== undefined && !isNaN(Number(preferredSeatIdx))) {
+      finalSeat = Math.max(0, Math.min(9, Number(preferredSeatIdx)));
+      if (targetFl && finalSeat >= (targetFl.seatCount || 6)) {
+        targetFl.seatCount = Math.min(10, finalSeat + 1);
+      }
+      // If another agent was sitting at (fNum, finalSeat), swap or move them to an open seat
+      const occupantId = Object.keys(placements).find(
+        cid => cid !== agentId && placements[cid]?.floorId === fNum && placements[cid]?.seatIndex === finalSeat
+      );
+      if (occupantId) {
+        if (prev && prev.floorId === fNum && typeof prev.seatIndex === 'number') {
+          placements[occupantId] = { floorId: fNum, seatIndex: prev.seatIndex };
+        } else {
+          const used = new Set(
+            Object.entries(placements)
+              .filter(([cid, pl]) => cid !== agentId && cid !== occupantId && pl?.floorId === fNum)
+              .map(([, pl]) => pl.seatIndex)
+          );
+          used.add(finalSeat);
+          let openS = 0;
+          while (used.has(openS) && openS < 9) openS++;
+          if (targetFl && openS >= (targetFl.seatCount || 6)) targetFl.seatCount = Math.min(10, openS + 1);
+          placements[occupantId] = { floorId: fNum, seatIndex: openS };
+        }
+      }
+    } else {
+      if (prev && prev.floorId === fNum && typeof prev.seatIndex === 'number') {
+        finalSeat = prev.seatIndex;
+      } else {
+        const used = new Set(
+          Object.entries(placements)
+            .filter(([cid, pl]) => cid !== agentId && pl?.floorId === fNum)
+            .map(([, pl]) => pl.seatIndex)
+        );
+        let openS = 0;
+        while (used.has(openS) && openS < 9) openS++;
+        finalSeat = openS;
+        if (targetFl && finalSeat >= (targetFl.seatCount || 6)) {
+          targetFl.seatCount = Math.min(10, finalSeat + 1);
+        }
+      }
+    }
+
+    placements[agentId] = { floorId: fNum, seatIndex: finalSeat };
+    try {
+      localStorage.setItem(OFFICE_FLOORS_KEY, JSON.stringify(floors));
+      localStorage.setItem(OFFICE_PLACEMENTS_KEY, JSON.stringify(placements));
+    } catch (_) {}
+
+    // 3. Sync in-memory agent preset + savedCharAiConfigs
+    const agPreset = ALL_AGENT_PRESETS.find(a => a.id === agentId);
+    if (agPreset) agPreset.floor = normFloorStr;
+    const modAg = modularAgents.find(a => a.id === agentId);
+    if (modAg) modAg.floor = normFloorStr;
+    if (!savedCharAiConfigs[agentId]) savedCharAiConfigs[agentId] = { id: agentId };
+    savedCharAiConfigs[agentId].floor = normFloorStr;
+    savedCharAiConfigs[agentId].seatIndex = finalSeat;
+    try {
+      localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
+    } catch (_) {}
+
+    if (persistServer) {
+      fetch('/ops/character-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ configs: savedCharAiConfigs })
+      }).catch(() => {});
+    }
+    return { floorId: fNum, floorStr: normFloorStr, seatIndex: finalSeat };
+  }
+
+  // ==========================================================================
   // [3] KMS v389 (maplestory-characters-scraper · 29,491 Parts) 시뮬레이터 컨트롤러
   // ==========================================================================
   if (page === 'dashboard' || page === 'agents') {
@@ -301,8 +452,13 @@
     // AI CLI Studio Controls
     const studioQuickRole = document.getElementById('studioQuickRole');
     const studioQuickCli = document.getElementById('studioQuickCli');
+    const studioAiModelSelect = document.getElementById('studioAiModelSelect');
+    const studioAiModelSourceHint = document.getElementById('studioAiModelSourceHint');
     const studioAiNameInput = document.getElementById('studioAiNameInput');
+    const studioAiTeamSelect = document.getElementById('studioAiTeamSelect');
+    const btnStudioEditTeam = document.getElementById('btnStudioEditTeam');
     const studioAiFloorSelect = document.getElementById('studioAiFloorSelect');
+    const studioAiSeatSelect = document.getElementById('studioAiSeatSelect');
     const studioAiSandboxSelect = document.getElementById('studioAiSandboxSelect');
     const studioAiTimeoutSelect = document.getElementById('studioAiTimeoutSelect');
     const studioAiPromptInput = document.getElementById('studioAiPromptInput');
@@ -493,8 +649,35 @@
       const statReg = document.getElementById('statRegisteredAgents');
       if (statReg) statReg.textContent = String(modularAgents.length).padStart(2, '0');
 
+      const teamsArr = (window.NEXUS_TEAMS_SUMMARY && Array.isArray(window.NEXUS_TEAMS_SUMMARY.teams))
+        ? window.NEXUS_TEAMS_SUMMARY.teams
+        : [];
+      if (floorFilter && teamsArr.length > 0) {
+        const prevFilter = floorFilter.value || 'all';
+        floorFilter.querySelectorAll('option[data-team-opt="1"]').forEach(o => o.remove());
+        teamsArr.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = `team:${t.id}`;
+          opt.dataset.teamOpt = '1';
+          opt.textContent = `🏢 팀: ${t.name} (${t.floor})`;
+          floorFilter.insertBefore(opt, floorFilter.children[1] || null);
+        });
+        if (Array.from(floorFilter.options).some(o => o.value === prevFilter)) {
+          floorFilter.value = prevFilter;
+        }
+      }
+      const effFilterVal = floorFilter?.value || 'all';
+
       modularAgents
-        .filter(a => filterVal === 'all' || a.floor === filterVal || a.triadRole === filterVal)
+        .filter(a => {
+          if (effFilterVal === 'all') return true;
+          if (effFilterVal.startsWith('team:')) {
+            const tid = effFilterVal.slice(5);
+            const tObj = teamsArr.find(x => x.id === tid);
+            return Boolean(tObj && Array.isArray(tObj.member_ids) && tObj.member_ids.includes(a.id));
+          }
+          return a.floor === effFilterVal || a.triadRole === effFilterVal;
+        })
         .forEach(agent => {
           const card = document.createElement('div');
           card.className = `char-card${agent.id === selectedId ? ' active' : ''}`;
@@ -502,14 +685,21 @@
           const cliKey = agent.cliProvider || 'claude';
           const cliLabel = CLI_BADGE_LABELS[cliKey] || cliKey;
           const skillCount = Array.isArray(agent.skills) ? agent.skills.length : 0;
+          const plc = getAgentOfficePlacement(agent.id, agent.floor || '1F');
+          const agentTeams = teamsArr.filter(t => Array.isArray(t.member_ids) && t.member_ids.includes(agent.id));
+          const teamTagHtml = agentTeams.length > 0
+            ? `<div style="font-size:8px;font-weight:800;color:${agentTeams[0].color || '#0f6848'};background:${(agentTeams[0].color || '#0f6848')}14;border:1px solid ${(agentTeams[0].color || '#0f6848')}36;padding:1.5px 5px;border-radius:4px;margin-bottom:3px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏢 ${agentTeams[0].name}${agentTeams.length > 1 ? ` +${agentTeams.length - 1}` : ''}</div>`
+            : `<div style="font-size:8px;color:#94a3b8;margin-bottom:3px">미배정 팀</div>`;
           card.innerHTML = `
             <div class="char-card-top">
               <span>#${agent.id} · ${agent.triadRole || 'AGENT'}</span>
-              <span class="char-floor-tag">${agent.floor}</span>
+              <span class="char-floor-tag">${plc.floorStr} · #${plc.seatIndex + 1}석</span>
             </div>
             <div class="char-svg-wrap">${CharacterEngine.render(agent, { stance: agent.mapleAnim || 'stand1', animated: false })}</div>
             <div class="char-card-name">${agent.name}</div>
+            ${teamTagHtml}
             <span class="char-cli-badge ${cliKey}">${cliLabel} · ⚡${skillCount}</span>
+            ${agent.cliModel ? `<div style="font-size:7.5px;font-weight:800;color:#0f6848;margin-bottom:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="실제 실행 모델: ${escHtml(agent.cliModel)}">✨ ${escHtml(agent.cliModel)}</div>` : ''}
             <div class="char-card-code">${formatPartCode(agent.parts, agent)}</div>
           `;
           card.addEventListener('click', () => {
@@ -527,6 +717,26 @@
       renderTopRosterAvatars();
     }
 
+    studioRefreshDirectoryFn = () => {
+      renderDirectory();
+      updateCustomizer();
+    };
+    studioSelectAgentFn = (aid, scrollIntoStudio = false) => {
+      const found = modularAgents.find(a => a.id === aid);
+      if (!found) return;
+      selectedId = found.id;
+      currentStance = found.mapleAnim || 'stand1';
+      isMotionAnimated = Boolean(found.mapleAnimated);
+      isFlipped = Boolean(found.mapleFlipped);
+      if (selStance) selStance.value = currentStance;
+      renderDirectory();
+      updateCustomizer();
+      updateMapleCardEquippedHighlight();
+      if (scrollIntoStudio) {
+        document.getElementById('characters')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
     document.getElementById('btnAddStudioCharacter')?.addEventListener('click', () => {
       if (modularAgents.length >= ALL_AGENT_PRESETS.length) {
         alert(`최대 ${ALL_AGENT_PRESETS.length}명까지 직원을 추가할 수 있습니다.`);
@@ -535,11 +745,13 @@
       const nextAgent = ALL_AGENT_PRESETS[modularAgents.length];
       modularAgents.push(nextAgent);
       selectedId = nextAgent.id;
+      syncAgentOfficePlacement(nextAgent.id, nextAgent.floor || '2F', null, true);
       try {
         localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length));
       } catch (_) {}
       renderDirectory();
       updateCustomizer();
+      if (window.NEXUS_TEAMS_SUMMARY) renderTeamsAndWorkspacesDashboard(window.NEXUS_TEAMS_SUMMARY);
     });
 
     function updateMotionButtonUI() {
@@ -607,11 +819,67 @@
       if (pillEl) pillEl.textContent = `${agent.triadRole}/${cliLabel} · ${formatPartCode(agent.parts, agent)}`;
       if (badgeEl) badgeEl.textContent = `#${agent.id}`;
 
-      // 1-2. AI CLI & 설정 탭 동기화
+      // 1-2. AI CLI & 팀 · 층 · 좌석 설정 탭 동기화
+      const curPlc = getAgentOfficePlacement(agent.id, agent.floor || '1F');
+      agent.floor = curPlc.floorStr;
+      if (deptEl) deptEl.textContent = `${curPlc.floorStr} · #${curPlc.seatIndex + 1}석 · ${agent.triadRole} (${cliLabel})`;
+
       if (studioQuickRole) studioQuickRole.value = agent.triadRole || 'HEAD';
-      if (studioQuickCli) studioQuickCli.value = agent.cliProvider || 'claude';
+      const provMapNow = (typeof lastDiagnostics !== 'undefined' && lastDiagnostics?.providers) ? lastDiagnostics.providers : null;
+      if (provMapNow && Object.keys(provMapNow).length > 0 && !provMapNow[agent.cliProvider]) {
+        agent.cliProvider = provMapNow.antigravity ? 'antigravity' : Object.keys(provMapNow)[0];
+      }
+      if (studioQuickCli) studioQuickCli.value = agent.cliProvider || 'antigravity';
+      if (studioAiModelSelect && document.activeElement !== studioAiModelSelect) {
+        const provDiag = provMapNow ? (provMapNow[agent.cliProvider] || null) : null;
+        const avail = Array.isArray(provDiag?.available_models) ? provDiag.available_models : [];
+        const slotDefDisp = provDiag?.selected_model_display || 'CLI 기본값';
+        const curAgModel = (agent.cliModel || '').trim();
+        const defOpt = `<option value="" ${!curAgModel ? 'selected' : ''}>🔄 계정 기본 실행 모델 따름 (${escHtml(slotDefDisp)})</option>`;
+        if (avail.length > 0) {
+          const grpMap = new Map();
+          avail.forEach(m => {
+            const g = m.group || '실제 실행 가능 모델';
+            if (!grpMap.has(g)) grpMap.set(g, []);
+            grpMap.get(g).push(m);
+          });
+          const grpHtml = Array.from(grpMap.entries()).map(([gName, items]) => {
+            const opts = items.map(m => {
+              const isSel = m.id === curAgModel && !m.locked;
+              const lk = m.locked ? '🔒 ' : '';
+              const lkNote = m.locked && m.lock_reason ? ` — [${m.lock_reason}]` : '';
+              return `<option value="${escHtml(m.id)}" ${isSel ? 'selected' : ''} ${m.locked ? 'disabled' : ''}>${lk}${escHtml(m.name)} (${escHtml(m.id)})${escHtml(lkNote)}</option>`;
+            }).join('');
+            return `<optgroup label="${escHtml(gName)}">${opts}</optgroup>`;
+          }).join('');
+          studioAiModelSelect.innerHTML = defOpt + grpHtml;
+        } else {
+          studioAiModelSelect.innerHTML = defOpt + (curAgModel ? `<option value="${escHtml(curAgModel)}" selected>${escHtml(curAgModel)}</option>` : '');
+        }
+        if (studioAiModelSourceHint) {
+          if (provDiag?.models_source === 'agy_live_cli') {
+            studioAiModelSourceHint.textContent = `✓ agy.exe 실시간 ${avail.length}종 연동`;
+          } else if (avail.length > 0) {
+            studioAiModelSourceHint.textContent = `✓ 실행 가능 모델 ${avail.length}종`;
+          } else {
+            studioAiModelSourceHint.textContent = provDiag?.auth_state === 'LOGGED_IN' ? '기본 모델 사용' : '미로그인 계정';
+          }
+        }
+      }
       if (studioAiNameInput && document.activeElement !== studioAiNameInput) studioAiNameInput.value = agent.name || '';
-      if (studioAiFloorSelect) studioAiFloorSelect.value = agent.floor || '1F';
+      if (studioAiFloorSelect) studioAiFloorSelect.value = curPlc.floorStr;
+      if (studioAiSeatSelect) studioAiSeatSelect.value = String(curPlc.seatIndex);
+      if (studioAiTeamSelect) {
+        const tsTeams = (window.NEXUS_TEAMS_SUMMARY && Array.isArray(window.NEXUS_TEAMS_SUMMARY.teams))
+          ? window.NEXUS_TEAMS_SUMMARY.teams
+          : [];
+        const belongTeam = tsTeams.find(t => Array.isArray(t.member_ids) && t.member_ids.includes(agent.id));
+        studioAiTeamSelect.innerHTML = [
+          `<option value="" ${!belongTeam ? 'selected' : ''}>— 미배정 (독립 직원) —</option>`,
+          ...tsTeams.map(t => `<option value="${t.id}" ${belongTeam && belongTeam.id === t.id ? 'selected' : ''}>🏢 [${t.floor}] ${t.name}</option>`),
+          `<option value="__create_new_team__">➕ 새 팀 추가 후 배정...</option>`
+        ].join('');
+      }
       if (studioAiSandboxSelect) studioAiSandboxSelect.value = agent.sandboxMode || 'read-only';
       if (studioAiTimeoutSelect) studioAiTimeoutSelect.value = String(agent.timeoutSec || '300');
       if (studioAiPromptInput && document.activeElement !== studioAiPromptInput) studioAiPromptInput.value = agent.systemPrompt || '';
@@ -664,6 +932,7 @@
             aiConfig: {
               triadRole: agent.triadRole,
               cliProvider: agent.cliProvider,
+              cliModel: agent.cliModel || '',
               cliLabel: cliLabel,
               sandboxMode: agent.sandboxMode,
               timeoutSec: Number(agent.timeoutSec || 300),
@@ -703,18 +972,65 @@
         });
         return;
       }
-      updateSelectedAgentAiField(a => { a.cliProvider = e.target.value; });
+      updateSelectedAgentAiField(a => {
+        a.cliProvider = e.target.value;
+        a.cliModel = '';
+      });
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => {});
+    });
+    studioAiModelSelect?.addEventListener('change', (e) => {
+      const chosenModel = (e.target.value || '').trim();
+      updateSelectedAgentAiField(a => { a.cliModel = chosenModel; });
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => {});
+    });
+    document.getElementById('btnStudioRefreshModels')?.addEventListener('click', (e) => {
+      if (typeof handleRefreshRealModels === 'function') {
+        handleRefreshRealModels(e.currentTarget);
+      }
     });
     document.querySelectorAll('#studioCliCardGroup .studio-cli-card').forEach(btn => {
       btn.addEventListener('click', () => {
-        updateSelectedAgentAiField(a => { a.cliProvider = btn.dataset.cliVal; });
+        updateSelectedAgentAiField(a => {
+          a.cliProvider = btn.dataset.cliVal;
+          a.cliModel = '';
+        });
+        saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => {});
       });
     });
     studioAiNameInput?.addEventListener('input', (e) => {
       updateSelectedAgentAiField(a => { a.name = e.target.value.trim() || a.name; });
     });
+    studioAiTeamSelect?.addEventListener('change', async (e) => {
+      const chosenTid = e.target.value;
+      if (chosenTid === '__create_new_team__') {
+        updateCustomizer();
+        if (window.openTeamBuilderModal) window.openTeamBuilderModal(null);
+        return;
+      }
+      if (typeof assignAgentToTeamAndPlace === 'function') {
+        await assignAgentToTeamAndPlace(selectedId, chosenTid, 'move');
+      }
+    });
+    btnStudioEditTeam?.addEventListener('click', () => {
+      const tid = studioAiTeamSelect?.value && studioAiTeamSelect.value !== '__create_new_team__'
+        ? studioAiTeamSelect.value
+        : null;
+      if (window.openTeamBuilderModal) window.openTeamBuilderModal(tid || null);
+    });
     studioAiFloorSelect?.addEventListener('change', (e) => {
-      updateSelectedAgentAiField(a => { a.floor = e.target.value; });
+      const placed = syncAgentOfficePlacement(selectedId, e.target.value, null, true);
+      updateSelectedAgentAiField(a => { a.floor = placed.floorStr; });
+      if (window.NEXUS_TEAMS_SUMMARY && typeof renderAgentsTeamPlacementBoard === 'function') {
+        renderAgentsTeamPlacementBoard(window.NEXUS_TEAMS_SUMMARY);
+      }
+    });
+    studioAiSeatSelect?.addEventListener('change', (e) => {
+      const curFloor = studioAiFloorSelect?.value || '1F';
+      const placed = syncAgentOfficePlacement(selectedId, curFloor, Number(e.target.value), true);
+      updateSelectedAgentAiField(a => { a.floor = placed.floorStr; });
+      if (window.NEXUS_TEAMS_SUMMARY && typeof renderAgentsTeamPlacementBoard === 'function') {
+        renderAgentsTeamPlacementBoard(window.NEXUS_TEAMS_SUMMARY);
+      }
     });
     studioAiSandboxSelect?.addEventListener('change', (e) => {
       updateSelectedAgentAiField(a => { a.sandboxMode = e.target.value; });
@@ -819,6 +1135,7 @@
             cli: (agent.triadRole || 'head').toLowerCase(),
             agent_name: agent.name,
             custom_cli: agent.cliProvider,
+            custom_model: agent.cliModel || '',
             system_prompt: agent.systemPrompt,
             skills: Array.isArray(agent.skills) ? agent.skills : [],
             question: q
@@ -1464,11 +1781,13 @@
 
   let currentRoles = loadStoredRoles();
   let localPipelineTimer = null;
+  let selectedOrchestratorMode = 'standard';
 
   // 각 AI CLI의 로그인 계정 요금제(Plan) 자동 감지 및 일일 제한(Daily) / 월간 제한(Monthly) 구분 계산
+  // 주의: 구글 개인 계정(@gmail.com) OAuth 토큰은 Google One 개인 구독 등급을 노출하지 않으므로 임의로 Pro로 단정하지 않고 기본 Free로 표시 후 직접 선택 지원
   const CLI_QUOTA_CAPS = {
     claude:      { domain: 'ANTHROPIC', dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null },
-    antigravity: { domain: 'GOOGLE',    dailyCalls: 60, dailyTokens: 500000, monthlyCalls: 1800, monthlyTokens: 15000000, planName: 'Google AI Pro (Antigravity IDE 구독 플랜)', planLabel: 'Google AI Pro (Antigravity 구독)', isSubscribed: true, isPaid: true, accountEmail: null },
+    antigravity: { domain: 'GOOGLE',    dailyCalls: 20, dailyTokens: 120000, monthlyCalls: 600,  monthlyTokens: 3600000,  planName: 'Google 계정 연결됨 (기본 Free 적용 · Pro/Ultra 구독 시 직접 선택)', planLabel: 'Google Free (또는 구독 직접 선택)', isSubscribed: true, isPaid: false, accountEmail: null },
     gemini:      { domain: 'GEMINI2',   dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '서브 구글 계정 (계정 2) 로그인 필요', planLabel: '미로그인 (계정 2 로그인 대기)', isSubscribed: false, isPaid: false, accountEmail: null },
     openai:      { domain: 'OPENAI',    dailyCalls: 15, dailyTokens: 60000,  monthlyCalls: 300,  monthlyTokens: 1200000,  planName: 'ChatGPT Free (무료 플랜 · 유료 미구독)', planLabel: 'ChatGPT Free (무료 플랜)', isSubscribed: true, isPaid: false, accountEmail: null },
     grok:        { domain: 'XAI',       dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null }
@@ -1640,6 +1959,64 @@
     });
 
     window.NEXUS_CLI_QUOTA = { getCliQuotaStatus, latestUsageByProvider, CLI_QUOTA_CAPS };
+    if (typeof renderConnectedAccountsList === 'function') {
+      renderConnectedAccountsList(lastDiagnostics);
+    }
+  }
+
+  function renderConnectedAccountsList(diag) {
+    const gridEl = document.getElementById('connectedAccountsGrid');
+    const countBadge = document.getElementById('connectedAccountsCountBadge');
+    if (!gridEl) return;
+
+    const providers = (diag || lastDiagnostics || {}).providers || {};
+    const connectedEntries = Object.entries(providers).filter(([, p]) => p && p.auth_state === 'LOGGED_IN');
+
+    if (countBadge) {
+      countBadge.textContent = connectedEntries.length > 0
+        ? `연결된 계정 ${connectedEntries.length}개 활성`
+        : '연결된 계정 없음';
+    }
+
+    if (connectedEntries.length === 0) {
+      gridEl.innerHTML = `
+        <div style="grid-column:1/-1;padding:18px 20px;border-radius:12px;border:1px dashed #cbd5e1;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="font-size:12px;color:#475569">현재 로그인(연결)된 AI 계정이 없습니다. 아래 CLI 설정 섹션에서 계정을 로그인해 주세요.</div>
+          <a href="#cliAuthSection" class="btn small primary">🔑 AI 계정 로그인하러 가기 ↓</a>
+        </div>
+      `;
+      return;
+    }
+
+    gridEl.innerHTML = connectedEntries.map(([key, p]) => {
+      const q = getCliQuotaStatus(key);
+      const dispTitle = p.label || key;
+      const emailTxt = p.account_email || '로그인 계정 확인됨';
+      const curModelTxt = p.selected_model_display || 'CLI 기본 설정 모델';
+      return `
+        <div class="triad-role-card" data-connected-slot="${escHtml(key)}">
+          <div class="triad-role-top">
+            <strong style="font-size:12.5px;font-weight:800;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(dispTitle)}">${escHtml(dispTitle)}</strong>
+            <span class="cli-auth-badge LOGGED_IN" style="flex-shrink:0">✓ 연결됨</span>
+          </div>
+          <div class="triad-role-meta" style="gap:6px;flex-wrap:wrap">
+            <span title="로그인 계정 이메일">👤 ${escHtml(emailTxt)}</span>
+            <strong style="color:#0f6848;font-size:10px" title="현재 선택된 세부 모델">🤖 ${escHtml(curModelTxt)}</strong>
+          </div>
+          <div class="cli-quota-box" style="margin-top:0">
+            <div class="cli-quota-top">
+              <span>${q.isPaid ? `✓ 유료 구독: ${escHtml(q.planLabel)}` : `● 무료 플랜: ${escHtml(q.planLabel)}`}</span>
+              <strong>${escHtml(q.topSummaryText)}</strong>
+            </div>
+            <div class="cli-quota-track"><span class="cli-quota-fill ${q.level}" style="width:${q.isSubscribed ? q.dailyRemainPct : 0}%"></span></div>
+            <div class="cli-quota-meta">
+              <span>${escHtml(q.bottomMetaText)}</span>
+              <span class="cli-quota-pct ${q.level}">${escHtml(q.statusBadgeText)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
   function applyRolesToDOM(roles) {
@@ -1849,20 +2226,35 @@
   }
 
   async function dispatchMissionGoal(goal, profile = 'standard', teamId = null) {
-    if (!goal || !goal.trim()) return;
+    if (!goal || !goal.trim()) return { ok: false, error: '업무 목표를 입력해 주세요.' };
     const effTeamId = teamId || document.getElementById('triadTeamSelect')?.value || (window.NEXUS_TEAMS_SUMMARY && window.NEXUS_TEAMS_SUMMARY.active_team_id) || null;
     try {
-      const res = await fetch('/chat', {
+      const res = await apiFetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: goal.trim(), profile, team_id: effTeamId })
+        body: JSON.stringify({
+          message: goal.trim(),
+          profile,
+          team_id: effTeamId
+        })
       });
       if (res.ok || res.status === 202) {
+        const d = await res.json().catch(() => ({}));
         pollOrchestrator();
-        return;
+        return { ok: true, data: d };
+      }
+      if (res.status === 400 || res.status === 409) {
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData.error || '요청을 처리할 수 없습니다.';
+        const replyRole = document.getElementById('triadReplyRole');
+        const replyText = document.getElementById('triadReplyText');
+        if (replyRole) replyRole.textContent = '[⚠️ 미션 실행 제한 안내]';
+        if (replyText) replyText.textContent = msg;
+        return { ok: false, error: msg };
       }
     } catch (_) {}
     startLocalPipelineFallback(goal.trim());
+    return { ok: true, fallback: true };
   }
 
   async function askDirectQuestion(target, question, agentName = '') {
@@ -2007,9 +2399,6 @@
       { to_state: 'STOPPED', state_ko: '작업 정지 실행 · 모든 실행 중인 미션 및 CLI 프로세스 종료', role: 'DIRECTOR', run_id: 'stop-signal' }
     ]);
   });
-
-  let backendAvailable = true;
-  let lastDiagnostics = null;
 
   async function apiFetch(path, options = {}) {
     const isFile = typeof window !== 'undefined' && window.location.protocol === 'file:';
@@ -2380,7 +2769,13 @@
       modalAskSel.value = prevVal;
     }
 
-    // 4. Sync #studioQuickCli on agents.html
+    // 4. Normalize agent cliProvider if pointing to a removed slot & sync #studioQuickCli + #studioCliCardGroup
+    const fallbackSlot = providersObj.antigravity ? 'antigravity' : keys[0];
+    modularAgents.forEach(ag => {
+      if (!ag.cliProvider || !providersObj[ag.cliProvider]) {
+        ag.cliProvider = fallbackSlot;
+      }
+    });
     const studioCliSel = document.getElementById('studioQuickCli');
     if (studioCliSel) {
       const prevVal = studioCliSel.value && keys.includes(studioCliSel.value) ? studioCliSel.value : keys[0];
@@ -2388,6 +2783,34 @@
         `<option value="${k}" ${k === prevVal ? 'selected' : ''}>${CLI_LABELS[k]}</option>`
       ).join('') + `<option value="__add_new_cli__">➕ 드롭다운에서 새 CLI 로그인 추가...</option>`;
       studioCliSel.value = prevVal;
+    }
+
+    const studioCardGroup = document.getElementById('studioCliCardGroup');
+    if (studioCardGroup) {
+      const countEm = studioCardGroup.previousElementSibling?.querySelector('em');
+      if (countEm) countEm.textContent = `${keys.length} Slots`;
+      const curSelVal = studioCliSel?.value || keys[0];
+      studioCardGroup.innerHTML = keys.map(k => {
+        const p = providersObj[k] || {};
+        const domTxt = p.domain || k.toUpperCase();
+        const cliCmd = p.cli || k;
+        const stTxt = p.auth_state === 'LOGGED_IN' ? '✓ 연결됨' : '미로그인';
+        return `
+          <button type="button" class="studio-cli-card ${k === curSelVal ? 'active' : ''}" data-cli-val="${escHtml(k)}">
+            <span class="item-code">${escHtml(domTxt)} · ${stTxt}</span>
+            <strong>${escHtml(p.label || k)}</strong>
+            <span>${escHtml(cliCmd)} (${escHtml(p.selected_model_display || '기본 모델')})</span>
+          </button>
+        `;
+      }).join('');
+      studioCardGroup.querySelectorAll('.studio-cli-card').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (studioCliSel) {
+            studioCliSel.value = btn.dataset.cliVal;
+            studioCliSel.dispatchEvent(new Event('change'));
+          }
+        });
+      });
     }
   }
 
@@ -2417,7 +2840,7 @@
       if (labelInp) labelInp.value = '';
       if (data.roles) currentRoles = { ...currentRoles, ...data.roles };
       if (data.diagnostics) {
-        renderCliDiagnosticsModal(data.diagnostics);
+        renderCliDiagnosticsModal(data.diagnostics, true);
       } else {
         await fetchAndRenderCliDiagnostics(false);
       }
@@ -2469,7 +2892,7 @@
         currentRoles = { ...currentRoles, ...data.roles };
       }
       if (data.diagnostics) {
-        renderCliDiagnosticsModal(data.diagnostics);
+        renderCliDiagnosticsModal(data.diagnostics, true);
       } else {
         await fetchAndRenderCliDiagnostics(false);
       }
@@ -2496,7 +2919,7 @@
       const data = await res.json().catch(() => ({}));
       if (data.roles) currentRoles = { ...currentRoles, ...data.roles };
       if (data.diagnostics) {
-        renderCliDiagnosticsModal(data.diagnostics);
+        renderCliDiagnosticsModal(data.diagnostics, true);
       }
       applyRolesToDOM(currentRoles);
       if (logBox) {
@@ -2545,7 +2968,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.added) {
-        if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics);
+        if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics, true);
         if (typeof onAddedCallback === 'function') {
           await onAddedCallback(data.added.key);
         }
@@ -2553,10 +2976,258 @@
     } catch (_) {}
   }
 
-  function renderCliDiagnosticsModal(diag) {
+  async function handleRenameCliSlot(slotKey, newLabel, triggerBtn = null) {
+    const clean = (newLabel || '').trim();
+    if (!clean) {
+      alert('AI 타이틀(표시 이름)을 입력해 주세요.');
+      return;
+    }
+    const logBox = document.getElementById('cliInstallLogBox');
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = '저장 중...';
+    }
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename', key: slotKey, label: clean })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'AI 타이틀 수정에 실패했습니다.');
+        return;
+      }
+      if (data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics, true);
+      } else {
+        await fetchAndRenderCliDiagnostics(false);
+      }
+      applyRolesToDOM(currentRoles);
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `✏️ ${data.message || `AI 타이틀이 [${clean}]으로 수정되었습니다.`}`;
+      }
+    } catch (err) {
+      alert(`AI 타이틀 변경 오류: ${err.message}`);
+    } finally {
+      if (triggerBtn) {
+        triggerBtn.disabled = false;
+      }
+    }
+  }
+
+  async function handleSetCliSlotPlan(slotKey, planOverride) {
+    const logBox = document.getElementById('cliInstallLogBox');
+    const orchFb = document.getElementById('orchestratorFeedbackText');
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_plan', key: slotKey, plan_override: planOverride })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || '구독 플랜 반영에 실패했습니다.');
+        return;
+      }
+      if (data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics, true);
+      } else {
+        await fetchAndRenderCliDiagnostics(false);
+      }
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `💳 ${data.message || '연결된 AI의 구독 플랜이 업데이트되었습니다.'}`;
+      }
+      if (orchFb && data.message) {
+        orchFb.style.color = '#0f6848';
+        orchFb.textContent = `✓ ${data.message} — 구독 등급에 맞춰 선택 가능한 Orchestrator(Argon / Carbon) 모드가 즉시 갱신되었습니다.`;
+      }
+    } catch (err) {
+      alert(`구독 플랜 변경 오류: ${err.message}`);
+    }
+  }
+
+  function buildSlotModelOptionsHtml(availModels, selectedModelId) {
+    const curSel = (selectedModelId || '').trim();
+    const list = Array.isArray(availModels) ? availModels : [];
+    const defaultOpt = `<option value="" ${!curSel ? 'selected' : ''}>🔄 CLI 기본 설정 모델 (자동 선택)</option>`;
+    if (!list.length) return defaultOpt;
+
+    const grouped = new Map();
+    list.forEach(m => {
+      const g = m.group || '지원 모델';
+      if (!grouped.has(g)) grouped.set(g, []);
+      grouped.get(g).push(m);
+    });
+
+    const groupsHtml = Array.from(grouped.entries()).map(([grpName, items]) => {
+      const opts = items.map(m => {
+        const isSel = m.id === curSel && !m.locked;
+        const lockPrefix = m.locked ? '🔒 ' : '';
+        const lockSuffix = m.locked && m.lock_reason ? ` — [${m.lock_reason}]` : '';
+        return `<option value="${escHtml(m.id)}" ${isSel ? 'selected' : ''} ${m.locked ? 'disabled' : ''}>${lockPrefix}${escHtml(m.name)} (${escHtml(m.id)})${escHtml(lockSuffix)}</option>`;
+      }).join('');
+      return `<optgroup label="${escHtml(grpName)}">${opts}</optgroup>`;
+    }).join('');
+
+    return defaultOpt + groupsHtml;
+  }
+
+  async function handleSetCliSlotModel(slotKey, modelId) {
+    const logBox = document.getElementById('cliInstallLogBox');
+    const orchFb = document.getElementById('orchestratorFeedbackText');
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_model', key: slotKey, model: modelId || '' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (orchFb) {
+          orchFb.style.color = '#dc2626';
+          orchFb.textContent = `❌ ${data.error || '모델 설정에 실패했습니다.'}`;
+        } else {
+          alert(data.error || '모델 설정에 실패했습니다.');
+        }
+        if (lastDiagnostics) renderCliDiagnosticsModal(lastDiagnostics, true);
+        return;
+      }
+      if (data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics, true);
+      } else {
+        await fetchAndRenderCliDiagnostics(false);
+      }
+      if (logBox && data.message) {
+        logBox.style.display = 'block';
+        logBox.textContent = `🤖 ${data.message}`;
+      }
+      if (orchFb && data.message) {
+        orchFb.style.color = '#0f6848';
+        orchFb.textContent = `✓ ${data.message} (실제 CLI --model 인자로 직접 호출됩니다)`;
+      }
+    } catch (err) {
+      alert(`실행 모델 변경 오류: ${err.message}`);
+    }
+  }
+
+  async function handleRefreshRealModels(triggerBtn = null) {
+    const orchFb = document.getElementById('orchestratorFeedbackText');
+    const orig = triggerBtn ? triggerBtn.textContent : '';
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = '⏳ 조회 중...';
+    }
+    try {
+      const res = await apiFetch('/ops/cli-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh_models' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.diagnostics) {
+        renderCliDiagnosticsModal(data.diagnostics, true);
+        if (orchFb) {
+          orchFb.style.color = '#0f6848';
+          orchFb.textContent = `✓ ${data.message || '실제 CLI 모델 목록 새로고침 완료'}`;
+        }
+      }
+    } catch (_) {} finally {
+      if (triggerBtn) {
+        triggerBtn.disabled = false;
+        triggerBtn.textContent = orig || '🔄 실제 모델 목록 새로고침';
+      }
+    }
+  }
+
+  function renderOrchestratorModeControls(diag) {
+    const d = diag || lastDiagnostics || {};
+    const providers = d.providers || {};
+    const keys = Object.keys(providers);
+    if (!keys.length) return;
+
+    const slotSel = document.getElementById('realModelSlotSelect');
+    const modelSel = document.getElementById('realAntigravityModelSelect');
+    const tierBadge = document.getElementById('orchestratorTierStatusBadge');
+
+    if (slotSel && document.activeElement !== slotSel) {
+      const prevSlot = (slotSel.value && providers[slotSel.value])
+        ? slotSel.value
+        : (providers.antigravity ? 'antigravity' : keys[0]);
+      slotSel.innerHTML = keys.map(k => {
+        const p = providers[k] || {};
+        const stTxt = p.auth_state === 'LOGGED_IN' ? '로그인됨' : '미로그인';
+        return `<option value="${escHtml(k)}" ${k === prevSlot ? 'selected' : ''}>${escHtml(p.label || k)} (${stTxt})</option>`;
+      }).join('');
+      slotSel.value = prevSlot;
+    }
+
+    const activeSlotKey = (slotSel && slotSel.value && providers[slotSel.value])
+      ? slotSel.value
+      : (providers.antigravity ? 'antigravity' : keys[0]);
+    const activeProv = providers[activeSlotKey] || {};
+    const availModels = Array.isArray(activeProv.available_models) ? activeProv.available_models : [];
+    const unlockedCount = availModels.filter(m => !m.locked).length;
+
+    if (modelSel && document.activeElement !== modelSel) {
+      modelSel.innerHTML = buildSlotModelOptionsHtml(availModels, activeProv.selected_model || '');
+    }
+
+    if (tierBadge) {
+      const tier = (activeProv.orchestrator_tier || 'free').toLowerCase();
+      const srcNote = activeProv.models_source === 'agy_live_cli' ? 'agy.exe 실시간 조회' : 'CLI 모델 목록';
+      if (tier === 'ultra') {
+        tierBadge.className = 'orch-tier-pill ultra';
+        tierBadge.textContent = `💎 ${srcNote}: 전체 ${availModels.length}종 해금 (Ultra)`;
+      } else if (tier === 'pro') {
+        tierBadge.className = 'orch-tier-pill pro';
+        tierBadge.textContent = `🔷 ${srcNote}: ${availModels.length}종 중 ${unlockedCount}종 선택 가능 (Pro · Argon 포함)`;
+      } else {
+        tierBadge.className = 'orch-tier-pill free';
+        tierBadge.textContent = `🆓 ${srcNote}: ${availModels.length}종 중 ${unlockedCount}종 선택 가능 (Free)`;
+      }
+    }
+  }
+
+  function bindOrchestratorModeControls() {
+    const slotSel = document.getElementById('realModelSlotSelect');
+    const modelSel = document.getElementById('realAntigravityModelSelect');
+    const refreshBtn = document.getElementById('btnRefreshRealModels');
+
+    if (slotSel && !slotSel.dataset.bound) {
+      slotSel.dataset.bound = '1';
+      slotSel.addEventListener('change', () => {
+        renderOrchestratorModeControls(lastDiagnostics);
+      });
+    }
+    if (modelSel && !modelSel.dataset.bound) {
+      modelSel.dataset.bound = '1';
+      modelSel.addEventListener('change', () => {
+        const sKey = slotSel?.value || 'antigravity';
+        handleSetCliSlotModel(sKey, modelSel.value || '');
+      });
+    }
+    if (refreshBtn && !refreshBtn.dataset.bound) {
+      refreshBtn.dataset.bound = '1';
+      refreshBtn.addEventListener('click', () => handleRefreshRealModels(refreshBtn));
+    }
+  }
+
+  function renderCliDiagnosticsModal(diag, forceRender = false) {
     lastDiagnostics = diag || getFallbackDiagnostics();
     const providers = lastDiagnostics.providers || {};
     syncAllCliDropdowns(providers);
+    renderOrchestratorModeControls(lastDiagnostics);
+    renderConnectedAccountsList(lastDiagnostics);
+    if (studioRefreshDirectoryFn) {
+      const ae = document.activeElement;
+      const isTypingInStudio = !forceRender && ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && document.getElementById('characters')?.contains(ae);
+      if (!isTypingInStudio) {
+        studioRefreshDirectoryFn();
+      }
+    }
     const grid = document.getElementById('cliAuthGrid');
     const headline = document.getElementById('cliSummaryHeadline');
     const sub = document.getElementById('cliSummarySub');
@@ -2575,7 +3246,8 @@
       if (lastDiagnostics.triad_state === 'STATIC_FALLBACK') {
         headline.textContent = '현재 정적 파일 서버(http.server) 모드 · 404 방지 폴백 활성화됨';
       } else {
-        headline.textContent = `활성 CLI 슬롯: ${list.length}개 · 구독 로그인 확인: ${loggedInCount}/${list.length}개 · 설치 감지: ${installedCount}/${list.length}개 (${lastDiagnostics.triad_state || 'TRIAD'})`;
+        const activeOrch = (lastDiagnostics.active_orchestrator_mode || 'standard').toUpperCase();
+        headline.textContent = `활성 CLI 슬롯: ${list.length}개 · 구독 로그인 확인: ${loggedInCount}/${list.length}개 · 오케스트레이터: ${activeOrch} (${lastDiagnostics.triad_state || 'TRIAD'})`;
       }
     }
     if (sub) {
@@ -2583,20 +3255,31 @@
       sub.textContent = `종량제 API 키 차단(Sanitized): ${stripped} 자동 제거 · 마지막 확인: ${new Date().toLocaleTimeString('ko-KR')}`;
     }
 
-    if (!grid) return;
+    if (!grid) {
+      renderCliQuotaGauges();
+      return;
+    }
 
-    const roleByProvider = {};
-    for (const [rKey, pKey] of Object.entries(currentRoles)) {
-      roleByProvider[pKey] = rKey.toUpperCase();
+    // 3초 주기 폴링 중 사용자가 타이틀 입력창·경로 입력창을 편집 중이거나 미저장 타이틀이 있으면 카드 DOM 덮어쓰기 방지
+    if (!forceRender && grid.children.length === keys.length) {
+      const activeInGrid = grid.contains(document.activeElement);
+      const hasDirtyTitle = Array.from(grid.querySelectorAll('.cli-title-inline-input')).some(inp => inp.classList.contains('is-dirty'));
+      if (activeInGrid || hasDirtyTitle) {
+        renderCliQuotaGauges();
+        return;
+      }
     }
 
     grid.innerHTML = keys.map(key => {
       const p = providers[key] || {};
       const state = p.auth_state || 'NOT_INSTALLED';
       const cardCls = state === 'LOGGED_IN' ? 'logged-in' : state === 'AUTH_REQUIRED' ? 'auth-required' : '';
-      const assignedRole = roleByProvider[key] || 'UNASSIGNED';
-      const roleCls = assignedRole === 'HEAD' ? 'role-head' : (assignedRole === 'BUILDER' || assignedRole === 'SUB_BUILDER') ? 'role-builder' : 'role-reviewer';
       const cliName = p.cli || (key === 'claude' ? 'claude' : key === 'antigravity' ? 'agy' : key === 'gemini' ? 'gemini' : key === 'grok' ? 'grok' : 'codex');
+      const dispTitle = p.label || key;
+
+      const curPlanOv = (p.plan_override || 'auto').toLowerCase();
+      const needsPlanConfirm = state === 'LOGGED_IN' && p.plan_source === 'unverified_default_free';
+      const planSrcLabel = p.plan_source_label || (state === 'LOGGED_IN' ? '로컬 인증 확인' : '로그인 후 확인');
 
       const actionButtonsHtml = !p.installed
         ? `
@@ -2619,24 +3302,46 @@
       return `
         <div class="cli-auth-card ${cardCls}" data-slot-card="${key}">
           <div class="cli-auth-top">
-            <div class="cli-auth-title">
-              <span class="triad-role-badge ${roleCls}">${assignedRole}</span>
-              <span>${p.label || key}</span>
+            <div class="cli-auth-title" style="flex:1;min-width:0">
+              <div class="cli-title-edit-wrap">
+                <input type="text" class="cli-title-inline-input" data-slot-title-input="${key}" data-orig-title="${escHtml(dispTitle)}" value="${escHtml(dispTitle)}" maxlength="80" title="클릭하여 AI 타이틀을 수정하고 Enter 또는 저장 버튼을 누르세요" aria-label="${escHtml(dispTitle)} AI 타이틀 수정">
+                <button type="button" class="btn-save-cli-title" data-slot-key="${key}" title="AI 타이틀 수정 / 저장">✏️ 이름 수정</button>
+              </div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px">
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
               <span class="cli-auth-badge ${state}">${p.auth_label || state}</span>
-              <button type="button" class="btn-remove-cli-slot" data-slot-key="${key}" title="${p.label || key} 로그인 슬롯 제거">🗑️ 제거</button>
+              <button type="button" class="btn-remove-cli-slot" data-slot-key="${key}" title="${escHtml(dispTitle)} 로그인 슬롯 제거">🗑️ 제거</button>
             </div>
           </div>
           <div class="cli-auth-detail">${p.auth_detail || ''}</div>
           <div class="cli-auth-rows">
             <div class="cli-auth-row"><span>로그인 계정</span><strong>${p.account_email || '미로그인'}</strong></div>
-            <div class="cli-auth-row"><span>구독 중인 플랜</span><strong style="color:${p.is_subscribed ? (p.is_paid ? '#15803d' : '#0284c7') : '#64748b'}">${p.plan_name || p.plan_label || '미구독 / 미로그인'}</strong></div>
+            <div class="cli-auth-row"><span>적용 중인 플랜</span><strong style="color:${p.is_subscribed ? (p.is_paid ? '#15803d' : '#0284c7') : '#64748b'}">${p.plan_name || p.plan_label || '미구독 / 미로그인'}</strong></div>
+            <div class="cli-auth-row"><span>플랜 판별 근거</span><strong style="color:${needsPlanConfirm ? '#b45309' : '#334155'}">${planSrcLabel}</strong></div>
             <div class="cli-auth-row"><span>CLI 명령어 / 슬롯 ID</span><code>${cliName} (${key})</code></div>
             ${p.profile_dir ? `<div class="cli-auth-row"><span>격리 프로필 폴더</span><code>${p.profile_dir}</code></div>` : ''}
             <div class="cli-auth-row"><span>감지된 버전</span><strong>${p.version || '미확인'}</strong></div>
             <div class="cli-auth-row"><span>실행 파일 경로</span><code>${p.executable || 'PATH 미감지 (원클릭 설치 가능)'}</code></div>
             <div class="cli-auth-row"><span>종량제 API 키</span><strong style="color:#15803d">차단됨 (구독 전용)</strong></div>
+          </div>
+          <div class="cli-plan-verify-box ${needsPlanConfirm ? 'needs-confirm' : ''}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+              <label style="font-size:10px;font-weight:800;color:${needsPlanConfirm ? '#92400e' : '#334155'}">💳 실제 구독 중인 플랜 지정 ${needsPlanConfirm ? '(구글 개인 계정은 직접 선택 권장)' : ''}</label>
+              <span style="font-size:9.5px;font-weight:700;color:#64748b">등급: <b>${(p.orchestrator_tier || 'none').toUpperCase()}</b></span>
+            </div>
+            <select class="cli-plan-override-select" data-slot-key="${key}" aria-label="${escHtml(dispTitle)} 실제 구독 플랜 선택">
+              <option value="auto" ${curPlanOv === 'auto' ? 'selected' : ''}>🔍 자동 감지 (토큰·API 실측 / 미제공 시 Free 기본 적용)</option>
+              <option value="free" ${curPlanOv === 'free' ? 'selected' : ''}>🆓 Free 무료 플랜</option>
+              <option value="pro" ${curPlanOv === 'pro' ? 'selected' : ''}>🔷 Pro / Plus 유료 구독 (Argon 등 Pro 모델 해금)</option>
+              <option value="ultra" ${curPlanOv === 'ultra' ? 'selected' : ''}>💎 Ultra / Max 최상위 구독 (Carbon · Neon 등 전체 해금)</option>
+            </select>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px">
+              <label style="font-size:10px;font-weight:800;color:#0f6848">🤖 사용할 실제 모델 선택 (${p.models_source === 'agy_live_cli' ? `agy.exe 실시간 ${Array.isArray(p.available_models) ? p.available_models.length : 0}종` : 'CLI 지원 모델'})</label>
+              <code style="font-size:9px;color:#475569">${escHtml(p.selected_model || 'CLI 기본값')}</code>
+            </div>
+            <select class="cli-plan-override-select cli-slot-model-select" data-slot-key="${key}" aria-label="${escHtml(dispTitle)} 사용할 실제 모델 선택">
+              ${buildSlotModelOptionsHtml(p.available_models, p.selected_model)}
+            </select>
           </div>
           ${(() => {
             const q = getCliQuotaStatus(key);
@@ -2670,6 +3375,65 @@
       `;
     }).join('');
 
+    grid.querySelectorAll('.cli-title-inline-input').forEach(inp => {
+      const sKey = inp.dataset.slotTitleInput;
+      const saveBtn = grid.querySelector(`.btn-save-cli-title[data-slot-key="${sKey}"]`);
+      const syncDirtyState = () => {
+        const dirty = inp.value.trim() !== (inp.dataset.origTitle || '').trim();
+        inp.classList.toggle('is-dirty', dirty);
+        if (saveBtn) {
+          saveBtn.classList.toggle('is-dirty', dirty);
+          saveBtn.textContent = dirty ? '💾 저장' : '✏️ 이름 수정';
+        }
+      };
+      inp.addEventListener('input', syncDirtyState);
+      inp.addEventListener('keydown', (ev) => {
+        if (ev.isComposing) return;
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          const val = inp.value.trim();
+          if (val && val !== (inp.dataset.origTitle || '').trim()) {
+            handleRenameCliSlot(sKey, val, saveBtn);
+          } else {
+            inp.blur();
+          }
+        } else if (ev.key === 'Escape') {
+          inp.value = inp.dataset.origTitle || '';
+          syncDirtyState();
+          inp.blur();
+        }
+      });
+    });
+
+    grid.querySelectorAll('.btn-save-cli-title').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sKey = btn.dataset.slotKey;
+        const inp = grid.querySelector(`.cli-title-inline-input[data-slot-title-input="${sKey}"]`);
+        if (!inp) return;
+        const val = inp.value.trim();
+        if (val && val !== (inp.dataset.origTitle || '').trim()) {
+          handleRenameCliSlot(sKey, val, btn);
+        } else {
+          inp.focus();
+          inp.select();
+        }
+      });
+    });
+
+    grid.querySelectorAll('.cli-plan-override-select:not(.cli-slot-model-select)').forEach(sel => {
+      sel.addEventListener('change', (ev) => {
+        const sKey = ev.currentTarget.dataset.slotKey;
+        const val = ev.currentTarget.value || 'auto';
+        handleSetCliSlotPlan(sKey, val);
+      });
+    });
+    grid.querySelectorAll('.cli-slot-model-select').forEach(sel => {
+      sel.addEventListener('change', (ev) => {
+        const sKey = ev.currentTarget.dataset.slotKey;
+        const val = ev.currentTarget.value || '';
+        handleSetCliSlotModel(sKey, val);
+      });
+    });
     grid.querySelectorAll('.btn-install-cli').forEach(btn => {
       btn.addEventListener('click', () => triggerOneClickInstall(btn.dataset.cli, btn));
     });
@@ -2702,7 +3466,7 @@
       if (res.ok) {
         backendAvailable = true;
         const diag = await res.json();
-        renderCliDiagnosticsModal(diag);
+        renderCliDiagnosticsModal(diag, true);
         return;
       }
       if (res.status === 404) backendAvailable = false;
@@ -2712,7 +3476,7 @@
         btn.textContent = '🔍 실시간 로그인 검증 (Deep Probe)';
       }
     }
-    renderCliDiagnosticsModal(getFallbackDiagnostics());
+    renderCliDiagnosticsModal(getFallbackDiagnostics(), true);
   }
 
   async function saveCustomCliPaths() {
@@ -2733,7 +3497,7 @@
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics);
+        if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics, true);
       }
     } catch (_) {} finally {
       if (btn) {
@@ -3592,9 +4356,6 @@
   // ========================================================================
   // [신규] 🏢 팀 구성 · 팀별 작업 폴더 지정 · 연결된 작업 폴더 전체 대시보드
   // ========================================================================
-  let latestTeamsSummary = null;
-  let initialQueryTeamApplied = false;
-
   function escHtml(str) {
     return String(str == null ? '' : str)
       .replace(/&/g, '&amp;')
@@ -3668,7 +4429,7 @@
     }
   }
 
-  function renderTeamsAndWorkspacesDashboard(ts) {
+  function renderTeamsAndWorkspacesDashboard(ts, forceRender = false) {
     if (!ts || !Array.isArray(ts.teams)) return;
     latestTeamsSummary = ts;
     window.NEXUS_TEAMS_SUMMARY = ts;
@@ -3683,9 +4444,19 @@
     if (cTeamsBadge) cTeamsBadge.textContent = `등록 팀 ${teams.length}개`;
     if (cWsBadge) cWsBadge.textContent = `연결된 작업 폴더 ${connected.length}개`;
 
-    // 1) Render Team Cards Grid on index.html
+    // 1) Render Team Cards Grid on index.html (protecting active typing or pinned status during 3s polling)
     const gridEl = document.getElementById('dashboardTeamsGrid');
-    if (gridEl) {
+    const skipTeamGridRebuild = Boolean(
+      gridEl &&
+      !forceRender &&
+      gridEl.children.length === teams.length &&
+      (
+        gridEl.contains(document.activeElement) ||
+        Array.from(gridEl.querySelectorAll('.team-dispatch-input')).some(inp => (inp.value || '').trim().length > 0) ||
+        Array.from(gridEl.querySelectorAll('.team-dispatch-status')).some(st => st.dataset.pinned === '1')
+      )
+    );
+    if (gridEl && !skipTeamGridRebuild) {
       gridEl.innerHTML = teams.map(t => {
         const ws = t.workspace_status || {};
         const gd = ws.gdrive_direct || {};
@@ -3721,6 +4492,11 @@
                   ${t.is_active
                     ? '<span class="team-active-pill">★ 현재 기본 작업팀</span>'
                     : `<button type="button" class="btn small btn-set-active-team" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀으로 전환</button>`}
+                  ${t.orchestrator_mode === 'carbon'
+                    ? '<span class="orch-tier-pill ultra">💎 Carbon</span>'
+                    : t.orchestrator_mode === 'argon'
+                    ? '<span class="orch-tier-pill pro">🔷 Argon</span>'
+                    : '<span class="orch-tier-pill free">⚡ Standard/전역</span>'}
                 </div>
                 ${t.description ? `<div class="team-ws-desc">${escHtml(t.description)}</div>` : ''}
               </div>
@@ -3749,11 +4525,92 @@
               <button type="button" class="btn small btn-team-open-exp" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">🗂️ 폴더 열기</button>
               <button type="button" class="btn small btn-team-browse-dir" data-tid="${escHtml(t.id)}" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">📂 작업 폴더 변경</button>
               <button type="button" class="btn small btn-team-edit" data-tid="${escHtml(t.id)}" style="height:28px;padding:0 10px;font-size:10px">✏️ 팀 &amp; 폴더 상세편집</button>
-              <a href="settings.html?team=${encodeURIComponent(t.id)}#triadGoalForm" class="btn small primary" style="height:28px;padding:0 11px;font-size:10px;margin-left:auto;background:${escHtml(color)};border-color:${escHtml(color)}">🚀 이 팀으로 미션 실행 ↗</a>
+              <a href="settings.html?team=${encodeURIComponent(t.id)}#triadGoalForm" class="btn small" style="height:28px;padding:0 10px;font-size:10px;margin-left:auto;color:${escHtml(color)};border-color:${escHtml(color)}55;background:${escHtml(color)}0d">⚙ 상세 설정 ↗</a>
+            </div>
+
+            <div class="team-dispatch-box">
+              <form class="team-dispatch-form" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-head-cli="${escHtml(r.head || 'antigravity')}">
+                <select class="team-dispatch-select" aria-label="${escHtml(t.name)} 실행 모드 선택">
+                  <option value="standard" selected>🔄 Standard (5단계)</option>
+                  <option value="quick">⚡ Quick (2단계)</option>
+                  <option value="deep">🔬 Deep (모듈분할)</option>
+                  <option value="ask">💬 간단 질문 (즉답)</option>
+                </select>
+                <input type="text" class="team-dispatch-input" placeholder="[${escHtml(t.name)}]에 지시할 업무 목표(Goal) 또는 질문을 입력하세요..." aria-label="${escHtml(t.name)} 업무지시 입력" required>
+                <button type="submit" class="team-dispatch-btn" style="background:${escHtml(color)}">🚀 업무 지시</button>
+              </form>
+              <div class="team-dispatch-status" data-status-tid="${escHtml(t.id)}"></div>
             </div>
           </div>
         `;
       }).join('');
+
+      gridEl.querySelectorAll('.team-dispatch-form').forEach(form => {
+        form.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const tid = form.dataset.tid;
+          const tname = form.dataset.tname || '선택 팀';
+          const headCli = form.dataset.headCli || 'antigravity';
+          const modeSel = form.querySelector('.team-dispatch-select');
+          const inp = form.querySelector('.team-dispatch-input');
+          const btn = form.querySelector('.team-dispatch-btn');
+          const stBox = gridEl.querySelector(`.team-dispatch-status[data-status-tid="${tid}"]`);
+          const goal = (inp?.value || '').trim();
+          if (!goal) return;
+          const mode = modeSel?.value || 'standard';
+          inp.value = '';
+
+          if (mode === 'ask') {
+            const origTxt = btn ? btn.textContent : '🚀 업무 지시';
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 응답 중...'; }
+            if (stBox) {
+              stBox.style.display = 'block';
+              stBox.style.background = '#f8fafc';
+              stBox.style.borderColor = '#cbd5e1';
+              stBox.style.color = '#334155';
+              stBox.dataset.pinned = '1';
+              stBox.textContent = `💭 [${tname}] '${goal}' 질문에 대한 답변을 생성 중입니다...`;
+            }
+            const ans = await askDirectQuestion(headCli, goal, `${tname} 리드 AI`);
+            if (stBox) {
+              stBox.style.background = '#f0fdf4';
+              stBox.style.borderColor = '#86efac';
+              stBox.style.color = '#166534';
+              stBox.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div><strong>💬 [${escHtml(ans.label || tname)}]</strong> ${escHtml(ans.answer || '')}</div><button type="button" class="btn-close-dispatch-status" style="border:0;background:transparent;color:#64748b;cursor:pointer;font-size:11px;padding:0 2px">✕</button></div>`;
+              stBox.querySelector('.btn-close-dispatch-status')?.addEventListener('click', () => {
+                delete stBox.dataset.pinned;
+                stBox.style.display = 'none';
+              });
+            }
+            if (btn) { btn.disabled = false; btn.textContent = origTxt; }
+            return;
+          }
+
+          if (btn) btn.disabled = true;
+          const res = await dispatchMissionGoal(goal, mode, tid);
+          if (btn) btn.disabled = false;
+          if (stBox) {
+            stBox.style.display = 'block';
+            stBox.dataset.pinned = '1';
+            if (res && res.ok) {
+              stBox.style.background = '#f0fdf4';
+              stBox.style.borderColor = '#86efac';
+              stBox.style.color = '#166534';
+              stBox.textContent = `🚀 [${tname} · ${mode.toUpperCase()}] '${goal}' 업무 파이프라인이 시작되었습니다! 바로 아래 실시간 파이프라인 실행 로그 및 산출물 섹션에서 진행 상황을 확인하세요.`;
+              setTimeout(() => {
+                delete stBox.dataset.pinned;
+                stBox.style.display = 'none';
+              }, 8000);
+            } else {
+              stBox.style.background = '#fef2f2';
+              stBox.style.borderColor = '#fecaca';
+              stBox.style.color = '#b91c1c';
+              stBox.textContent = `⚠️ ${res?.error || '업무 지시를 시작할 수 없습니다.'}`;
+              setTimeout(() => { delete stBox.dataset.pinned; }, 6000);
+            }
+          }
+        });
+      });
 
       gridEl.querySelectorAll('.btn-set-active-team').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -3765,7 +4622,7 @@
               body: JSON.stringify({ action: 'set_active', team_id: btn.dataset.tid })
             });
             const d = await res.json().catch(() => ({}));
-            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
           } catch (_) {
             btn.disabled = false;
           }
@@ -3794,7 +4651,7 @@
               body: JSON.stringify({ action: 'browse', team_id: btn.dataset.tid, initial_dir: btn.dataset.dir })
             });
             const d = await res.json().catch(() => ({}));
-            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
           } catch (_) {} finally {
             btn.disabled = false;
             btn.textContent = orig;
@@ -3822,7 +4679,7 @@
               body: JSON.stringify({ action: 'create_gdrive_team_folder', team_id: btn.dataset.tid })
             });
             const d = await res.json().catch(() => ({}));
-            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
           } catch (_) {
             btn.disabled = false;
             btn.textContent = orig;
@@ -3920,6 +4777,319 @@
       ).join('');
       syncSettingsBarFromTeam(desiredId);
     }
+
+    // 4) Render AI 직원 관리(agents.html)의 팀 추가·수정 & 오피스 배치 보드 동기화
+    renderAgentsTeamPlacementBoard(ts);
+    if (studioRefreshDirectoryFn) studioRefreshDirectoryFn();
+  }
+
+  function showAgentsPlacementFeedback(msg, isError = false) {
+    const bar = document.getElementById('agentsPlacementFeedbackBar');
+    if (!bar) return;
+    bar.style.display = 'block';
+    bar.style.background = isError ? '#fef2f2' : '#f0fdf4';
+    bar.style.borderColor = isError ? '#fecaca' : '#86efac';
+    bar.style.color = isError ? '#b91c1c' : '#15803d';
+    bar.textContent = msg;
+  }
+
+  async function assignAgentToTeamAndPlace(agentId, teamId, mode = 'move', customFloor = null, customSeat = null) {
+    try {
+      const res = await apiFetch('/ops/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'assign_member',
+          agent_id: agentId,
+          team_id: teamId || '',
+          mode,
+          floor: customFloor || undefined
+        })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showAgentsPlacementFeedback(`❌ ${d.error || '팀 배정 실패'}`, true);
+        return false;
+      }
+      const teams = d.teams_summary?.teams || latestTeamsSummary?.teams || [];
+      const targetTeam = teamId ? teams.find(t => t.id === teamId) : null;
+      if (mode !== 'remove' && (targetTeam || customFloor || customSeat !== null)) {
+        const destFloor = customFloor || targetTeam?.floor || '1F';
+        const plc = syncAgentOfficePlacement(agentId, destFloor, customSeat, true);
+        const agObj = modularAgents.find(a => a.id === agentId) || ALL_AGENT_PRESETS.find(a => a.id === agentId);
+        const agName = agObj?.name || `#${agentId}`;
+        showAgentsPlacementFeedback(
+          targetTeam
+            ? `✓ [${agName}] 직원이 [${targetTeam.name}] 팀에 배정되고 가상 오피스 ${plc.floorStr} · #${plc.seatIndex + 1}번석에 배치되었습니다!`
+            : `✓ [${agName}] 직원의 오피스 배치가 ${plc.floorStr} · #${plc.seatIndex + 1}번석으로 변경되었습니다.`
+        );
+      } else if (mode === 'remove') {
+        showAgentsPlacementFeedback('✓ 선택한 직원을 해당 팀에서 제외했습니다.');
+      }
+      if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+      return true;
+    } catch (_) {
+      showAgentsPlacementFeedback('❌ 서버 통신 오류가 발생했습니다.', true);
+      return false;
+    }
+  }
+
+  function renderAgentsTeamPlacementBoard(ts) {
+    const boardEl = document.getElementById('agentsTeamCardsBoard');
+    const tbodyEl = document.getElementById('agentsPlacementTableBody');
+    const countBadge = document.getElementById('agentsTeamsCountBadge');
+    if (!boardEl && !tbodyEl) return;
+
+    const teams = Array.isArray(ts?.teams) ? ts.teams : [];
+    if (countBadge) {
+      countBadge.textContent = `등록 팀 ${teams.length}개 · 활성 직원 ${modularAgents.length}명`;
+    }
+
+    const placementsMap = loadOfficePlacementsMap();
+
+    // [A] Render Team Cards + Drag-and-Drop Dropzones on agents.html
+    if (boardEl) {
+      boardEl.innerHTML = teams.map(t => {
+        const color = t.color || '#0f6848';
+        const ws = t.workspace_status || {};
+        const memIds = Array.isArray(t.member_ids) ? t.member_ids : [];
+
+        const memberPillsHtml = memIds.map(mid => {
+          const baseAg = modularAgents.find(a => a.id === mid) || ALL_AGENT_PRESETS.find(a => a.id === mid) || { id: mid, name: `Agent #${mid}`, triadRole: 'BUILDER', floor: t.floor };
+          const cfg = savedCharAiConfigs[mid] || {};
+          const merged = { ...baseAg, ...cfg };
+          const plc = getAgentOfficePlacement(mid, merged.floor || t.floor);
+          return `
+            <div class="agents-member-pill" draggable="true" data-drag-aid="${escHtml(mid)}" data-select-aid="${escHtml(mid)}" title="클릭하여 하단 스튜디오에서 편집 · 드래그하여 다른 팀으로 이동">
+              <span style="width:22px;height:26px;display:inline-flex;align-items:center;justify-content:center">${CharacterEngine.render(merged)}</span>
+              <span><b style="color:${escHtml(color)}">#${escHtml(mid)}</b> ${escHtml(merged.name)}</span>
+              <span style="background:#eef2f6;color:#475569;padding:1px 5px;border-radius:4px;font-size:8.5px;font-weight:800">${escHtml(plc.floorStr)}·#${plc.seatIndex + 1}석</span>
+              ${memIds.length > 1 ? `<button type="button" class="remove-mem-btn" data-rem-tid="${escHtml(t.id)}" data-rem-aid="${escHtml(mid)}" title="이 팀에서 제외">✕</button>` : ''}
+            </div>
+          `;
+        }).join('');
+
+        const availableAgents = modularAgents.filter(a => !memIds.includes(a.id));
+        const quickAddOptions = [
+          `<option value="">＋ 이 팀에 합류시킬 직원 선택...</option>`,
+          ...availableAgents.map(a => `<option value="${escHtml(a.id)}">#${escHtml(a.id)} ${escHtml(a.name)} (${escHtml(a.triadRole || 'AGENT')})</option>`),
+          ...(modularAgents.length < ALL_AGENT_PRESETS.length ? [`<option value="__recruit_new__">✨ 새 AI 직원 충원 후 이 팀에 즉시 배치</option>`] : [])
+        ].join('');
+
+        return `
+          <div class="agents-team-dropcard" data-drop-tid="${escHtml(t.id)}" style="border-left-color:${escHtml(color)}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
+              <div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="team-floor-pill" style="border-color:${escHtml(color)}44;color:${escHtml(color)}">🏢 ${escHtml(t.floor)}</span>
+                  <strong style="font-size:13px;color:#0f172a">${escHtml(t.name)}</strong>
+                  ${t.is_active
+                    ? '<span class="team-active-pill">★ 기본 팀</span>'
+                    : `<button type="button" class="btn small btn-ag-set-active" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀 지정</button>`}
+                  ${t.orchestrator_mode === 'carbon'
+                    ? '<span class="orch-tier-pill ultra">💎 Carbon</span>'
+                    : t.orchestrator_mode === 'argon'
+                    ? '<span class="orch-tier-pill pro">🔷 Argon</span>'
+                    : ''}
+                </div>
+                <div style="font-size:10px;color:#64748b;margin-top:3px;font-family:var(--font-mono)">📂 폴더: ${escHtml(ws.effective_dir || 'deliverables/')}</div>
+              </div>
+              <div style="display:flex;gap:5px;align-items:center">
+                <button type="button" class="btn small btn-ag-open-dir" data-dir="${escHtml(ws.effective_dir || '')}" style="height:25px;padding:0 8px;font-size:9.5px">🗂️ 폴더</button>
+                <button type="button" class="btn small btn-ag-edit-team" data-tid="${escHtml(t.id)}" style="height:25px;padding:0 9px;font-size:9.5px;background:#f0fdf4;color:#0f6848;border-color:#86efac">✏️ 팀 수정</button>
+                ${teams.length > 1 ? `<button type="button" class="btn small btn-ag-del-team" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="height:25px;padding:0 7px;font-size:9.5px;background:#fef2f2;color:#dc2626;border-color:#fecaca" title="팀 삭제">🗑</button>` : ''}
+              </div>
+            </div>
+
+            <div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;border-radius:9px;background:#f8fafc;border:1px dashed #cbd5e1;min-height:44px;align-items:center">
+              ${memberPillsHtml || '<span style="font-size:10px;color:#94a3b8">직원을 이 카드로 드래그하거나 아래에서 선택해 배치하세요.</span>'}
+            </div>
+
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <select class="triad-cli-select sel-ag-quick-assign" data-tid="${escHtml(t.id)}" style="height:29px;font-size:10.5px;flex:1;min-width:170px;background:#fff">${quickAddOptions}</select>
+              <button type="button" class="btn small primary btn-ag-quick-assign" data-tid="${escHtml(t.id)}" style="height:29px;padding:0 10px;font-size:10px;background:${escHtml(color)};border-color:${escHtml(color)}">＋ 팀 합류 &amp; ${escHtml(t.floor)} 배치</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Drag-and-drop & button bindings on Team Cards
+      boardEl.querySelectorAll('[data-drag-aid]').forEach(pill => {
+        pill.addEventListener('dragstart', (ev) => {
+          ev.dataTransfer.setData('text/plain', pill.dataset.dragAid);
+          ev.dataTransfer.effectAllowed = 'move';
+        });
+        pill.addEventListener('click', (ev) => {
+          if (ev.target.closest('.remove-mem-btn')) return;
+          if (studioSelectAgentFn) studioSelectAgentFn(pill.dataset.selectAid, true);
+        });
+      });
+
+      boardEl.querySelectorAll('.remove-mem-btn').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          assignAgentToTeamAndPlace(btn.dataset.remAid, btn.dataset.remTid, 'remove');
+        });
+      });
+
+      boardEl.querySelectorAll('.agents-team-dropcard').forEach(card => {
+        card.addEventListener('dragover', (ev) => {
+          ev.preventDefault();
+          card.classList.add('is-drag-over');
+        });
+        card.addEventListener('dragleave', () => card.classList.remove('is-drag-over'));
+        card.addEventListener('drop', (ev) => {
+          ev.preventDefault();
+          card.classList.remove('is-drag-over');
+          const aid = (ev.dataTransfer.getData('text/plain') || '').trim();
+          const tid = card.dataset.dropTid;
+          if (aid && tid) {
+            assignAgentToTeamAndPlace(aid, tid, 'add');
+          }
+        });
+      });
+
+      boardEl.querySelectorAll('.btn-ag-edit-team').forEach(b => {
+        b.addEventListener('click', () => openTeamBuilderModal(b.dataset.tid));
+      });
+      boardEl.querySelectorAll('.btn-ag-open-dir').forEach(b => {
+        b.addEventListener('click', () => {
+          apiFetch('/ops/output-dir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
+          }).catch(() => {});
+        });
+      });
+      boardEl.querySelectorAll('.btn-ag-set-active').forEach(b => {
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          try {
+            const r = await apiFetch('/ops/teams', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'set_active', team_id: b.dataset.tid })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          } catch (_) { b.disabled = false; }
+        });
+      });
+      boardEl.querySelectorAll('.btn-ag-del-team').forEach(b => {
+        b.addEventListener('click', async () => {
+          if (!confirm(`[${b.dataset.tname}] 팀을 삭제하시겠습니까? (작업 폴더 내 파일은 그대로 보존됩니다.)`)) return;
+          b.disabled = true;
+          try {
+            const r = await apiFetch('/ops/teams', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'delete', team_id: b.dataset.tid })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (r.ok && d.teams_summary) {
+              renderTeamsAndWorkspacesDashboard(d.teams_summary);
+              showAgentsPlacementFeedback(`✓ [${b.dataset.tname}] 팀이 삭제되었습니다.`);
+            } else {
+              showAgentsPlacementFeedback(`❌ ${d.error || '삭제 실패'}`, true);
+              b.disabled = false;
+            }
+          } catch (_) { b.disabled = false; }
+        });
+      });
+      boardEl.querySelectorAll('.btn-ag-quick-assign').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const tid = btn.dataset.tid;
+          const sel = boardEl.querySelector(`.sel-ag-quick-assign[data-tid="${tid}"]`);
+          let aid = sel?.value || '';
+          if (!aid) {
+            showAgentsPlacementFeedback('합류시킬 AI 직원을 먼저 드롭다운에서 선택해 주세요.', true);
+            return;
+          }
+          if (aid === '__recruit_new__') {
+            if (modularAgents.length >= ALL_AGENT_PRESETS.length) return;
+            const nextAg = ALL_AGENT_PRESETS[modularAgents.length];
+            modularAgents.push(nextAg);
+            try { localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length)); } catch (_) {}
+            aid = nextAg.id;
+          }
+          await assignAgentToTeamAndPlace(aid, tid, 'add');
+        });
+      });
+    }
+
+    // [B] Render Full AI Staff Team Assignment Matrix (#agentsPlacementTableBody) — without Floor / Seat columns
+    if (tbodyEl) {
+      tbodyEl.innerHTML = modularAgents.map(ag => {
+        const belongTeams = teams.filter(t => Array.isArray(t.member_ids) && t.member_ids.includes(ag.id));
+        const primaryTid = belongTeams[0]?.id || '';
+        const cliKey = ag.cliProvider || 'claude';
+        const cliLbl = CLI_BADGE_LABELS[cliKey] || cliKey;
+        const provDiag = lastDiagnostics?.providers?.[cliKey] || null;
+        const agModelDisp = ag.cliModel
+          ? ((provDiag?.available_models || []).find(m => m.id === ag.cliModel)?.name || ag.cliModel)
+          : (provDiag?.selected_model_display || '계정 기본 모델');
+
+        const teamOpts = [
+          `<option value="" ${!primaryTid ? 'selected' : ''}>— 미배정 —</option>`,
+          ...teams.map(t => `<option value="${escHtml(t.id)}" ${t.id === primaryTid ? 'selected' : ''}>🏢 [${escHtml(t.floor)}] ${escHtml(t.name)}</option>`),
+          `<option value="__new_team__">➕ 새 팀 만들어 배정...</option>`
+        ].join('');
+
+        return `
+          <tr draggable="true" data-row-drag-aid="${escHtml(ag.id)}">
+            <td>
+              <div style="display:flex;align-items:center;gap:8px;cursor:grab">
+                <span style="color:#94a3b8;font-size:12px" title="드래그하여 위 팀 카드에 놓기">⋮⋮</span>
+                <div style="width:30px;height:34px;flex-shrink:0">${CharacterEngine.render(ag)}</div>
+                <div>
+                  <div style="font-weight:800;color:#0f172a">#${escHtml(ag.id)} ${escHtml(ag.name)}</div>
+                  ${belongTeams.length > 1 ? `<div style="font-size:9px;color:#0284c7;font-weight:700">겸임: ${belongTeams.map(x => escHtml(x.name)).join(', ')}</div>` : ''}
+                </div>
+              </div>
+            </td>
+            <td>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span class="char-cli-badge ${escHtml(cliKey)}" style="margin:0">${escHtml(ag.triadRole || 'BUILDER')} · ${escHtml(cliLbl)}</span>
+                <span style="font-size:9.5px;font-weight:700;color:#0f6848;background:#f0fdf4;border:1px solid #bbf7d0;padding:1.5px 6px;border-radius:5px">🤖 ${escHtml(agModelDisp)}</span>
+              </div>
+            </td>
+            <td>
+              <select class="triad-cli-select sel-row-team" data-aid="${escHtml(ag.id)}" style="height:29px;font-size:10.5px;background:#fff;min-width:190px">${teamOpts}</select>
+            </td>
+            <td>
+              <div style="display:flex;gap:5px;align-items:center">
+                <button type="button" class="btn small btn-row-focus-studio" data-aid="${escHtml(ag.id)}" style="height:26px;padding:0 8px;font-size:9.5px">⚙ 실행모델·페르소나 편집 ↓</button>
+                <a href="office.html" class="btn small" style="height:26px;padding:0 8px;font-size:9.5px;background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">⬡ 오피스 ↗</a>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      tbodyEl.querySelectorAll('[data-row-drag-aid]').forEach(row => {
+        row.addEventListener('dragstart', (ev) => {
+          ev.dataTransfer.setData('text/plain', row.dataset.rowDragAid);
+          ev.dataTransfer.effectAllowed = 'move';
+        });
+      });
+      tbodyEl.querySelectorAll('.sel-row-team').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const aid = sel.dataset.aid;
+          const val = sel.value;
+          if (val === '__new_team__') {
+            renderAgentsTeamPlacementBoard(ts);
+            openTeamBuilderModal(null);
+            return;
+          }
+          await assignAgentToTeamAndPlace(aid, val, 'move');
+        });
+      });
+      tbodyEl.querySelectorAll('.btn-row-focus-studio').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (studioSelectAgentFn) studioSelectAgentFn(btn.dataset.aid, true);
+        });
+      });
+    }
   }
 
   function ensureTeamBuilderModal() {
@@ -3991,9 +5161,15 @@
             <div class="team-member-pick-grid" id="tbMembersGrid"></div>
           </div>
 
-          <!-- 3. 팀 전용 Triad 역할 CLI 배정 -->
+          <!-- 3. 팀 전용 Triad 역할 CLI 배정 & 오케스트레이터 엔진 -->
           <div style="padding:11px 13px;border-radius:11px;background:#ffffff;border:1px solid #e2e8f0;display:flex;flex-direction:column;gap:8px">
-            <strong style="font-size:11.5px;color:#0f172a">⚙️ 팀 전용 파이프라인 역할 CLI 배정</strong>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <strong style="font-size:11.5px;color:#0f172a">⚙️ 팀 전용 파이프라인 역할 CLI &amp; 오케스트레이터 배정</strong>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:800;color:#1e293b">
+                <span>🧠 오케스트레이터:</span>
+                <select id="tbOrchestratorSelect" class="triad-cli-select" style="height:29px;min-width:230px;background:#f8fafc"></select>
+              </label>
+            </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
               <label class="studio-field"><span>👑 HEAD (계획·판정)</span><select id="tbRoleHead" class="triad-cli-select" style="height:31px"></select></label>
               <label class="studio-field"><span>🛠 BUILDER (구현 1)</span><select id="tbRoleBuilder" class="triad-cli-select" style="height:31px"></select></label>
@@ -4121,7 +5297,7 @@
         });
         const d = await res.json().catch(() => ({}));
         if (res.ok && d.teams_summary) {
-          renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
           close();
         } else {
           const fb = document.getElementById('tbModalFeedback');
@@ -4161,6 +5337,7 @@
           description: (document.getElementById('tbDescInput')?.value || '').trim(),
           floor: floorVal,
           color: document.getElementById('tbColorSelect')?.value || '#0f6848',
+          orchestrator_mode: document.getElementById('tbOrchestratorSelect')?.value || 'auto',
           member_ids: selectedMembers,
           roles: {
             head: document.getElementById('tbRoleHead')?.value || 'claude',
@@ -4194,19 +5371,21 @@
           if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '팀 저장 실패'}`; }
           return;
         }
-        // Sync member floor placements in localStorage if requested so office.html reflects immediately
+        // Sync member floor & seat placements in localStorage if requested so office.html reflects immediately
         if (syncFloor && d.saved_team) {
           try {
             selectedMembers.forEach(aid => {
-              const mAgent = ALL_AGENT_PRESETS.find(a => a.id === aid);
-              if (mAgent) mAgent.floor = floorVal;
-              if (savedCharAiConfigs[aid]) savedCharAiConfigs[aid].floor = floorVal;
+              syncAgentOfficePlacement(aid, floorVal, null, false);
             });
-            localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
+            fetch('/ops/character-config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ configs: savedCharAiConfigs })
+            }).catch(() => {});
           } catch (_) {}
         }
         if (d.teams_summary) {
-          renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
           if (d.saved_team) {
             const sel = document.getElementById('triadTeamSelect');
             if (sel) sel.value = d.saved_team.id;
@@ -4255,6 +5434,21 @@
 
     const delBtn = document.getElementById('btnTbDeleteTeam');
     if (delBtn) delBtn.style.display = (existing && teams.length > 1) ? 'inline-flex' : 'none';
+
+    // Populate Team Orchestrator Select gated by subscription tier
+    const tbOrchSel = document.getElementById('tbOrchestratorSelect');
+    if (tbOrchSel) {
+      const allowed = lastDiagnostics?.allowed_orchestrators || { standard: true, argon: false, carbon: false };
+      let curOrch = existing?.orchestrator_mode || 'auto';
+      if (curOrch === 'carbon' && !allowed.carbon) curOrch = allowed.argon ? 'argon' : 'auto';
+      if (curOrch === 'argon' && !allowed.argon) curOrch = 'auto';
+      tbOrchSel.innerHTML = [
+        `<option value="auto" ${curOrch === 'auto' ? 'selected' : ''}>🔄 전역 오케스트레이션 설정 따름</option>`,
+        `<option value="standard" ${curOrch === 'standard' ? 'selected' : ''}>⚡ 기본 파이프라인 (Standard · 전 등급)</option>`,
+        `<option value="argon" ${curOrch === 'argon' ? 'selected' : ''} ${!allowed.argon ? 'disabled' : ''}>${allowed.argon ? '🔷 Orchestrator (Argon) · Pro 이상' : '🔒 Orchestrator (Argon) — Pro 구독 필요'}</option>`,
+        `<option value="carbon" ${curOrch === 'carbon' ? 'selected' : ''} ${!allowed.carbon ? 'disabled' : ''}>${allowed.carbon ? '💎 Orchestrator (Carbon) · Ultra 전용' : '🔒 Orchestrator (Carbon) — Ultra 구독 전용'}</option>`
+      ].join('');
+    }
 
     // Populate Role CLI selects
     const provEntries = lastDiagnostics?.providers
@@ -4315,6 +5509,19 @@
     document.getElementById('btnDashCreateTeam')?.addEventListener('click', () => openTeamBuilderModal(null));
     document.getElementById('btnSettingsCreateTeam')?.addEventListener('click', () => openTeamBuilderModal(null));
     document.getElementById('btnOpenTeamModalFromAgents')?.addEventListener('click', () => openTeamBuilderModal(null));
+    document.getElementById('btnAgentsAddNewTeam')?.addEventListener('click', () => openTeamBuilderModal(null));
+    document.getElementById('btnAgentsQuickAddStaff')?.addEventListener('click', () => {
+      if (modularAgents.length >= ALL_AGENT_PRESETS.length) {
+        showAgentsPlacementFeedback(`최대 ${ALL_AGENT_PRESETS.length}명까지 AI 직원을 충원할 수 있습니다.`, true);
+        return;
+      }
+      const nextAg = ALL_AGENT_PRESETS[modularAgents.length];
+      modularAgents.push(nextAg);
+      const plc = syncAgentOfficePlacement(nextAg.id, nextAg.floor || '2F', null, true);
+      try { localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length)); } catch (_) {}
+      if (latestTeamsSummary) renderTeamsAndWorkspacesDashboard(latestTeamsSummary);
+      showAgentsPlacementFeedback(`✨ 새 AI 직원 [#${nextAg.id} ${nextAg.name}] 충원 완료 (${plc.floorStr} · #${plc.seatIndex + 1}번석 배치)! 원하는 팀으로 드래그하거나 선택해 배정하세요.`);
+    });
     document.getElementById('btnEditSelectedTeam')?.addEventListener('click', () => {
       const tid = document.getElementById('triadTeamSelect')?.value || latestTeamsSummary?.active_team_id || null;
       openTeamBuilderModal(tid);
@@ -4336,14 +5543,14 @@
     document.getElementById('btnRefreshTeamsDashboard')?.addEventListener('click', () => {
       apiFetch('/ops/teams?refresh=1', { cache: 'no-store' })
         .then(r => (r.ok ? r.json() : null))
-        .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts); })
+        .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts, true); })
         .catch(() => {});
     });
 
     // Initial load of teams & connected workspaces
     apiFetch('/ops/teams', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
-      .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts); })
+      .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts, true); })
       .catch(() => {});
   }
 
@@ -4508,6 +5715,7 @@
   }
 
   ensureCliSettingsModal();
+  bindOrchestratorModeControls();
   bindProjectOutputDirControls();
   bindTeamsAndWorkspacesControls();
   applyRolesToDOM(currentRoles);

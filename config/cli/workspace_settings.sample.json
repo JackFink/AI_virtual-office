@@ -2,6 +2,7 @@
   "output_dir": "",
   "mirror_to_local": false,
   "recent_dirs": [],
+  "orchestrator_mode": "standard",
   "gdrive_direct_enabled": false,
   "gdrive_folder_id": "root",
   "gdrive_folder_name": "내 드라이브 (루트)",

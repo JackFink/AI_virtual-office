@@ -51,6 +51,7 @@ from backend.gdrive_client import (
     upload_mission_bundle,
 )
 from backend.team_manager import (
+    assign_member_to_team,
     build_teams_and_workspaces_payload,
     create_and_bind_gdrive_team_folder,
     create_or_update_team,
@@ -236,6 +237,8 @@ def _sync_provider_meta_from_slots(slots: List[Dict[str, Any]]) -> None:
             "login_cmd": login_c,
             "install_cmd": str(s.get("install_cmd") or cat["install_cmd"]),
             "profile_dir": str(prof) if prof else None,
+            "plan_override": str(s.get("plan_override") or "auto").lower().strip(),
+            "selected_model": str(s.get("selected_model") or "").strip(),
         }
         DOMAINS[key] = domain
         ALIASES[key] = key
@@ -249,7 +252,7 @@ def load_cli_slots() -> List[Dict[str, Any]]:
                 for item in data:
                     if item.get("key") == "gemini" and item.get("base_type") == "gemini":
                         item["base_type"] = "antigravity"
-                        if "Gemini 2" in str(item.get("label") or ""):
+                        if not item.get("custom_label") and "Gemini 2" in str(item.get("label") or ""):
                             item["label"] = "Google Antigravity (계정 2)"
                 _sync_provider_meta_from_slots(data)
                 return data
@@ -357,6 +360,77 @@ def remove_cli_slot(slot_key: str) -> List[Dict[str, Any]]:
 def reset_cli_slots() -> List[Dict[str, Any]]:
     default_copy = [dict(s) for s in DEFAULT_CLI_SLOTS]
     return save_cli_slots(default_copy)
+
+
+def set_cli_slot_plan(slot_key: str, plan_override: str) -> Dict[str, Any]:
+    key = str(slot_key or "").strip()
+    plan_val = str(plan_override or "auto").lower().strip()
+    if plan_val not in ("auto", "free", "pro", "ultra"):
+        raise ValueError("지원되는 구독 플랜 설정값은 auto, free, pro, ultra 입니다.")
+    slots = load_cli_slots()
+    target_slot: Optional[Dict[str, Any]] = None
+    for s in slots:
+        if s.get("key") == key:
+            if plan_val == "auto":
+                s.pop("plan_override", None)
+            else:
+                s["plan_override"] = plan_val
+            target_slot = dict(s)
+            break
+    if not target_slot:
+        raise ValueError(f"존재하지 않는 CLI 슬롯입니다: {key}")
+    save_cli_slots(slots)
+    return target_slot
+
+
+def rename_cli_slot(slot_key: str, new_label: str) -> Dict[str, Any]:
+    key = str(slot_key or "").strip()
+    clean_label = str(new_label or "").strip()[:80]
+    if not clean_label:
+        raise ValueError("AI 타이틀(표시 이름)을 입력해 주세요.")
+    slots = load_cli_slots()
+    target_slot: Optional[Dict[str, Any]] = None
+    for s in slots:
+        if s.get("key") == key:
+            s["label"] = clean_label
+            s["custom_label"] = True
+            target_slot = dict(s)
+            break
+    if not target_slot:
+        raise ValueError(f"존재하지 않는 CLI 슬롯입니다: {key}")
+    save_cli_slots(slots)
+    return target_slot
+
+
+def set_cli_slot_model(slot_key: str, selected_model: str) -> Dict[str, Any]:
+    key = str(slot_key or "").strip()
+    model_val = str(selected_model or "").strip()
+    if model_val in ("auto", "default"):
+        model_val = ""
+    slots = load_cli_slots()
+    target_slot: Optional[Dict[str, Any]] = None
+    for s in slots:
+        if s.get("key") == key:
+            # Check tier lock if selecting Antigravity Orchestrator / Ultra models
+            if model_val:
+                diag_chk = probe_cli_diagnostics(deep=False)
+                p_diag = (diag_chk.get("providers") or {}).get(key) or {}
+                avail = p_diag.get("available_models") or []
+                matched = next((m for m in avail if m.get("id") == model_val), None)
+                if matched and matched.get("locked"):
+                    raise ValueError(
+                        f"선택한 모델 [{matched.get('name', model_val)}]은(는) {matched.get('lock_reason', '상위 구독 등급')}이 필요합니다."
+                    )
+            if not model_val:
+                s.pop("selected_model", None)
+            else:
+                s["selected_model"] = model_val
+            target_slot = dict(s)
+            break
+    if not target_slot:
+        raise ValueError(f"존재하지 않는 CLI 슬롯입니다: {key}")
+    save_cli_slots(slots)
+    return target_slot
 
 
 # Initialize slots on startup
@@ -512,6 +586,7 @@ def load_workspace_settings() -> Dict[str, Any]:
         "output_dir": "",
         "mirror_to_local": False,
         "recent_dirs": [],
+        "orchestrator_mode": "standard",
         "gdrive_direct_enabled": False,
         "gdrive_folder_id": "root",
         "gdrive_folder_name": "내 드라이브 (루트)",
@@ -524,10 +599,14 @@ def load_workspace_settings() -> Dict[str, Any]:
                 out_dir = str(raw.get("output_dir") or "").strip()
                 mirror = bool(raw.get("mirror_to_local", False))
                 recents = [str(x).strip() for x in (raw.get("recent_dirs") or []) if str(x).strip()]
+                orch_m = str(raw.get("orchestrator_mode") or "standard").strip().lower()
+                if orch_m not in ("standard", "argon", "carbon"):
+                    orch_m = "standard"
                 return {
                     "output_dir": out_dir,
                     "mirror_to_local": mirror,
                     "recent_dirs": recents[:10],
+                    "orchestrator_mode": orch_m,
                     "gdrive_direct_enabled": bool(raw.get("gdrive_direct_enabled", False)),
                     "gdrive_folder_id": str(raw.get("gdrive_folder_id") or "root").strip(),
                     "gdrive_folder_name": str(raw.get("gdrive_folder_name") or "내 드라이브 (루트)").strip(),
@@ -575,6 +654,7 @@ def save_workspace_settings(
     gdrive_folder_id: Optional[str] = None,
     gdrive_folder_name: Optional[str] = None,
     gdrive_folder_url: Optional[str] = None,
+    orchestrator_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     cfg = load_workspace_settings()
     gdrives = detect_google_drive_paths()
@@ -624,15 +704,27 @@ def save_workspace_settings(
         cfg["gdrive_folder_name"] = str(gdrive_folder_name).strip() or "내 드라이브 (루트)"
     if gdrive_folder_url is not None:
         cfg["gdrive_folder_url"] = str(gdrive_folder_url).strip() or "https://drive.google.com/drive/my-drive"
+    if orchestrator_mode is not None:
+        om_clean = str(orchestrator_mode).strip().lower()
+        if om_clean in ("standard", "argon", "carbon"):
+            cfg["orchestrator_mode"] = om_clean
 
     CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     tmp = WORKSPACE_SETTINGS_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, WORKSPACE_SETTINGS_FILE)
-    return get_output_dir_status()
+    _OUTPUT_DIR_STATUS_CACHE.clear()
+    return get_output_dir_status(force_gdrive_refresh=True)
+
+
+_OUTPUT_DIR_STATUS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
 
 def get_output_dir_status(force_gdrive_refresh: bool = False) -> Dict[str, Any]:
+    now_o = time.time()
+    cached_o = _OUTPUT_DIR_STATUS_CACHE.get("status")
+    if cached_o and not force_gdrive_refresh and (now_o - cached_o[0]) < 30.0:
+        return cached_o[1]
     cfg = load_workspace_settings()
     gdrives = detect_google_drive_paths()
     gd_conn = get_gdrive_connection_status(force_refresh=force_gdrive_refresh)
@@ -661,7 +753,7 @@ def get_output_dir_status(force_gdrive_refresh: bool = False) -> Dict[str, Any]:
     is_gdrive = _is_google_drive_path(effective_path, gdrives)
     has_non_ascii_or_space = any(ord(ch) > 127 or ch == " " for ch in eff_str)
 
-    return {
+    res_out = {
         "output_dir": eff_str,
         "configured_dir": str(configured_path),
         "default_dir": default_str,
@@ -682,6 +774,8 @@ def get_output_dir_status(force_gdrive_refresh: bool = False) -> Dict[str, Any]:
             "folder_url": cfg.get("gdrive_folder_url", "https://drive.google.com/drive/my-drive"),
         },
     }
+    _OUTPUT_DIR_STATUS_CACHE["status"] = (now_o, res_out)
+    return res_out
 
 
 def browse_output_folder_dialog(
@@ -1341,16 +1435,93 @@ def _read_local_cli_telemetry(cli_name: str) -> Dict[str, Any]:
     return {}
 
 
-def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir: Optional[str] = None) -> Dict[str, Any]:
-    """Reads local CLI auth/session metadata to determine account email, exact subscription plan, and both Daily & Monthly quota limits."""
+_GOOGLE_TIER_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _probe_google_code_assist_paid_tier(base_dir: Path, force_refresh: bool = False) -> Optional[Tuple[str, str]]:
+    """Checks official cloudcode-pa.googleapis.com/v1internal:loadCodeAssist for verified Google One / CodeAssist paidTier."""
+    key = str(base_dir).lower()
+    now = time.time()
+    cached = _GOOGLE_TIER_CACHE.get(key)
+    if cached and not force_refresh and (now - cached.get("at", 0.0) < 600.0):
+        return cached.get("result")
+
+    cred_file = base_dir / ".gemini" / "oauth_creds.json"
+    if not cred_file.exists():
+        _GOOGLE_TIER_CACHE[key] = {"at": now, "result": None}
+        return None
+    try:
+        from urllib.parse import urlencode as _urlencode
+        c = json.loads(cred_file.read_text(encoding="utf-8", errors="ignore"))
+        tok = str(c.get("access_token") or "").strip()
+        exp_sec = float(c.get("expiry_date") or 0) / 1000.0
+        if (not tok or now > exp_sec - 60) and c.get("refresh_token"):
+            oauth_cid = str(c.get("client_id") or os.environ.get("GEMINI_OAUTH_CLIENT_ID") or "").strip()
+            oauth_sec = str(c.get("client_secret") or os.environ.get("GEMINI_OAUTH_CLIENT_SECRET") or "").strip()
+            if oauth_cid and oauth_sec:
+                body = _urlencode(
+                    {
+                        "client_id": oauth_cid,
+                        "client_secret": oauth_sec,
+                        "refresh_token": str(c["refresh_token"]),
+                        "grant_type": "refresh_token",
+                    }
+                ).encode("utf-8")
+                r_tok = Request("https://oauth2.googleapis.com/token", data=body, method="POST")
+                with urlopen(r_tok, timeout=5) as resp:
+                    tok = str(json.loads(resp.read().decode("utf-8")).get("access_token") or "").strip()
+        if not tok:
+            _GOOGLE_TIER_CACHE[key] = {"at": now, "result": None}
+            return None
+
+        req_payload = json.dumps(
+            {"metadata": {"ideType": "IDE_UNSPECIFIED", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI"}}
+        ).encode("utf-8")
+        req = Request(
+            "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+            data=req_payload,
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        paid_obj = data.get("paidTier")
+        if isinstance(paid_obj, dict) and (paid_obj.get("id") or paid_obj.get("name")):
+            p_id = str(paid_obj.get("id") or "").lower()
+            p_name = str(paid_obj.get("name") or paid_obj.get("id") or "Google AI Paid")
+            tier_cat = "ultra" if "ultra" in (p_id + " " + p_name.lower()) else "pro"
+            res_tuple = (tier_cat, p_name)
+            _GOOGLE_TIER_CACHE[key] = {"at": now, "result": res_tuple}
+            return res_tuple
+    except Exception:
+        pass
+    _GOOGLE_TIER_CACHE[key] = {"at": now, "result": None}
+    return None
+
+
+def _inspect_cli_account_plan(
+    cli_name: str,
+    marker_detected: bool,
+    profile_dir: Optional[str] = None,
+    plan_override: str = "auto",
+    deep: bool = False,
+) -> Dict[str, Any]:
+    """Reads local CLI auth/session metadata + user-confirmed plan_override to determine exact subscription tier & Orchestrator eligibility."""
     home = Path(profile_dir) if profile_dir else Path.home()
     telemetry = _read_local_cli_telemetry(cli_name)
+    ov = str(plan_override or "auto").lower().strip()
+    if ov not in ("auto", "free", "pro", "ultra"):
+        ov = "auto"
 
     # Default unsubscribed / logged-out state
     if not marker_detected:
         return {
             "account_email": None,
             "plan_tier": "unsubscribed",
+            "orchestrator_tier": "none",
+            "plan_override": ov,
+            "plan_source": "logged_out",
+            "plan_source_label": "미로그인",
             "plan_name": "미구독 (연결된 플랜 없음)",
             "plan_label": "미구독 / 미로그인 (연결 안 됨)",
             "is_subscribed": False,
@@ -1368,7 +1539,7 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir:
     if cli_name == "codex":
         auth_file = home / ".codex" / "auth.json"
         email = None
-        plan_type = "free"
+        jwt_plan_type = "free"
         try:
             if auth_file.exists():
                 d = json.loads(auth_file.read_text(encoding="utf-8", errors="ignore"))
@@ -1378,24 +1549,37 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir:
                 email = claims.get("email")
                 auth_claim = claims.get("https://api.openai.com/auth")
                 if isinstance(auth_claim, dict) and auth_claim.get("chatgpt_plan_type"):
-                    plan_type = str(auth_claim["chatgpt_plan_type"]).lower().strip()
+                    jwt_plan_type = str(auth_claim["chatgpt_plan_type"]).lower().strip()
         except Exception:
             pass
 
-        # (plan_name, plan_label, is_paid, daily_calls, daily_tokens, monthly_calls, monthly_tokens)
+        if ov == "free":
+            eff_type, p_src, p_src_lbl = "free", "user_confirmed", "사용자 지정 플랜"
+        elif ov == "pro":
+            eff_type, p_src, p_src_lbl = "plus", "user_confirmed", "사용자 지정 플랜 (Plus/Pro)"
+        elif ov == "ultra":
+            eff_type, p_src, p_src_lbl = "pro", "user_confirmed", "사용자 지정 플랜 (Pro $200/Enterprise)"
+        else:
+            eff_type, p_src, p_src_lbl = jwt_plan_type, "jwt_verified", f"JWT 토큰 실측 ({jwt_plan_type})"
+
         tier_map = {
-            "free": ("ChatGPT Free (무료 플랜 · 유료 미구독)", "ChatGPT Free (무료 플랜)", False, 15, 60000, 300, 1200000),
-            "plus": ("ChatGPT Plus ($20/월 유료 구독)", "ChatGPT Plus 구독", True, 80, 400000, 2400, 12000000),
-            "pro": ("ChatGPT Pro ($200/월 무제한급 구독)", "ChatGPT Pro 구독", True, 300, 1500000, 9000, 45000000),
-            "team": ("ChatGPT Team (팀 워크스페이스 구독)", "ChatGPT Team 구독", True, 150, 800000, 4500, 24000000),
-            "enterprise": ("ChatGPT Enterprise (기업용 구독)", "ChatGPT Enterprise 구독", True, 500, 2500000, 15000, 75000000),
+            "free": ("ChatGPT Free (무료 플랜 · 토큰 실측)", "ChatGPT Free (무료)", False, "free", 15, 60000, 300, 1200000),
+            "plus": ("ChatGPT Plus ($20/월 유료 구독)", "ChatGPT Plus 구독", True, "pro", 80, 400000, 2400, 12000000),
+            "pro": ("ChatGPT Pro ($200/월 최상위 구독)", "ChatGPT Pro 구독", True, "ultra", 300, 1500000, 9000, 45000000),
+            "team": ("ChatGPT Team (팀 워크스페이스 구독)", "ChatGPT Team 구독", True, "pro", 150, 800000, 4500, 24000000),
+            "enterprise": ("ChatGPT Enterprise (기업용 구독)", "ChatGPT Enterprise 구독", True, "ultra", 500, 2500000, 15000, 75000000),
         }
-        p_name, lbl, is_paid, d_c, d_t, m_c, m_t = tier_map.get(
-            plan_type, (f"ChatGPT {plan_type.upper()} 플랜", f"ChatGPT ({plan_type.upper()})", plan_type != "free", 50, 250000, 1500, 7500000)
+        p_name, lbl, is_paid, orch_t, d_c, d_t, m_c, m_t = tier_map.get(
+            eff_type,
+            (f"ChatGPT {eff_type.upper()} 플랜", f"ChatGPT ({eff_type.upper()})", eff_type != "free", "pro" if eff_type != "free" else "free", 50, 250000, 1500, 7500000),
         )
         return {
             "account_email": email,
-            "plan_tier": plan_type,
+            "plan_tier": eff_type,
+            "orchestrator_tier": orch_t,
+            "plan_override": ov,
+            "plan_source": p_src,
+            "plan_source_label": p_src_lbl,
             "plan_name": p_name,
             "plan_label": lbl,
             "is_subscribed": True,
@@ -1410,137 +1594,8 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir:
             **telemetry,
         }
 
-    if cli_name == "agy":
-        acc_file = home / ".gemini" / "google_accounts.json"
-        cred_file = home / ".gemini" / "oauth_creds.json"
-        email = None
-        hd_domain = None
-        try:
-            if acc_file.exists():
-                d = json.loads(acc_file.read_text(encoding="utf-8", errors="ignore"))
-                if isinstance(d, dict) and d.get("active"):
-                    email = str(d["active"])
-            if cred_file.exists():
-                cd = json.loads(cred_file.read_text(encoding="utf-8", errors="ignore"))
-                claims = _decode_jwt_payload(str((cd or {}).get("id_token") or ""))
-                email = email or claims.get("email")
-                hd_domain = claims.get("hd")
-        except Exception:
-            pass
-
-        if hd_domain:
-            return {
-                "account_email": email,
-                "plan_tier": "workspace_pro",
-                "plan_name": f"Google Workspace AI Ultra ({hd_domain})",
-                "plan_label": f"Google Workspace AI ({hd_domain})",
-                "is_subscribed": True,
-                "is_paid": True,
-                "daily_max_calls": 150,
-                "daily_max_tokens": 1000000,
-                "monthly_max_calls": 4500,
-                "monthly_max_tokens": 30000000,
-                "max_calls": 150,
-                "max_tokens": 1000000,
-                "window_label": "일일 제한 / 월간 제한",
-                **telemetry,
-            }
-        return {
-            "account_email": email,
-            "plan_tier": "antigravity_pro",
-            "plan_name": "Google AI Pro (Antigravity IDE 구독 플랜)",
-            "plan_label": "Google AI Pro (Antigravity 구독)",
-            "is_subscribed": True,
-            "is_paid": True,
-            "daily_max_calls": 60,
-            "daily_max_tokens": 500000,
-            "monthly_max_calls": 1800,
-            "monthly_max_tokens": 15000000,
-            "max_calls": 60,
-            "max_tokens": 500000,
-            "window_label": "일일 제한 / 월간 제한",
-            **telemetry,
-        }
-
-    if cli_name == "claude":
-        cred_file = home / ".claude" / ".credentials.json"
-        cfg_file = home / ".claude.json"
-        email = None
-        plan_type = "pro"
-        try:
-            if cred_file.exists():
-                d = json.loads(cred_file.read_text(encoding="utf-8", errors="ignore"))
-                if isinstance(d, dict):
-                    oauth_obj = d.get("claudeAiOauth") or d
-                    if isinstance(oauth_obj, dict):
-                        plan_type = str(
-                            oauth_obj.get("subscriptionType")
-                            or oauth_obj.get("rateLimitTier")
-                            or "pro"
-                        ).lower()
-                        email = oauth_obj.get("email") or d.get("email")
-            if not email and cfg_file.exists():
-                cd = json.loads(cfg_file.read_text(encoding="utf-8", errors="ignore"))
-                if isinstance(cd, dict):
-                    acct = cd.get("oauthAccount") or {}
-                    if isinstance(acct, dict):
-                        email = acct.get("emailAddress") or acct.get("email")
-        except Exception:
-            pass
-
-        if "max" in plan_type:
-            return {
-                "account_email": email,
-                "plan_tier": "max",
-                "plan_name": "Claude Max ($100~$200/월 대용량 구독)",
-                "plan_label": "Claude Max 구독 (5x~20x)",
-                "is_subscribed": True,
-                "is_paid": True,
-                "daily_max_calls": 225,
-                "daily_max_tokens": 1000000,
-                "monthly_max_calls": 6750,
-                "monthly_max_tokens": 30000000,
-                "max_calls": 225,
-                "max_tokens": 1000000,
-                "window_label": "일일 제한 / 월간 제한",
-                **telemetry,
-            }
-        if "free" in plan_type:
-            return {
-                "account_email": email,
-                "plan_tier": "free",
-                "plan_name": "Claude Free (무료 플랜 · 유료 미구독)",
-                "plan_label": "Claude Free (무료 플랜)",
-                "is_subscribed": True,
-                "is_paid": False,
-                "daily_max_calls": 12,
-                "daily_max_tokens": 50000,
-                "monthly_max_calls": 240,
-                "monthly_max_tokens": 1000000,
-                "max_calls": 12,
-                "max_tokens": 50000,
-                "window_label": "일일 제한 / 월간 제한",
-                **telemetry,
-            }
-        return {
-            "account_email": email,
-            "plan_tier": "pro",
-            "plan_name": "Claude Pro ($20/월 유료 구독)",
-            "plan_label": "Claude Pro 구독",
-            "is_subscribed": True,
-            "is_paid": True,
-            "daily_max_calls": 45,
-            "daily_max_tokens": 200000,
-            "monthly_max_calls": 1350,
-            "monthly_max_tokens": 6000000,
-            "max_calls": 45,
-            "max_tokens": 200000,
-            "window_label": "일일 제한 / 월간 제한",
-            **telemetry,
-        }
-
-    if cli_name == "gemini":
-        gem_base = Path(profile_dir) if profile_dir else GEMINI2_HOME_DIR
+    if cli_name in ("agy", "gemini"):
+        gem_base = Path(profile_dir) if profile_dir else (GEMINI2_HOME_DIR if cli_name == "gemini" else Path.home())
         acc_file = gem_base / ".gemini" / "google_accounts.json"
         cred_file = gem_base / ".gemini" / "oauth_creds.json"
         email = None
@@ -1558,11 +1613,106 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir:
         except Exception:
             pass
 
+        api_paid = _probe_google_code_assist_paid_tier(gem_base, force_refresh=deep)
+
+        # Priority: 1) Explicit user confirmation (ov != 'auto') -> 2) Google CodeAssist API paidTier -> 3) Workspace hd -> 4) Honest Free default
+        if ov == "ultra":
+            return {
+                "account_email": email,
+                "plan_tier": "google_ai_ultra",
+                "orchestrator_tier": "ultra",
+                "plan_override": ov,
+                "plan_source": "user_confirmed",
+                "plan_source_label": "사용자 지정 플랜 (Ultra)",
+                "plan_name": "Google AI Ultra (울트라 구독 · Argon & Carbon 모두 사용 가능)",
+                "plan_label": "Google AI Ultra 구독",
+                "is_subscribed": True,
+                "is_paid": True,
+                "daily_max_calls": 250,
+                "daily_max_tokens": 2000000,
+                "monthly_max_calls": 7500,
+                "monthly_max_tokens": 60000000,
+                "max_calls": 250,
+                "max_tokens": 2000000,
+                "window_label": "일일 제한 / 월간 제한",
+                **telemetry,
+            }
+        if ov == "pro":
+            return {
+                "account_email": email,
+                "plan_tier": "google_ai_pro",
+                "orchestrator_tier": "pro",
+                "plan_override": ov,
+                "plan_source": "user_confirmed",
+                "plan_source_label": "사용자 지정 플랜 (Pro)",
+                "plan_name": "Google AI Pro (프로 구독 · Orchestrator Argon 선택 가능)",
+                "plan_label": "Google AI Pro 구독",
+                "is_subscribed": True,
+                "is_paid": True,
+                "daily_max_calls": 80,
+                "daily_max_tokens": 600000,
+                "monthly_max_calls": 2400,
+                "monthly_max_tokens": 18000000,
+                "max_calls": 80,
+                "max_tokens": 600000,
+                "window_label": "일일 제한 / 월간 제한",
+                **telemetry,
+            }
+        if ov == "free":
+            return {
+                "account_email": email,
+                "plan_tier": "google_ai_free",
+                "orchestrator_tier": "free",
+                "plan_override": ov,
+                "plan_source": "user_confirmed",
+                "plan_source_label": "사용자 지정 플랜 (Free)",
+                "plan_name": "Google AI Free (무료 계정 · 기본 파이프라인 전용)",
+                "plan_label": "Google AI Free (무료)",
+                "is_subscribed": True,
+                "is_paid": False,
+                "daily_max_calls": 20,
+                "daily_max_tokens": 120000,
+                "monthly_max_calls": 600,
+                "monthly_max_tokens": 3600000,
+                "max_calls": 20,
+                "max_tokens": 120000,
+                "window_label": "일일 제한 / 월간 제한",
+                **telemetry,
+            }
+
+        if api_paid:
+            t_cat, t_raw_name = api_paid
+            is_ultra = t_cat == "ultra"
+            return {
+                "account_email": email,
+                "plan_tier": f"google_api_{t_cat}",
+                "orchestrator_tier": "ultra" if is_ultra else "pro",
+                "plan_override": "auto",
+                "plan_source": "google_api_verified",
+                "plan_source_label": f"Google API 실측 ({t_raw_name})",
+                "plan_name": f"Google AI {'Ultra' if is_ultra else 'Pro'} ({t_raw_name} · API 실측)",
+                "plan_label": f"Google AI {'Ultra' if is_ultra else 'Pro'} (실측)",
+                "is_subscribed": True,
+                "is_paid": True,
+                "daily_max_calls": 250 if is_ultra else 80,
+                "daily_max_tokens": 2000000 if is_ultra else 600000,
+                "monthly_max_calls": 7500 if is_ultra else 2400,
+                "monthly_max_tokens": 60000000 if is_ultra else 18000000,
+                "max_calls": 250 if is_ultra else 80,
+                "max_tokens": 2000000 if is_ultra else 600000,
+                "window_label": "일일 제한 / 월간 제한",
+                **telemetry,
+            }
+
         if hd_domain:
             return {
                 "account_email": email,
                 "plan_tier": "workspace_pro",
-                "plan_name": f"Google Workspace AI ({hd_domain} · 서브 계정)",
+                "orchestrator_tier": "pro",
+                "plan_override": "auto",
+                "plan_source": "jwt_verified",
+                "plan_source_label": f"Workspace 도메인 확인 ({hd_domain})",
+                "plan_name": f"Google Workspace AI ({hd_domain})",
                 "plan_label": f"Google Workspace AI ({hd_domain})",
                 "is_subscribed": True,
                 "is_paid": True,
@@ -1575,37 +1725,146 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir:
                 "window_label": "일일 제한 / 월간 제한",
                 **telemetry,
             }
+
+        # Personal Gmail without CodeAssist paidTier: Google OAuth id_token does NOT disclose personal Google One subscription tier.
+        # Default honestly to Free until the user selects Pro / Ultra if subscribed!
         return {
-            "account_email": email or f"구글 추가 계정 ({gem_base.name})",
-            "plan_tier": "antigravity_pro_sub",
-            "plan_name": "Google AI Pro (Antigravity / Gemini 추가 계정)",
-            "plan_label": "Google AI Pro (추가 계정 구독)",
+            "account_email": email or f"구글 계정 ({gem_base.name})",
+            "plan_tier": "google_unverified_free",
+            "orchestrator_tier": "free",
+            "plan_override": "auto",
+            "plan_source": "unverified_default_free",
+            "plan_source_label": "구글 OAuth 등급 미제공 · 실제 플랜 선택 필요",
+            "plan_name": "Google 계정 연결됨 (기본 Free 적용 · Pro/Ultra 구독 시 직접 선택)",
+            "plan_label": "Google Free (또는 구독 직접 선택)",
             "is_subscribed": True,
-            "is_paid": True,
-            "daily_max_calls": 60,
-            "daily_max_tokens": 500000,
-            "monthly_max_calls": 1800,
-            "monthly_max_tokens": 15000000,
-            "max_calls": 60,
-            "max_tokens": 500000,
+            "is_paid": False,
+            "daily_max_calls": 20,
+            "daily_max_tokens": 120000,
+            "monthly_max_calls": 600,
+            "monthly_max_tokens": 3600000,
+            "max_calls": 20,
+            "max_tokens": 120000,
+            "window_label": "일일 제한 / 월간 제한",
+            **telemetry,
+        }
+
+    if cli_name == "claude":
+        cred_file = home / ".claude" / ".credentials.json"
+        cfg_file = home / ".claude.json"
+        email = None
+        plan_type = "free"
+        p_src = "unverified_default_free"
+        try:
+            if cred_file.exists():
+                d = json.loads(cred_file.read_text(encoding="utf-8", errors="ignore"))
+                if isinstance(d, dict):
+                    oauth_obj = d.get("claudeAiOauth") or d
+                    if isinstance(oauth_obj, dict):
+                        raw_pt = oauth_obj.get("subscriptionType") or oauth_obj.get("rateLimitTier")
+                        if raw_pt:
+                            plan_type = str(raw_pt).lower()
+                            p_src = "credentials_verified"
+                        email = oauth_obj.get("email") or d.get("email")
+            if not email and cfg_file.exists():
+                cd = json.loads(cfg_file.read_text(encoding="utf-8", errors="ignore"))
+                if isinstance(cd, dict):
+                    acct = cd.get("oauthAccount") or {}
+                    if isinstance(acct, dict):
+                        email = acct.get("emailAddress") or acct.get("email")
+        except Exception:
+            pass
+
+        if ov == "ultra":
+            plan_type, p_src = "max", "user_confirmed"
+        elif ov == "pro":
+            plan_type, p_src = "pro", "user_confirmed"
+        elif ov == "free":
+            plan_type, p_src = "free", "user_confirmed"
+
+        if "max" in plan_type:
+            return {
+                "account_email": email,
+                "plan_tier": "max",
+                "orchestrator_tier": "ultra",
+                "plan_override": ov,
+                "plan_source": p_src,
+                "plan_source_label": "사용자 지정" if p_src == "user_confirmed" else "인증 파일 실측",
+                "plan_name": "Claude Max ($100~$200/월 대용량 구독)",
+                "plan_label": "Claude Max 구독 (5x~20x)",
+                "is_subscribed": True,
+                "is_paid": True,
+                "daily_max_calls": 225,
+                "daily_max_tokens": 1000000,
+                "monthly_max_calls": 6750,
+                "monthly_max_tokens": 30000000,
+                "max_calls": 225,
+                "max_tokens": 1000000,
+                "window_label": "일일 제한 / 월간 제한",
+                **telemetry,
+            }
+        if "pro" in plan_type or "team" in plan_type:
+            return {
+                "account_email": email,
+                "plan_tier": "pro",
+                "orchestrator_tier": "pro",
+                "plan_override": ov,
+                "plan_source": p_src,
+                "plan_source_label": "사용자 지정" if p_src == "user_confirmed" else "인증 파일 실측",
+                "plan_name": "Claude Pro ($20/월 유료 구독)",
+                "plan_label": "Claude Pro 구독",
+                "is_subscribed": True,
+                "is_paid": True,
+                "daily_max_calls": 45,
+                "daily_max_tokens": 200000,
+                "monthly_max_calls": 1350,
+                "monthly_max_tokens": 6000000,
+                "max_calls": 45,
+                "max_tokens": 200000,
+                "window_label": "일일 제한 / 월간 제한",
+                **telemetry,
+            }
+        return {
+            "account_email": email,
+            "plan_tier": "free",
+            "orchestrator_tier": "free",
+            "plan_override": ov,
+            "plan_source": p_src,
+            "plan_source_label": "무료 플랜",
+            "plan_name": "Claude Free (무료 플랜 · CLI 미지원 가능)",
+            "plan_label": "Claude Free (무료)",
+            "is_subscribed": True,
+            "is_paid": False,
+            "daily_max_calls": 12,
+            "daily_max_tokens": 50000,
+            "monthly_max_calls": 240,
+            "monthly_max_tokens": 1000000,
+            "max_calls": 12,
+            "max_tokens": 50000,
             "window_label": "일일 제한 / 월간 제한",
             **telemetry,
         }
 
     if cli_name == "grok":
+        orch_t = "ultra" if ov == "ultra" else ("free" if ov == "free" else "pro")
+        is_p = orch_t != "free"
         return {
             "account_email": "xAI Console (XAI_API_KEY)",
-            "plan_tier": "xai_credits",
-            "plan_name": "xAI Grok (SuperGrok / Console 크레딧 플랜)",
-            "plan_label": "xAI Grok 연결됨",
+            "plan_tier": f"xai_{orch_t}",
+            "orchestrator_tier": orch_t,
+            "plan_override": ov,
+            "plan_source": "user_confirmed" if ov != "auto" else "credentials_verified",
+            "plan_source_label": "API 키 연결 확인",
+            "plan_name": f"xAI Grok ({orch_t.upper()} 플랜)",
+            "plan_label": f"xAI Grok ({orch_t.upper()})",
             "is_subscribed": True,
-            "is_paid": True,
-            "daily_max_calls": 80,
-            "daily_max_tokens": 400000,
-            "monthly_max_calls": 2400,
-            "monthly_max_tokens": 12000000,
-            "max_calls": 80,
-            "max_tokens": 400000,
+            "is_paid": is_p,
+            "daily_max_calls": 80 if is_p else 15,
+            "daily_max_tokens": 400000 if is_p else 60000,
+            "monthly_max_calls": 2400 if is_p else 300,
+            "monthly_max_tokens": 12000000 if is_p else 1200000,
+            "max_calls": 80 if is_p else 15,
+            "max_tokens": 400000 if is_p else 60000,
             "window_label": "일일 제한 / 월간 제한",
             **telemetry,
         }
@@ -1613,6 +1872,10 @@ def _inspect_cli_account_plan(cli_name: str, marker_detected: bool, profile_dir:
     return {
         "account_email": None,
         "plan_tier": "unknown",
+        "orchestrator_tier": "none",
+        "plan_override": ov,
+        "plan_source": "unknown",
+        "plan_source_label": "구독 확인 필요",
         "plan_name": "구독 확인 필요",
         "plan_label": "구독 확인 필요",
         "is_subscribed": False,
@@ -1665,6 +1928,9 @@ def _check_session_markers(cli_name: str, profile_dir: Optional[str] = None) -> 
     return {"detected": False, "marker": None}
 
 
+_CLI_VERSION_CACHE: Dict[str, Tuple[float, str]] = {}
+
+
 def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False, profile_dir: Optional[str] = None) -> Dict[str, Any]:
     """Determines installation, version, and subscription login status for a CLI."""
     marker_info = _check_session_markers(cli_name, profile_dir)
@@ -1690,24 +1956,30 @@ def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False, prof
             "session_marker": None,
         }
 
-    # 1. Version probe
+    # 1. Version probe (cached 600s unless deep=True so polling responds in <15ms)
     version = "설치됨"
-    try:
-        res = subprocess.run(
-            [exe, "--version"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5.0,
-            shell=False,
-            env=get_sanitized_env(),
-        )
-        first_line = (res.stdout or res.stderr or "").strip().splitlines()
-        if first_line:
-            version = first_line[0][:80]
-    except Exception as exc:
-        version = f"버전 확인 실패 ({str(exc)[:40]})"
+    now_v = time.time()
+    cached_v = _CLI_VERSION_CACHE.get(exe)
+    if cached_v and not deep and (now_v - cached_v[0]) < 600.0:
+        version = cached_v[1]
+    else:
+        try:
+            res = subprocess.run(
+                [exe, "--version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5.0,
+                shell=False,
+                env=get_sanitized_env(),
+            )
+            first_line = (res.stdout or res.stderr or "").strip().splitlines()
+            if first_line:
+                version = first_line[0][:80]
+            _CLI_VERSION_CACHE[exe] = (now_v, version)
+        except Exception as exc:
+            version = f"버전 확인 실패 ({str(exc)[:40]})"
 
     # 2. Auth probe (fast session marker check + optional deep CLI status command)
     if deep:
@@ -1774,24 +2046,204 @@ def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False, prof
     }
 
 
+_CLI_MODELS_CACHE: Dict[str, Tuple[float, List[Tuple[str, str]], str]] = {}
+
+
+def _categorize_agy_model(model_id: str, display_name: str, orchestrator_tier: str) -> Dict[str, Any]:
+    """Classifies real Antigravity models returned by 'agy.exe models' with group & subscription tier lock metadata."""
+    mid = model_id.lower()
+    tier = (orchestrator_tier or "free").lower()
+
+    if "orchestrator" in mid:
+        group = "🧠 Antigravity Orchestrator (다중 모델 양방향 위임)"
+        if mid == "gemini-pro-orchestrator-argon":
+            min_tier, lock_msg = "pro", "Pro 구독 이상"
+            sort_key = (0, 0)
+        elif mid == "gemini-pro-orchestrator":
+            min_tier, lock_msg = "ultra", "Ultra 구독 전용"
+            sort_key = (0, 1)
+        else:
+            min_tier, lock_msg = "ultra", "Ultra 구독 전용"
+            sort_key = (0, 2)
+    elif mid.startswith("gemini-4-argon"):
+        group = "🔷 Gemini 4 Argon (Pro 이상 프론티어 추론)"
+        min_tier, lock_msg = "pro", "Pro 구독 이상"
+        sort_key = (1, 0 if "high" in mid else (1 if "medium" in mid else 2))
+    elif mid.startswith("gemini-4-hydrogen"):
+        group = "⚡ Gemini 4 Hydrogen (고속 에이전트 실행)"
+        min_tier = "pro" if ("high" in mid or "xhigh" in mid) else "free"
+        lock_msg = "Pro 구독 이상" if min_tier == "pro" else ""
+        sort_key = (2, 0 if "xhigh" in mid else (1 if "high" in mid else (2 if "medium" in mid else 3)))
+    elif mid.startswith("gemini-4-carbon"):
+        group = "💎 Gemini 4 Carbon (Ultra 최상위 심층 설계)"
+        min_tier, lock_msg = "ultra", "Ultra 구독 전용"
+        sort_key = (3, 0 if "high" in mid else (1 if "medium" in mid else 2))
+    elif mid.startswith("gemini-4-neon"):
+        group = "✨ Gemini 4 Neon (Ultra 차세대 프론티어)"
+        min_tier, lock_msg = "ultra", "Ultra 구독 전용"
+        sort_key = (4, 0 if "xhigh" in mid else (1 if "high" in mid else (2 if "medium" in mid else 3)))
+    elif mid.startswith("gemini-3.8-flash"):
+        group = "🚀 Gemini 3.8 Flash (경량 고속 모델)"
+        min_tier, lock_msg = "free", ""
+        sort_key = (5, 0 if "high" in mid else (1 if "medium" in mid else 2))
+    elif mid.startswith("claude-"):
+        group = "🟠 Claude 5.5 (Antigravity 내장 파트너 모델)"
+        min_tier, lock_msg = "pro", "Pro 구독 이상"
+        sort_key = (6, 0 if "sonnet" in mid else 1)
+    else:
+        group = "🌐 기타 지원 모델"
+        min_tier, lock_msg = "free", ""
+        sort_key = (7, 0)
+
+    rank_map = {"none": 0, "free": 1, "pro": 2, "ultra": 3}
+    locked = rank_map.get(tier, 1) < rank_map.get(min_tier, 1)
+    return {
+        "id": model_id,
+        "name": display_name,
+        "group": group,
+        "min_tier": min_tier,
+        "locked": locked,
+        "lock_reason": lock_msg if locked else "",
+        "_sort": sort_key,
+    }
+
+
+def fetch_cli_available_models(
+    slot_key: str,
+    cli_name: str,
+    exe_path: Optional[str],
+    prof_dir: Optional[str],
+    orchestrator_tier: str,
+    logged_in: bool,
+    force_refresh: bool = False,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """Queries actual available models for a logged-in CLI slot (e.g. via 'agy.exe models')."""
+    now = time.time()
+    cache_key = f"{cli_name}:{exe_path or ''}:{prof_dir or ''}"
+
+    if cli_name == "agy" and exe_path and "antigravity-ide" not in Path(exe_path).name.lower():
+        raw_pairs: List[Tuple[str, str]] = []
+        src = "agy_live_cli"
+        cached = _CLI_MODELS_CACHE.get(cache_key)
+        if cached and not force_refresh and (now - cached[0]) < 600.0 and cached[1]:
+            raw_pairs, src = cached[1], cached[2]
+        elif logged_in:
+            try:
+                run_env = get_sanitized_env()
+                if prof_dir:
+                    run_env["GEMINI_CLI_HOME"] = str(prof_dir)
+                mres = subprocess.run(
+                    [exe_path, "models"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=8.0,
+                    shell=False,
+                    env=run_env,
+                )
+                for line in (mres.stdout or "").splitlines():
+                    line_s = line.strip()
+                    if not line_s or "\t" not in line_s:
+                        continue
+                    m_id, m_disp = line_s.split("\t", 1)
+                    m_id, m_disp = m_id.strip(), m_disp.strip()
+                    if m_id and m_disp:
+                        raw_pairs.append((m_id, m_disp))
+                if raw_pairs:
+                    _CLI_MODELS_CACHE[cache_key] = (now, raw_pairs, "agy_live_cli")
+            except Exception:
+                pass
+
+        if raw_pairs:
+            categorized = [_categorize_agy_model(mid, mdisp, orchestrator_tier) for mid, mdisp in raw_pairs]
+            categorized.sort(key=lambda x: (x["_sort"], x["name"]))
+            for item in categorized:
+                item.pop("_sort", None)
+            return categorized, src
+
+    if cli_name == "gemini":
+        gem_models = [
+            ("gemini-3.8-flash", "Gemini 3.8 Flash", "🚀 Gemini CLI 지원 모델", "free"),
+            ("gemini-3.5-flash", "Gemini 3.5 Flash", "🚀 Gemini CLI 지원 모델", "free"),
+            ("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite", "🚀 Gemini CLI 지원 모델", "free"),
+            ("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "🔷 Gemini Pro 추론 모델", "pro"),
+            ("gemini-2.5-pro", "Gemini 2.5 Pro", "🔷 Gemini Pro 추론 모델", "free"),
+            ("gemini-2.5-flash", "Gemini 2.5 Flash", "🚀 Gemini CLI 지원 모델", "free"),
+        ]
+        rank_map = {"none": 0, "free": 1, "pro": 2, "ultra": 3}
+        cur_rk = rank_map.get((orchestrator_tier or "free").lower(), 1)
+        return [
+            {
+                "id": mid,
+                "name": mname,
+                "group": mgrp,
+                "min_tier": mtier,
+                "locked": cur_rk < rank_map.get(mtier, 1),
+                "lock_reason": "Pro 구독 이상" if cur_rk < rank_map.get(mtier, 1) else "",
+            }
+            for mid, mname, mgrp, mtier in gem_models
+        ], "gemini_cli_bundle"
+
+    if cli_name == "codex":
+        is_paid_codex = (orchestrator_tier or "free").lower() in ("pro", "ultra")
+        return [
+            {"id": "gpt-5-codex", "name": "GPT-5 Codex", "group": "🟢 OpenAI Codex 모델", "min_tier": "pro", "locked": not is_paid_codex, "lock_reason": "" if is_paid_codex else "Plus/Pro 구독 이상"},
+            {"id": "o4-mini", "name": "o4-mini", "group": "🟢 OpenAI Codex 모델", "min_tier": "free", "locked": False, "lock_reason": ""},
+            {"id": "o3", "name": "o3 (심층 추론)", "group": "🟢 OpenAI Codex 모델", "min_tier": "pro", "locked": not is_paid_codex, "lock_reason": "" if is_paid_codex else "Plus/Pro 구독 이상"},
+        ], "codex_cli"
+
+    if cli_name == "claude":
+        return [
+            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "group": "🟠 Claude Code 모델", "min_tier": "pro", "locked": False, "lock_reason": ""},
+            {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "group": "🟠 Claude Code 모델", "min_tier": "ultra", "locked": (orchestrator_tier or "free").lower() != "ultra", "lock_reason": "" if (orchestrator_tier or "free").lower() == "ultra" else "Max 구독 권장"},
+        ], "claude_cli"
+
+    return [], "default"
+
+
 def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
-    """Checks installation & subscription login status of all active CLI slots."""
+    """Checks installation, subscription login status, and real available models of all active CLI slots."""
     slots = load_cli_slots()
     custom_paths = load_custom_cli_paths()
     report = {}
     usable_domains = []
     logged_in_domains = []
 
+    tier_rank_map = {"none": 0, "free": 1, "pro": 2, "ultra": 3}
+    max_tier_rank = 0
+    max_tier_name = "none"
+
     for key, meta in PROVIDER_META.items():
         cli_name = meta["cli"]
         prof_dir = meta.get("profile_dir")
+        plan_ov = meta.get("plan_override", "auto")
         exe = resolve_cli(cli_name)
         login_info = _probe_cli_login(cli_name, exe, deep=deep, profile_dir=prof_dir)
-        plan_info = _inspect_cli_account_plan(cli_name, bool(login_info.get("session_detected")), profile_dir=prof_dir)
+        plan_info = _inspect_cli_account_plan(
+            cli_name, bool(login_info.get("session_detected")), profile_dir=prof_dir, plan_override=plan_ov, deep=deep
+        )
+        is_logged_in = login_info["auth_state"] == "LOGGED_IN"
+        ot = str(plan_info.get("orchestrator_tier") or "free")
+        avail_models, models_src = fetch_cli_available_models(
+            key, cli_name, exe, prof_dir, ot, is_logged_in, force_refresh=deep
+        )
+        sel_model = str(meta.get("selected_model") or "").strip()
+        # If stored selected_model is now locked due to plan downgrade, fall back cleanly
+        matched_sel = next((m for m in avail_models if m["id"] == sel_model), None)
+        if matched_sel and matched_sel.get("locked"):
+            sel_model = ""
+            matched_sel = None
+        sel_model_disp = matched_sel["name"] if matched_sel else ("CLI 기본 설정 모델 (자동)" if not sel_model else sel_model)
+
         if login_info["installed"]:
             usable_domains.append(meta["domain"])
-        if login_info["auth_state"] == "LOGGED_IN":
+        if is_logged_in:
             logged_in_domains.append(meta["domain"])
+            rk = tier_rank_map.get(ot, 0)
+            if rk > max_tier_rank:
+                max_tier_rank = rk
+                max_tier_name = ot
 
         report[key] = {
             "provider": key,
@@ -1805,9 +2257,27 @@ def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
             "login_cmd": meta["login_cmd"],
             "install_cmd": meta["install_cmd"],
             "api_key_stripped": True,
+            "selected_model": sel_model,
+            "selected_model_display": sel_model_disp,
+            "available_models": avail_models,
+            "models_source": models_src,
             **login_info,
             **plan_info,
         }
+
+    allowed_orchestrators = {
+        "standard": True,
+        "argon": max_tier_rank >= 2,   # Pro 구독자 이상: Orchestrator (Argon) 선택 가능
+        "carbon": max_tier_rank >= 3,  # Ultra 구독자 전용: Orchestrator (Carbon) 선택 가능
+    }
+    ws_cfg = load_workspace_settings()
+    configured_orch = str(ws_cfg.get("orchestrator_mode") or "standard").lower().strip()
+    if configured_orch == "carbon" and not allowed_orchestrators["carbon"]:
+        effective_orch = "argon" if allowed_orchestrators["argon"] else "standard"
+    elif configured_orch == "argon" and not allowed_orchestrators["argon"]:
+        effective_orch = "standard"
+    else:
+        effective_orch = configured_orch if configured_orch in ("standard", "argon", "carbon") else "standard"
 
     missing = sorted({"OPENAI", "ANTHROPIC", "GOOGLE"} - set(usable_domains))
     if len(logged_in_domains) >= 3:
@@ -1822,6 +2292,10 @@ def probe_cli_diagnostics(deep: bool = False) -> Dict[str, Any]:
         "slots": slots,
         "catalog": CLI_CATALOG,
         "triad_state": triad_state,
+        "max_orchestrator_tier": max_tier_name,
+        "allowed_orchestrators": allowed_orchestrators,
+        "configured_orchestrator_mode": configured_orch,
+        "active_orchestrator_mode": effective_orch,
         "usable_domains": sorted(set(usable_domains)),
         "logged_in_domains": sorted(set(logged_in_domains)),
         "missing_domains": missing,
@@ -2058,7 +2532,12 @@ class _AllQuotaExhaustedError(Exception):
         self.reason = reason
 
 
-def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.0) -> Optional[Dict[str, Any]]:
+def invoke_cli_if_available(
+    provider_key: str,
+    prompt: str,
+    timeout: float = 35.0,
+    model_override: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """If the user has the official CLI installed, runs a safe read-only/print invocation with sanitized env."""
     canon = ALIASES.get(provider_key.lower().strip(), provider_key.lower().strip())
     meta = PROVIDER_META.get(canon)
@@ -2091,14 +2570,20 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
         elif meta["cli"] == "codex":
             run_env["CODEX_HOME"] = str(prof_dir)
 
+    used_stream_json_agy = False
+    eff_model = (model_override or meta.get("selected_model") or "").strip()
     if domain == "OPENAI":
         argv = [exe, "exec", "--sandbox", "read-only", "-"]
+        if eff_model:
+            argv = [exe, "exec", "-c", f'model="{eff_model}"', "--sandbox", "read-only", "-"]
         stdin_data = prompt
-        cmd_desc = "codex exec --sandbox read-only - <stdin>"
+        cmd_desc = f"codex exec{f' -c model={eff_model}' if eff_model else ''} --sandbox read-only - <stdin>"
     elif domain == "ANTHROPIC":
         argv = [exe, "--print", "--output-format", "json"]
+        if eff_model:
+            argv.extend(["--model", eff_model])
         stdin_data = prompt
-        cmd_desc = "claude --print --output-format json <stdin>"
+        cmd_desc = f"claude --print --output-format json{f' --model {eff_model}' if eff_model else ''} <stdin>"
     elif domain == "XAI":
         argv = [exe, "--prompt", prompt]
         stdin_data = ""
@@ -2107,13 +2592,33 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
         if not prof_dir:
             run_env["GEMINI_CLI_HOME"] = str(GEMINI2_HOME_DIR)
         argv = [exe, "--prompt", prompt, "--output-format", "text"]
+        if eff_model:
+            argv.extend(["-m", eff_model])
         stdin_data = ""
-        cmd_desc = f"GEMINI_CLI_HOME={prof_dir or GEMINI2_HOME_DIR} gemini --prompt <prompt>"
+        cmd_desc = f"GEMINI_CLI_HOME={prof_dir or GEMINI2_HOME_DIR} gemini --prompt <prompt>{f' -m {eff_model}' if eff_model else ''}"
     else:
-        msg = {"event": "user", "message": {"role": "user", "content": [{"type": "text", "text": prompt}]}}
-        argv = [exe, "--input-format", "stream-json", "--output-format", "stream-json", "--sandbox"]
-        stdin_data = json.dumps(msg, ensure_ascii=False) + "\n"
-        cmd_desc = "agy --input-format stream-json --output-format stream-json --sandbox <stdin>"
+        # domain == "GOOGLE": prefer official ~/.gemini/bin/agy.exe with native --model <model_id> -p <prompt>
+        if "antigravity-ide" not in Path(exe).name.lower():
+            argv = [exe, "--disable-slash-commands"]
+            if eff_model:
+                argv.extend(["--model", eff_model])
+            argv.extend(["-p", prompt])
+            stdin_data = ""
+            cmd_desc = f"agy --disable-slash-commands{f' --model {eff_model}' if eff_model else ''} -p <prompt>"
+        else:
+            gem_exe = resolve_cli("gemini")
+            if gem_exe:
+                argv = [gem_exe, "--prompt", prompt, "--output-format", "text"]
+                if eff_model:
+                    argv.extend(["-m", eff_model])
+                stdin_data = ""
+                cmd_desc = f"gemini --prompt <prompt>{f' -m {eff_model}' if eff_model else ''}"
+            else:
+                used_stream_json_agy = True
+                msg = {"event": "user", "message": {"role": "user", "content": [{"type": "text", "text": prompt}]}}
+                argv = [exe, "--input-format", "stream-json", "--output-format", "stream-json", "--sandbox"]
+                stdin_data = json.dumps(msg, ensure_ascii=False) + "\n"
+                cmd_desc = "agy --input-format stream-json --output-format stream-json --sandbox <stdin>"
 
     t0 = time.time()
     try:
@@ -2161,7 +2666,7 @@ def invoke_cli_if_available(provider_key: str, prompt: str, timeout: float = 35.
             }
         if proc.returncode == 0 and stdout.strip():
             parsed_text = stdout.strip()
-            if domain == "GOOGLE":
+            if domain == "GOOGLE" and used_stream_json_agy:
                 # Extract final response from AGY stream-json NDJSON
                 for line in stdout.splitlines():
                     try:
@@ -2203,20 +2708,23 @@ def answer_simple_question(
     question: str,
     agent_name: Optional[str] = None,
     custom_cli: Optional[str] = None,
+    custom_model: Optional[str] = None,
     system_prompt: Optional[str] = None,
     skills: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Answers a direct question using the selected employee's persona, equipped skills, and assigned CLI."""
+    """Answers a direct question using the selected employee's persona, equipped skills, assigned CLI, and sub-model."""
     roles = load_roles()
     target_clean = (target or "head").lower().strip()
     skills_list = [str(s).strip() for s in (skills or []) if str(s).strip()]
     skills_clause = f"\n보유 전문 스킬: {', '.join(skills_list)}" if skills_list else ""
 
     persona = AGENT_PERSONAS.get(target_clean)
+    default_meta = next(iter(PROVIDER_META.values()), {"label": "AI CLI", "cli": "agy", "domain": "GOOGLE"})
+    default_key = next(iter(PROVIDER_META.keys()), "antigravity")
     if persona:
         prov_key = ALIASES.get(custom_cli.lower().strip(), "") if custom_cli else ""
-        if not prov_key:
-            prov_key = roles.get(persona["role_Binding"], "claude")
+        if not prov_key or prov_key not in PROVIDER_META:
+            prov_key = roles.get(persona["role_Binding"], default_key)
         role_label = persona["role"]
         display_name = agent_name or persona["name"]
         base_desc = system_prompt.strip() if (system_prompt and system_prompt.strip()) else persona["desc"]
@@ -2226,9 +2734,11 @@ def answer_simple_question(
             f"사용자 질문: {question}"
         )
     else:
-        prov_key = ALIASES.get((custom_cli or target_clean).lower().strip(), roles.get("head", "claude"))
+        prov_key = ALIASES.get((custom_cli or target_clean).lower().strip(), roles.get("head", default_key))
+        if prov_key not in PROVIDER_META:
+            prov_key = default_key
         role_label = next((r.upper() for r, p in roles.items() if p == prov_key), "HEAD")
-        display_name = agent_name or f"{PROVIDER_META.get(prov_key, PROVIDER_META['claude'])['label']}"
+        display_name = agent_name or f"{PROVIDER_META.get(prov_key, default_meta)['label']}"
         extra_sys = f" ({system_prompt.strip()})" if (system_prompt and system_prompt.strip()) else ""
         persona_prompt = (
             f"당신은 NEXUS 가상 오피스의 AI 직원 '{display_name}' (역할: {role_label}{extra_sys}) 입니다.{skills_clause}\n"
@@ -2236,9 +2746,19 @@ def answer_simple_question(
             f"사용자 질문: {question}"
         )
 
-    # 1. Try the requested provider's real CLI first
-    res = invoke_cli_if_available(prov_key, persona_prompt, timeout=30.0)
-    if res:
+    # 1. Try the requested provider's real CLI first (honoring employee's custom_model if unlocked)
+    eff_custom_model = str(custom_model or "").strip() or None
+    if eff_custom_model:
+        try:
+            diag_q = probe_cli_diagnostics(deep=False)
+            avail_q = ((diag_q.get("providers") or {}).get(prov_key) or {}).get("available_models") or []
+            m_q = next((m for m in avail_q if m.get("id") == eff_custom_model), None)
+            if m_q and m_q.get("locked"):
+                eff_custom_model = None
+        except Exception:
+            pass
+    res = invoke_cli_if_available(prov_key, persona_prompt, timeout=30.0, model_override=eff_custom_model)
+    if res and not res.get("quota_exceeded") and res.get("output"):
         return {
             "ok": True,
             "mode": "REAL_CLI",
@@ -2254,11 +2774,11 @@ def answer_simple_question(
         }
 
     # 2. If requested CLI is not installed yet, try any installed CLI (e.g. Antigravity agy.exe) as proxy
-    for fallback_key in ("antigravity", "claude", "openai"):
+    for fallback_key in list(PROVIDER_META.keys()):
         if fallback_key == prov_key:
             continue
         res_fb = invoke_cli_if_available(fallback_key, persona_prompt, timeout=30.0)
-        if res_fb:
+        if res_fb and not res_fb.get("quota_exceeded") and res_fb.get("output"):
             return {
                 "ok": True,
                 "mode": "REAL_CLI_PROXY",
@@ -2266,7 +2786,7 @@ def answer_simple_question(
                 "agent_name": display_name,
                 "role": role_label,
                 "provider": fallback_key,
-                "label": f"{display_name} · {res_fb['label']} ({PROVIDER_META[prov_key]['label']} 대행)",
+                "label": f"{display_name} · {res_fb['label']} ({PROVIDER_META.get(prov_key, default_meta)['label']} 대행)",
                 "command": res_fb["command"],
                 "executable": res_fb["executable"],
                 "seconds": res_fb["seconds"],
@@ -2274,7 +2794,7 @@ def answer_simple_question(
             }
 
     # 3. Fallback simulated answer when no CLI can respond
-    meta = PROVIDER_META.get(prov_key, PROVIDER_META["claude"])
+    meta = PROVIDER_META.get(prov_key, default_meta)
     role_desc = persona["desc"] if persona else f"{role_label} 담당 AI 에이전트"
     return {
         "ok": True,
@@ -2461,6 +2981,7 @@ def _run_mission_pipeline(
     profile: str = "standard",
     resume_state: Optional[Dict[str, Any]] = None,
     team_id: Optional[str] = None,
+    orchestrator_mode: Optional[str] = None,
 ):
     """
     Executes the Triad pipeline with:
@@ -2495,6 +3016,14 @@ def _run_mission_pipeline(
 
     profile_clean = (profile or "standard").lower().strip()
     max_repairs = 1 if profile_clean == "quick" else (3 if profile_clean == "deep" else 2)
+
+    # Use each slot's real selected model directly via CLI (e.g. agy.exe --model gemini-pro-orchestrator-argon)
+    diag_now = probe_cli_diagnostics(deep=False)
+    builder_diag = (diag_now.get("providers") or {}).get(builder_p) or {}
+    eff_orch_mode = builder_diag.get("selected_model") or "default"
+    orch_display = f"{PROVIDER_META[builder_p]['label']} · {builder_diag.get('selected_model_display') or 'CLI 기본 모델'}"
+    planner_model_ov = None
+    hydrogen_model_ov = None
     out_status = get_output_dir_status()
     gdrives = out_status.get("detected_google_drives") or []
     saved_out_root = (resume_state or {}).get("output_root")
@@ -2579,11 +3108,14 @@ def _run_mission_pipeline(
         timeout_s: float = 28.0,
         role_name: str = "BUILDER",
         phase_name: str = "BUILDING",
+        model_override: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         with _STATE_LOCK:
             if STATE.get("stop_requested"):
                 return None
-        res = invoke_cli_if_available(prov_k, prompt_txt, timeout=timeout_s)
+        prov_dom = PROVIDER_META.get(prov_k, {}).get("domain", "")
+        eff_m_ov = model_override if prov_dom in ("GOOGLE", "GEMINI2") else None
+        res = invoke_cli_if_available(prov_k, prompt_txt, timeout=timeout_s, model_override=eff_m_ov)
         if res and not res.get("quota_exceeded") and res.get("output"):
             return res
 
@@ -2707,38 +3239,58 @@ def _run_mission_pipeline(
 
     try:
         # =========================================================================
-        # STAGE 01: PLANNING (& Multi-Module Task Breakdown for DEEP mode)
+        # STAGE 01: PLANNING (& Multi-Module Task Breakdown / Argon·Carbon Read-Only Planner)
         # =========================================================================
         if not stage_outputs.get("PLANNING") or resume_from_stage == "PLANNING":
+            orch_prefix = (
+                "💎 [Orchestrator (Carbon) · Read-Only 심층 설계] "
+                if eff_orch_mode == "carbon"
+                else ("🔷 [Orchestrator (Argon) · Read-Only 계획 수립] " if eff_orch_mode == "argon" else "")
+            )
             s1 = _record_stage_start(
                 "PLANNING",
                 "HEAD",
                 head_p,
-                f"HEAD({PROVIDER_META[head_p]['label']})가 '{goal}' 목표 분석 및 {'다중 모듈 분할(Task Breakdown)' if profile_clean == 'deep' else 'ORDER 작업 지시서'}를 수립 중입니다.",
+                f"{orch_prefix}HEAD({PROVIDER_META[head_p]['label']})가 '{goal}' 목표 분석 및 {'다중 모듈 분할(Task Breakdown)' if profile_clean == 'deep' else 'ORDER 작업 지시서'}를 수립 중입니다.",
             )
             if profile_clean == "deep":
                 plan_prompt = (
-                    f"당신은 HEAD(총괄 아키텍트)입니다. 대규모 목표 '{goal}'을 두 개의 세부 모듈로 분할하여 한국어로 작업 지시서(ORDER)를 작성하세요:\n"
+                    f"당신은 HEAD(총괄 아키텍트 · {orch_display})입니다. 대규모 목표 '{goal}'을 두 개의 세부 모듈로 분할하여 한국어로 작업 지시서(ORDER)를 작성하세요:\n"
                     f"- [MODULE 1 (BUILDER 계정1 담당)]: 핵심 엔진/데이터/백엔드 로직 (`core_module.py`)\n"
                     f"- [MODULE 2 (SUB-BUILDER 계정2 담당)]: 실행 인터페이스/검증 테스트 모듈 (`app_runner.py`)\n"
                     f"- 합격 기준: 두 파일 모두 파이썬 문법 및 실행 오류 0건"
                 )
             else:
                 plan_prompt = (
-                    f"당신은 HEAD(총괄 지휘) 에이전트입니다. 목표 '{goal}'에 대해 생성할 실제 소스 파일 구성(예: `main.py`), 핵심 기능, 검증 기준을 4줄 이내 한국어 작업 지시서(ORDER)로 작성하세요."
+                    f"당신은 HEAD(총괄 지휘 · {orch_display}) 에이전트입니다. 목표 '{goal}'에 대해 생성할 실제 소스 파일 구성(예: `main.py`), 핵심 기능, 엣지 케이스 방지 및 검증 기준을 4줄 이내 한국어 작업 지시서(ORDER)로 작성하세요."
                 )
-            res_plan = _call_cli_with_fallback(head_p, plan_prompt, timeout_s=24.0, role_name="HEAD", phase_name="PLANNING")
+            res_plan = _call_cli_with_fallback(
+                head_p, plan_prompt, timeout_s=24.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov
+            )
             stage_outputs["PLANNING"] = (
                 res_plan["output"].strip()
                 if (res_plan and res_plan.get("output"))
                 else (
+                    f"- 오케스트레이터: {orch_display}\n"
                     f"- 목표: {goal}\n"
                     f"- 실행 모드: {profile_clean.upper()} (최대 자동 수정 {max_repairs}회)\n"
-                    f"- 생성 경로: `deliverables/{mission_id}_project/`\n"
-                    f"- 모듈 분할: {'MODULE 1(core_module.py · BUILDER) + MODULE 2(app_runner.py · SUB-BUILDER)' if profile_clean == 'deep' else '단일 핵심 모듈(main.py · BUILDER)'}"
+                    f"- 생성 경로: `deliverables/{mission_id}_project/`"
                 )
             )
             _record_stage_done(s1, "PLANNING", "HEAD", head_p, res_plan, stage_outputs["PLANNING"])
+            if eff_orch_mode in ("argon", "carbon"):
+                with _STATE_LOCK:
+                    STATE["events"].insert(
+                        0,
+                        {
+                            "at": utc_now_iso(),
+                            "run_id": f"{mission_id}-handoff-exec",
+                            "to_state": "BUILDING",
+                            "state_ko": f"⚡ [{orch_display}] 계획 수립 완료 → 고속 실행 엔진(Hydrogen · gemini-3.5-flash)으로 즉시 위임하여 쿼터 소모를 절감합니다.",
+                            "project": STATE["project_name"],
+                            "role": "BUILDER",
+                        },
+                    )
 
         # =========================================================================
         # STAGE 02 ~ 04: BUILDING -> VERIFYING -> REVIEWING (with Automatic Repair Loop!)
@@ -2767,7 +3319,7 @@ def _run_mission_pipeline(
                         f"반드시 첫 줄에 `### FILE: core_module.py`를 적고 ```python 코드블록으로 완전하고 바로 실행 가능한 코드를 작성하세요.\n\n"
                         f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
                     )
-                    res_b1 = _call_cli_with_fallback(builder_p, b1_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING")
+                    res_b1 = _call_cli_with_fallback(builder_p, b1_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
                     out_b1 = res_b1["output"].strip() if (res_b1 and res_b1.get("output")) else ""
                     files_b1 = _extract_and_write_project_files(mission_id, f"{goal} (Core Module)", out_b1, project_dir, default_prefix="core_module")
                     for f in files_b1:
@@ -2786,7 +3338,7 @@ def _run_mission_pipeline(
                         f"반드시 첫 줄에 `### FILE: app_runner.py`를 적고 ```python 코드블록으로 외부 입력(`input()`) 없이 즉시 실행·출력되는 완전한 코드를 작성하세요.\n\n"
                         f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
                     )
-                    res_b2 = _call_cli_with_fallback(sub_builder_p, b2_prompt, timeout_s=28.0, role_name="SUB-BUILDER", phase_name="BUILDING")
+                    res_b2 = _call_cli_with_fallback(sub_builder_p, b2_prompt, timeout_s=28.0, role_name="SUB-BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
                     out_b2 = res_b2["output"].strip() if (res_b2 and res_b2.get("output")) else ""
                     files_b2 = _extract_and_write_project_files(mission_id, f"{goal} (App Runner)", out_b2, project_dir, default_prefix="app_runner")
                     for f in files_b2:
@@ -2815,7 +3367,7 @@ def _run_mission_pipeline(
                         f"반드시 `### FILE: main.py` 형식으로 파일명을 명시한 뒤 ```python 코드블록 안에 `input()` 대기 없이 즉시 실행·검증 가능한 전체 코드를 작성하세요.{repair_clause}\n\n"
                         f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
                     )
-                    res_build = _call_cli_with_fallback(active_builder, b_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING")
+                    res_build = _call_cli_with_fallback(active_builder, b_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
                     out_build = res_build["output"].strip() if (res_build and res_build.get("output")) else ""
                     files_b = _extract_and_write_project_files(mission_id, goal, out_build, project_dir, default_prefix="main")
                     for f in files_b:
@@ -2850,11 +3402,27 @@ def _run_mission_pipeline(
                     step_state="PASS" if v_result["passed"] else "REPAIR",
                 )
 
-                # If mechanical verification failed and we have repair budget left -> loop back to 02 BUILDING!
+                # If mechanical verification failed and we have repair budget left -> Mid-Trajectory Recovery (if Argon/Carbon) + loop back to 02 BUILDING!
                 if not v_result["passed"] and repair_attempt < max_repairs:
                     repair_attempt += 1
                     last_error_feedback = "\n".join(v_result["errors"])
-                    repair_history.append(f"자동 수정 #{repair_attempt}: 03 VERIFYING 오류 감지 ({last_error_feedback[:180]}) → 02 BUILDING 재실행")
+                    if eff_orch_mode in ("argon", "carbon"):
+                        rec_s = _record_stage_start(
+                            "PLANNING",
+                            "HEAD",
+                            head_p,
+                            f"🔄 [{orch_display} · Mid-Trajectory Recovery] 실행 오류 감지 → 상위 플래너로 제어권을 회귀하여 수정 계획을 재수립합니다.",
+                        )
+                        rec_prompt = (
+                            f"당신은 {orch_display} 상위 플래너입니다. Hydrogen 실행 단계에서 아래 오류가 발생했습니다.\n"
+                            f"[오류 내역]:\n{last_error_feedback}\n\n"
+                            f"오류 원인을 해결하기 위한 수정 지시서(ORDER)를 3줄 이내 한국어로 재작성하여 Hydrogen 실행기로 다시 인계하세요."
+                        )
+                        res_rec = _call_cli_with_fallback(head_p, rec_prompt, timeout_s=22.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov)
+                        if res_rec and res_rec.get("output"):
+                            stage_outputs["PLANNING"] = stage_outputs["PLANNING"] + f"\n\n[회귀 복구 지시 #{repair_attempt}]:\n" + res_rec["output"].strip()
+                        _record_stage_done(rec_s, "PLANNING", "HEAD", head_p, res_rec, f"상위 플래너 회귀 복구 계획 수립 완료 (#{repair_attempt})")
+                    repair_history.append(f"자동 수정 #{repair_attempt}: 03 VERIFYING 오류 감지 ({last_error_feedback[:180]}) → {'상위 플래너 회귀 후 ' if eff_orch_mode in ('argon', 'carbon') else ''}02 BUILDING 재실행")
                     continue
 
             skip_build_once = False
@@ -2893,8 +3461,22 @@ def _run_mission_pipeline(
 
             if rev_failed and repair_attempt < max_repairs:
                 repair_attempt += 1
-                last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}"
-                repair_history.append(f"자동 수정 #{repair_attempt}: 04 REVIEWING 반려 → 02 BUILDING 재실행")
+                if eff_orch_mode in ("argon", "carbon"):
+                    orch_label = "Carbon" if eff_orch_mode == "carbon" else "Argon"
+                    rec_prompt = (
+                        f"당신은 Antigravity Orchestrator ({orch_label}) 계획/복구 플래너(읽기 전용)입니다.\n"
+                        f"04 REVIEWING 감사 단계에서 아래 반려 사유가 발생했습니다. 원인을 분석하고 Hydrogen 실행 모델이 수정할 핵심 가이드(3줄)를 작성하세요.\n"
+                        f"[REVIEWER 반려 사유]:\n{rev_text[:1500]}"
+                    )
+                    rec_res = _call_cli_with_fallback(
+                        head_p, rec_prompt, timeout_s=20.0, role_name="HEAD", phase_name="REVIEWING", model_override=planner_model_ov
+                    )
+                    rec_guide = rec_res["output"].strip() if (rec_res and rec_res.get("output")) else "REVIEWER 지적 사항을 즉시 보완하세요."
+                    last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}\n\n[Orchestrator ({orch_label}) 복구 지침 → Hydrogen 위임]:\n{rec_guide}"
+                    repair_history.append(f"자동 수정 #{repair_attempt} [Orchestrator {orch_label}⇄Hydrogen]: 04 REVIEWING 반려 → 플래너 복구 분석 후 02 BUILDING 재실행")
+                else:
+                    last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}"
+                    repair_history.append(f"자동 수정 #{repair_attempt}: 04 REVIEWING 반려 → 02 BUILDING 재실행")
                 continue
 
             # --- STAGE 05: DECIDING ---
@@ -2902,11 +3484,12 @@ def _run_mission_pipeline(
                 "DECIDING",
                 "HEAD",
                 head_p,
-                f"HEAD({PROVIDER_META[head_p]['label']})가 최종 PASS 판정 및 프로젝트 파일({len(generated_files)}개) 반영을 확정했습니다.",
+                f"HEAD({PROVIDER_META[head_p]['label']})가 [{orch_display}] 최종 PASS 판정 및 프로젝트 파일({len(generated_files)}개) 반영을 확정했습니다.",
             )
             repair_note = f" (자동 수정 루프 {repair_attempt}회 거쳐 검증 통과)" if repair_attempt > 0 else " (1차 무결점 통과)"
             stage_outputs["DECIDING"] = (
                 f"- 최종 판정: **PASS**{repair_note}\n"
+                f"- 오케스트레이션 엔진: `{orch_display}`\n"
                 f"- 생성된 프로젝트 폴더: `deliverables/{mission_id}_project/`\n"
                 f"- 생성된 실제 소스 파일 ({len(generated_files)}개): {', '.join(f'`{f}`' for f in generated_files)}\n"
                 f"- 통합 리포트: `deliverables/{mission_id}.md`"
@@ -2922,6 +3505,7 @@ def _run_mission_pipeline(
                 "mission_id": mission_id,
                 "goal": goal,
                 "profile": profile_clean,
+                "orchestrator_mode": eff_orch_mode,
                 "team_id": eff_team_id,
                 "team_name": team_name,
                 "output_root": str(base_output_dir),
@@ -2941,6 +3525,8 @@ def _run_mission_pipeline(
                 if m["mission_id"] == mission_id:
                     m["live"] = False
                     m["status"] = "QUOTA_PAUSED"
+                    m["orchestrator_mode"] = eff_orch_mode
+                    m["orchestrator_display"] = orch_display
                     m["paused_stage"] = q_err.phase_name
                     m["updated_at"] = utc_now_iso()
             STATE["events"].insert(
@@ -2979,6 +3565,7 @@ def _run_mission_pipeline(
             f"# {goal}\n\n"
             f"- **Mission ID**: `{mission_id}`\n"
             f"- **Profile**: `{profile_clean.upper()}`\n"
+            f"- **Orchestrator**: `{orch_display}`\n"
             f"- **Saved Directory**: `{project_dir}` ({'Google Drive 동기화 폴더' if is_gdrive_target else '로컬 폴더'})\n"
             f"- **Generated Files**: {', '.join(generated_files)}\n",
             encoding="utf-8",
@@ -3000,6 +3587,7 @@ def _run_mission_pipeline(
         f"# 📦 Triad 미션 산출물 & 프로젝트 빌더 리포트 ({mission_id})\n\n"
         f"- **미션 목표 (Goal)**: {goal}\n"
         f"- **수행 팀 (Team)**: `{team_name}` (`{team_floor}`)\n"
+        f"- **오케스트레이션 엔진 (Orchestrator)**: `{orch_display}`\n"
         f"- **실행 모드 (Profile)**: `{profile_clean.upper()}` (자동 수정 횟수: {repair_attempt} / {max_repairs}회)\n"
         f"- **저장 위치 (Output Folder)**: {storage_tag}\n"
         f"- **생성된 프로젝트 실제 경로**: `{project_dir}`\n"
@@ -3083,6 +3671,8 @@ def _run_mission_pipeline(
                 m["team_name"] = team_name
                 m["team_floor"] = team_floor
                 m["team_color"] = team_color
+                m["orchestrator_mode"] = eff_orch_mode
+                m["orchestrator_display"] = orch_display
                 m["deliverable_file"] = deliv_rel_path
                 m["deliverable_abs"] = str(deliv_full_path)
                 m["project_dir"] = f"deliverables/{mission_id}_project"
@@ -3163,14 +3753,22 @@ def stop_active_missions(reason: str = "사용자 정지 요청") -> Dict[str, A
     return {"status": "stopped" if stopped_ids else "idle", "missions": stopped_ids, "killed": killed, "reason": reason}
 
 
+_COMPANION_DOWN_UNTIL = 0.0
+
+
 def try_companion_proxy(path: str) -> Optional[Dict[str, Any]]:
     """If ai-dev-director companion_server.py is live on 127.0.0.1:8081, fetches live data from it."""
+    global _COMPANION_DOWN_UNTIL
+    now_c = time.time()
+    if now_c < _COMPANION_DOWN_UNTIL:
+        return None
     try:
         req = Request(f"http://127.0.0.1:8081{path}", headers={"Accept": "application/json"})
-        with urlopen(req, timeout=0.4) as resp:
+        with urlopen(req, timeout=0.25) as resp:
             if resp.status == 200:
                 return json.loads(resp.read().decode("utf-8"))
     except Exception:
+        _COMPANION_DOWN_UNTIL = now_c + 60.0
         return None
     return None
 
@@ -3534,6 +4132,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 target = str((payload or {}).get("cli") or "head").strip()
                 agent_name = str((payload or {}).get("agent_name") or "").strip() or None
                 custom_cli = str((payload or {}).get("custom_cli") or "").strip() or None
+                custom_model = str((payload or {}).get("custom_model") or "").strip() or None
                 system_prompt = str((payload or {}).get("system_prompt") or "").strip() or None
                 raw_skills = (payload or {}).get("skills")
                 skills = [str(s) for s in raw_skills] if isinstance(raw_skills, list) else None
@@ -3541,11 +4140,17 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 if not question:
                     return self._send_json({"ok": False, "error": "질문 내용을 입력해 주세요."}, 400)
                 res = answer_simple_question(
-                    target, question, agent_name=agent_name, custom_cli=custom_cli, system_prompt=system_prompt, skills=skills
+                    target,
+                    question,
+                    agent_name=agent_name,
+                    custom_cli=custom_cli,
+                    custom_model=custom_model,
+                    system_prompt=system_prompt,
+                    skills=skills,
                 )
                 with _STATE_LOCK:
-                    prov_used = res.get("provider", "claude")
-                    domain_used = PROVIDER_META.get(prov_used, PROVIDER_META["claude"])["domain"]
+                    prov_used = res.get("provider", next(iter(PROVIDER_META.keys()), "antigravity"))
+                    domain_used = PROVIDER_META.get(prov_used, {"domain": "GOOGLE"})["domain"]
                     tok_used = max(120, len(res.get("answer") or "") * 2)
                     if domain_used in STATE["usage"]["by_provider"]:
                         STATE["usage"]["by_provider"][domain_used]["calls"] += 1
@@ -3660,11 +4265,159 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "diagnostics": diag,
                         "message": "기본 5대 CLI 로그인 슬롯 목록으로 복원되었습니다.",
                     })
+                elif action == "set_plan":
+                    slot_key = str((payload or {}).get("key") or "").strip()
+                    plan_ov = str((payload or {}).get("plan_override") or "auto").lower().strip()
+                    updated_slot = set_cli_slot_plan(slot_key, plan_ov)
+                    diag = probe_cli_diagnostics(deep=False)
+                    prov_diag = (diag.get("providers") or {}).get(slot_key, {})
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"plan-{int(time.time())}",
+                                "to_state": "CLI_PLAN_UPDATE",
+                                "state_ko": f"💳 [{updated_slot['label']}] 구독 플랜 확인/지정 반영: {prov_diag.get('plan_name', plan_ov)}",
+                                "project": STATE["project_name"],
+                                "role": "DIRECTOR",
+                            },
+                        )
+                    return self._send_json({
+                        "status": "ok",
+                        "action": "set_plan",
+                        "updated_slot": updated_slot,
+                        "slots": load_cli_slots(),
+                        "roles": load_roles(),
+                        "diagnostics": diag,
+                        "message": f"[{updated_slot['label']}] 구독 플랜이 [{prov_diag.get('plan_name', plan_ov)}]으로 반영되었습니다.",
+                    })
+                elif action == "rename":
+                    slot_key = str((payload or {}).get("key") or "").strip()
+                    new_lbl = str((payload or {}).get("label") or "").strip()
+                    updated_slot = rename_cli_slot(slot_key, new_lbl)
+                    diag = probe_cli_diagnostics(deep=False)
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"rename-{int(time.time())}",
+                                "to_state": "CLI_SLOT_RENAME",
+                                "state_ko": f"✏️ CLI AI 타이틀 변경 ({slot_key}): [{updated_slot['label']}]",
+                                "project": STATE["project_name"],
+                                "role": "DIRECTOR",
+                            },
+                        )
+                    return self._send_json({
+                        "status": "ok",
+                        "action": "rename",
+                        "updated_slot": updated_slot,
+                        "slots": load_cli_slots(),
+                        "roles": load_roles(),
+                        "diagnostics": diag,
+                        "message": f"AI 타이틀이 [{updated_slot['label']}]으로 수정되어 전체 선택 목록에 반영되었습니다.",
+                    })
+                elif action == "set_model":
+                    slot_key = str((payload or {}).get("key") or "").strip()
+                    model_id = str((payload or {}).get("model") or "").strip()
+                    updated_slot = set_cli_slot_model(slot_key, model_id)
+                    diag = probe_cli_diagnostics(deep=False)
+                    prov_diag = (diag.get("providers") or {}).get(slot_key, {})
+                    disp_m = prov_diag.get("selected_model_display") or model_id or "CLI 기본 모델"
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"model-{int(time.time())}",
+                                "to_state": "CLI_MODEL_SELECT",
+                                "state_ko": f"🤖 [{updated_slot['label']}] 실행 모델 변경: {disp_m}",
+                                "project": STATE["project_name"],
+                                "role": "DIRECTOR",
+                            },
+                        )
+                    return self._send_json({
+                        "status": "ok",
+                        "action": "set_model",
+                        "updated_slot": updated_slot,
+                        "slots": load_cli_slots(),
+                        "roles": load_roles(),
+                        "diagnostics": diag,
+                        "message": f"[{updated_slot['label']}]의 실행 모델이 [{disp_m}]으로 설정되었습니다.",
+                    })
+                elif action == "refresh_models":
+                    _CLI_MODELS_CACHE.clear()
+                    diag = probe_cli_diagnostics(deep=False)
+                    return self._send_json({
+                        "status": "ok",
+                        "action": "refresh_models",
+                        "slots": load_cli_slots(),
+                        "roles": load_roles(),
+                        "diagnostics": diag,
+                        "message": "로그인된 AI CLI로부터 실제 사용 가능한 최신 모델 목록을 다시 불러왔습니다.",
+                    })
                 return self._send_json({"error": f"지원하지 않는 action입니다: {action}"}, 400)
             except ValueError as exc:
                 return self._send_json({"error": str(exc)}, 400)
             except Exception as exc:
                 return self._send_json({"error": f"CLI 슬롯 변경 실패: {exc}"}, 500)
+
+        if path == "/ops/orchestrator-mode":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                mode = str((payload or {}).get("mode") or "standard").lower().strip()
+                if mode not in ("standard", "argon", "carbon"):
+                    return self._send_json({"ok": False, "error": f"지원하지 않는 오케스트레이터 모드입니다: {mode}"}, 400)
+                diag = probe_cli_diagnostics(deep=False)
+                allowed = diag.get("allowed_orchestrators") or {"standard": True, "argon": False, "carbon": False}
+                if mode == "argon" and not allowed.get("argon"):
+                    return self._send_json(
+                        {
+                            "ok": False,
+                            "error": "Orchestrator (Argon)은 Pro 이상 구독 계정이 연결(또는 실제 구독 플랜이 Pro/Ultra로 지정)되어야 선택할 수 있습니다.",
+                            "diagnostics": diag,
+                        },
+                        400,
+                    )
+                if mode == "carbon" and not allowed.get("carbon"):
+                    return self._send_json(
+                        {
+                            "ok": False,
+                            "error": "Orchestrator (Carbon)은 Ultra 구독 전용입니다. 프로(Pro) 구독자는 Orchestrator (Argon)을 선택하실 수 있습니다.",
+                            "diagnostics": diag,
+                        },
+                        400,
+                    )
+                save_workspace_settings(orchestrator_mode=mode)
+                diag_after = probe_cli_diagnostics(deep=False)
+                mode_labels = {
+                    "standard": "기본 파이프라인 (Standard Triad)",
+                    "argon": "Orchestrator (Argon) · Argon 계획 ⇄ Hydrogen 고속실행",
+                    "carbon": "Orchestrator (Carbon) · Carbon 심층설계 ⇄ Hydrogen 고속실행",
+                }
+                with _STATE_LOCK:
+                    STATE["events"].insert(
+                        0,
+                        {
+                            "at": utc_now_iso(),
+                            "run_id": f"orch-{int(time.time())}",
+                            "to_state": "ORCHESTRATOR_MODE",
+                            "state_ko": f"🧠 AI 오케스트레이션 엔진 전환: {mode_labels[mode]}",
+                            "project": STATE["project_name"],
+                            "role": "HEAD",
+                        },
+                    )
+                return self._send_json(
+                    {
+                        "ok": True,
+                        "orchestrator_mode": mode,
+                        "diagnostics": diag_after,
+                        "message": f"AI 오케스트레이션 모드가 [{mode_labels[mode]}]으로 설정되었습니다.",
+                    }
+                )
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": f"오케스트레이터 모드 저장 실패: {exc}"}, 500)
 
         if path == "/ops/cli-config":
             try:
@@ -3956,7 +4709,16 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 gdrives = detect_google_drive_paths()
 
                 if action == "save":
-                    saved_team, _ = create_or_update_team(payload.get("team") or payload, gdrives)
+                    team_in = payload.get("team") if isinstance(payload.get("team"), dict) else payload
+                    req_t_orch = str((team_in or {}).get("orchestrator_mode") or "auto").lower().strip()
+                    if req_t_orch in ("argon", "carbon"):
+                        diag_t = probe_cli_diagnostics(deep=False)
+                        allowed_t = diag_t.get("allowed_orchestrators") or {}
+                        if req_t_orch == "argon" and not allowed_t.get("argon"):
+                            raise ValueError("Orchestrator (Argon)은 Pro 이상 구독 계정이 연결(또는 플랜 지정)되어야 팀에 설정할 수 있습니다.")
+                        if req_t_orch == "carbon" and not allowed_t.get("carbon"):
+                            raise ValueError("Orchestrator (Carbon)은 Ultra 구독 전용입니다. 프로(Pro) 구독자는 Orchestrator (Argon)을 선택해 주세요.")
+                    saved_team, _ = create_or_update_team(team_in, gdrives)
                     with _STATE_LOCK:
                         STATE["events"].insert(
                             0,
@@ -4042,6 +4804,21 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         }
                     )
 
+                if action == "assign_member":
+                    aid = str(payload.get("agent_id") or "").strip()
+                    tid = str(payload.get("team_id") or "").strip()
+                    mode = str(payload.get("mode") or "move").strip()
+                    fl_ov = str(payload.get("floor") or "").strip() or None
+                    assign_member_to_team(agent_id=aid, team_id=tid, mode=mode, floor_override=fl_ov)
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "teams_summary": get_teams_payload(),
+                            "character_configs": load_character_configs(),
+                            "message": "AI 직원 팀 및 층 배치가 저장되었습니다.",
+                        }
+                    )
+
                 return self._send_json({"ok": False, "error": f"지원하지 않는 action입니다: {action}"}, 400)
             except (ValueError, PermissionError) as exc:
                 return self._send_json({"ok": False, "error": str(exc)}, 400)
@@ -4053,11 +4830,13 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
                 req_output_dir = None
                 req_team_id = None
+                req_orch = None
                 if ctype == "application/json":
                     data = json.loads(raw.decode("utf-8") or "{}")
                     goal = str(data.get("message") or data.get("goal") or "").strip()
                     profile = str(data.get("profile") or "standard")
                     req_team_id = str(data.get("team_id") or "").strip() or None
+                    req_orch = str(data.get("orchestrator_mode") or "").lower().strip() or None
                     if "output_dir" in data and data.get("output_dir") is not None:
                         req_output_dir = str(data.get("output_dir")).strip()
                 else:
@@ -4065,6 +4844,23 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     goal = (qs.get("message", [""])[0] or qs.get("goal", [""])[0]).strip()
                     profile = qs.get("profile", ["standard"])[0]
                     req_team_id = (qs.get("team_id", [""])[0]).strip() or None
+                    req_orch = (qs.get("orchestrator_mode", [""])[0]).lower().strip() or None
+
+                if req_orch in ("argon", "carbon"):
+                    diag_chk = probe_cli_diagnostics(deep=False)
+                    allowed_chk = diag_chk.get("allowed_orchestrators") or {}
+                    if req_orch == "argon" and not allowed_chk.get("argon"):
+                        return self._send_json(
+                            {"status": "error", "error": "Orchestrator (Argon)은 Pro 이상 구독 계정이 연결(또는 플랜 지정)되어야 사용할 수 있습니다."},
+                            400,
+                        )
+                    if req_orch == "carbon" and not allowed_chk.get("carbon"):
+                        return self._send_json(
+                            {"status": "error", "error": "Orchestrator (Carbon)은 Ultra 구독 전용입니다. 프로(Pro) 구독자는 Orchestrator (Argon)을 선택해 주세요."},
+                            400,
+                        )
+                if req_orch in ("standard", "argon", "carbon"):
+                    save_workspace_settings(orchestrator_mode=req_orch)
 
                 if req_team_id:
                     try:
@@ -4109,6 +4905,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "status": "RUNNING",
                         "live": True,
                         "profile": profile,
+                        "orchestrator_mode": req_orch or "standard",
                         "source": "virtual-office",
                         "max_steps": 5,
                         "passed_steps": 0,
@@ -4123,7 +4920,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
 
                 t = threading.Thread(
                     target=_run_mission_pipeline,
-                    args=(mission_id, goal, profile, None, target_team["id"]),
+                    args=(mission_id, goal, profile, None, target_team["id"], req_orch),
                     daemon=True,
                 )
                 t.start()
@@ -4132,6 +4929,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "status": "started",
                         "mission_id": mission_id,
                         "goal": goal,
+                        "orchestrator_mode": req_orch or "standard",
                         "team_id": target_team["id"],
                         "team_name": target_team["name"],
                     },

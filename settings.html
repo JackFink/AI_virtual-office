@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NEXUS · AI 설정 & 직원 질문 / 미션 컨트롤</title>
-<link rel="stylesheet" href="styles.css?v=triad38">
+<link rel="stylesheet" href="styles.css?v=triad44">
 </head>
 <body data-page="settings">
 <div class="app">
@@ -52,126 +52,18 @@
     </div>
   </div>
 
-  <!-- [1] 5대 AI 카드 섹션 (HEAD / BUILDER / SUB-BUILDER / REVIEWER / RESEARCHER) -->
-  <section class="panel settings-section-panel" aria-label="다중 AI CLI 역할 배정 및 한도 게이지">
+  <!-- [1] 연결된 AI 계정 목록 & 구독 한도 현황 섹션 (역할 배정 제외 · 로그인된 계정만 표시) -->
+  <section class="panel settings-section-panel" id="connectedAccountsSection" aria-label="연결된 AI 계정 목록 및 구독 한도 현황">
     <div class="panel-head settings-panel-head">
       <div>
-        <div class="panel-title">01 · 5대 AI 역할 배정 &amp; 구독 CLI 한도 현황 (구글 멀티 계정 지원)</div>
-        <div class="panel-sub">기존 Google Antigravity(계정 1)를 유지한 채 두 번째 구글 제미나이 계정(Google Gemini 2 · gemini)을 독립된 AI 공급자로 추가하여 동시에 운용합니다.</div>
+        <div class="panel-title">01 · 🔗 연결된 AI 계정 목록 &amp; 구독 CLI 한도 현황</div>
+        <div class="panel-sub">현재 실제로 로그인(연결)이 확인된 AI 계정만 표시됩니다. 계정 추가·로그인·타이틀 수정 및 경로 설정은 하단 <b>[03 · AI CLI 로그인 상태 확인]</b>에서 관리할 수 있습니다.</div>
       </div>
-      <span class="status running">5 AI PROVIDERS ACTIVE</span>
+      <span class="status running" id="connectedAccountsCountBadge">연결 계정 확인 중...</span>
     </div>
     <div class="settings-panel-body">
-      <div class="triad-bar settings-triad-grid">
-        <div class="triad-role-card" id="roleCardHead" data-role="head">
-          <div class="triad-role-top">
-            <span class="triad-role-badge role-head">HEAD · 총괄 지휘</span>
-            <select class="triad-cli-select" data-role-select="head" aria-label="HEAD 담당 AI CLI 선택">
-              <option value="claude" selected>Claude Code (claude)</option>
-              <option value="antigravity">Google Antigravity (agy · 계정1)</option>
-              <option value="gemini">Google Antigravity (계정 2)</option>
-              <option value="openai">OpenAI Codex (codex)</option>
-              <option value="grok">xAI Grok (grok)</option>
-            </select>
-          </div>
-          <div class="triad-role-meta">
-            <span>목표 분석 · ORDER 발행 · 최종 판정</span>
-            <strong id="headStatusLabel">대기 (STANDBY)</strong>
-          </div>
-          <div class="cli-quota-box" data-quota-role="head">
-            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="head">일일 0/0회 · 월간 0/0회</strong></div>
-            <div class="cli-quota-track"><span class="cli-quota-fill unsub" data-quota-bar="head" style="width:0%"></span></div>
-            <div class="cli-quota-meta"><span data-quota-tokens="head">플랜 확인 중...</span><span class="cli-quota-pct unsub" data-quota-badge="head">확인 중</span></div>
-          </div>
-        </div>
-
-        <div class="triad-role-card" id="roleCardBuilder" data-role="builder">
-          <div class="triad-role-top">
-            <span class="triad-role-badge role-builder">BUILDER · 구현 코딩 (구글 계정 1)</span>
-            <select class="triad-cli-select" data-role-select="builder" aria-label="BUILDER 담당 AI CLI 선택">
-              <option value="claude">Claude Code (claude)</option>
-              <option value="antigravity" selected>Google Antigravity (agy · 계정1)</option>
-              <option value="gemini">Google Antigravity (계정 2)</option>
-              <option value="openai">OpenAI Codex (codex)</option>
-              <option value="grok">xAI Grok (grok)</option>
-            </select>
-          </div>
-          <div class="triad-role-meta">
-            <span>격리 Worktree · 코드/산출물 구현</span>
-            <strong id="builderStatusLabel">대기 (STANDBY)</strong>
-          </div>
-          <div class="cli-quota-box" data-quota-role="builder">
-            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="builder">일일 1/60회 · 월간 1/1800회</strong></div>
-            <div class="cli-quota-track"><span class="cli-quota-fill safe" data-quota-bar="builder" style="width:98%"></span></div>
-            <div class="cli-quota-meta"><span data-quota-tokens="builder">구독 플랜: Google AI Pro</span><span class="cli-quota-pct safe" data-quota-badge="builder">일일 잔여 98%</span></div>
-          </div>
-        </div>
-
-        <div class="triad-role-card" id="roleCardSubBuilder" data-role="sub_builder">
-          <div class="triad-role-top">
-            <span class="triad-role-badge role-builder" style="background:#e0f2fe;color:#0369a1">SUB-BUILDER · 멀티 제미나이 (계정 2)</span>
-            <select class="triad-cli-select" data-role-select="sub_builder" aria-label="SUB-BUILDER 담당 AI CLI 선택">
-              <option value="claude">Claude Code (claude)</option>
-              <option value="antigravity">Google Antigravity (agy · 계정1)</option>
-              <option value="gemini" selected>Google Antigravity (계정 2)</option>
-              <option value="openai">OpenAI Codex (codex)</option>
-              <option value="grok">xAI Grok (grok)</option>
-            </select>
-          </div>
-          <div class="triad-role-meta">
-            <span>두 번째 구글 계정(GEMINI_CLI_HOME 분리) 독립 실행</span>
-            <strong id="subBuilderStatusLabel">대기 (STANDBY)</strong>
-          </div>
-          <div class="cli-quota-box" data-quota-role="sub_builder">
-            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="sub_builder">일일 0/0회 · 월간 0/0회</strong></div>
-            <div class="cli-quota-track"><span class="cli-quota-fill unsub" data-quota-bar="sub_builder" style="width:0%"></span></div>
-            <div class="cli-quota-meta"><span data-quota-tokens="sub_builder">아래 CLI 설정에서 2번째 구글 계정 로그인 가능</span><span class="cli-quota-pct unsub" data-quota-badge="sub_builder">로그인 대기</span></div>
-          </div>
-        </div>
-
-        <div class="triad-role-card" id="roleCardReviewer" data-role="reviewer">
-          <div class="triad-role-top">
-            <span class="triad-role-badge role-reviewer">REVIEWER · 독립 검수</span>
-            <select class="triad-cli-select" data-role-select="reviewer" aria-label="REVIEWER 담당 AI CLI 선택">
-              <option value="claude">Claude Code (claude)</option>
-              <option value="antigravity">Google Antigravity (agy · 계정1)</option>
-              <option value="gemini">Google Antigravity (계정 2)</option>
-              <option value="openai" selected>OpenAI Codex (codex)</option>
-              <option value="grok">xAI Grok (grok)</option>
-            </select>
-          </div>
-          <div class="triad-role-meta">
-            <span>Scope Guard 검증 · Fail-Closed 리뷰</span>
-            <strong id="reviewerStatusLabel">대기 (STANDBY)</strong>
-          </div>
-          <div class="cli-quota-box" data-quota-role="reviewer">
-            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="reviewer">일일 2/15회 · 월간 2/300회</strong></div>
-            <div class="cli-quota-track"><span class="cli-quota-fill free" data-quota-bar="reviewer" style="width:11%"></span></div>
-            <div class="cli-quota-meta"><span data-quota-tokens="reviewer">구독 플랜: ChatGPT Free</span><span class="cli-quota-pct free" data-quota-badge="reviewer">월간 잔여 100%</span></div>
-          </div>
-        </div>
-
-        <div class="triad-role-card" id="roleCardResearcher" data-role="researcher">
-          <div class="triad-role-top">
-            <span class="triad-role-badge role-director">RESEARCHER · 심층 추론</span>
-            <select class="triad-cli-select" data-role-select="researcher" aria-label="RESEARCHER 담당 AI CLI 선택">
-              <option value="claude">Claude Code (claude)</option>
-              <option value="antigravity">Google Antigravity (agy · 계정1)</option>
-              <option value="gemini">Google Antigravity (계정 2)</option>
-              <option value="openai">OpenAI Codex (codex)</option>
-              <option value="grok" selected>xAI Grok (grok)</option>
-            </select>
-          </div>
-          <div class="triad-role-meta">
-            <span>실시간 정보 탐색 · 다각도 가설 검증</span>
-            <strong id="researcherStatusLabel">대기 (STANDBY)</strong>
-          </div>
-          <div class="cli-quota-box" data-quota-role="researcher">
-            <div class="cli-quota-top"><span>구독 CLI 제한 사용량</span><strong data-quota-text="researcher">일일 0/0회 · 월간 0/0회</strong></div>
-            <div class="cli-quota-track"><span class="cli-quota-fill unsub" data-quota-bar="researcher" style="width:0%"></span></div>
-            <div class="cli-quota-meta"><span data-quota-tokens="researcher">플랜: 미구독 (연결된 플랜 없음)</span><span class="cli-quota-pct unsub" data-quota-badge="researcher">미구독 · 일일 0% / 월간 0%</span></div>
-          </div>
-        </div>
+      <div class="triad-bar settings-triad-grid" id="connectedAccountsGrid">
+        <div style="grid-column:1/-1;padding:18px;text-align:center;color:#64748b;font-size:12px">연결된 AI 계정 목록을 불러오는 중입니다...</div>
       </div>
     </div>
   </section>
@@ -198,6 +90,33 @@
             <button type="button" class="btn small" id="btnEditSelectedTeam" style="height:30px;padding:0 10px;font-size:10.5px;background:#fff">✏️ 선택 팀 &amp; 폴더 편집</button>
             <button type="button" class="btn small primary" id="btnSettingsCreateTeam" style="height:30px;padding:0 11px;font-size:10.5px;background:#0f6848;border-color:#0f6848">➕ 새 팀 만들기</button>
             <a href="index.html#teamsWorkspaceDashboardSection" class="btn small" style="height:30px;padding:0 10px;font-size:10.5px;background:#fff">📂 전체 작업폴더 현황판 ↗</a>
+          </div>
+        </div>
+
+        <!-- [실제 연동] 로그인된 Antigravity / AI CLI 실제 사용 가능 모델 선택 바 (agy.exe models 실시간 조회) -->
+        <div class="orch-mode-bar" id="orchestratorModeBar" aria-label="로그인된 AI 실제 모델 선택">
+          <div class="orch-mode-head">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="background:#0f172a;color:#fff;padding:3px 9px;border-radius:6px;font-size:10.5px;font-weight:800;white-space:nowrap">🤖 로그인된 AI 실제 사용 가능 모델</span>
+              <span id="orchestratorTierStatusBadge" class="orch-tier-pill pro">Antigravity CLI 실시간 모델 목록 조회 중...</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn small" id="btnRefreshRealModels" style="height:27px;padding:0 10px;font-size:10px;background:#fff;border-color:#94a3b8">🔄 실제 모델 목록 새로고침</button>
+              <a href="#cliAuthSection" class="btn small" id="btnJumpToPlanVerify" style="height:27px;padding:0 10px;font-size:10px;background:#fff;border-color:#94a3b8">💳 계정별 플랜·모델 상세 설정 ↓</a>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:minmax(180px,0.8fr) minmax(260px,1.8fr);gap:8px;align-items:end">
+            <label class="settings-select-field" style="gap:4px">
+              <span style="font-size:10.5px;font-weight:800;color:#334155">🔌 대상 연결 계정 (CLI 슬롯)</span>
+              <select id="realModelSlotSelect" class="triad-cli-select" style="height:35px;background:#ffffff" aria-label="모델을 변경할 연결 계정 선택"></select>
+            </label>
+            <label class="settings-select-field" style="gap:4px">
+              <span style="font-size:10.5px;font-weight:800;color:#0f6848">✨ 실제 실행 모델 선택 (<code>agy.exe models</code> 로그인 계정 실시간 연동)</span>
+              <select id="realAntigravityModelSelect" class="triad-cli-select" style="height:35px;background:#ffffff;font-weight:700" aria-label="실제 사용할 AI 모델 선택"></select>
+            </label>
+          </div>
+          <div id="orchestratorFeedbackText" style="font-size:10.5px;color:#475569;line-height:1.45">
+            ℹ️ 자체 제작 오케스트레이터가 아니라 <b>실제 PC에 로그인된 Antigravity CLI(<code>agy.exe models</code>)가 반환하는 공식 모델 목록</b>(<code>Orchestrator (Argon)</code>, <code>Orchestrator (Carbon)</code>, <code>Gemini 4</code>, <code>Claude 5.5</code> 등)을 그대로 불러와 <code>--model</code> 옵션으로 직접 실행합니다.
           </div>
         </div>
 
@@ -294,7 +213,7 @@
       <div style="flex:1;min-width:260px">
         <div class="eyebrow">SUBSCRIPTION CLI AUTHENTICATION &amp; DIAGNOSTICS</div>
         <div class="panel-title" style="font-size:15px;margin-top:2px">03 · 🔑 AI CLI 로그인 상태 확인 &amp; 실행 경로 설정 (5대 AI · 구글 멀티 계정 지원)</div>
-        <div class="panel-sub">Claude Code(claude), Google Antigravity(agy · 계정 1), Google Gemini 2(gemini · 서브 계정 2), OpenAI Codex(codex), xAI Grok(grok)의 설치·구독 로그인 세션 상태와 실행 파일 경로를 관리합니다.</div>
+        <div class="panel-sub">각 AI CLI의 표시 타이틀(이름)을 직접 수정하고, 구독 플랜 지정·로그인 세션 상태·실행 파일 경로를 통합 관리합니다.</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0">
         <button type="button" class="btn small mint" id="btnInstallAllMissingCli" style="white-space:nowrap">⚡ 미설치 CLI 일괄 원클릭 설치</button>
@@ -352,7 +271,7 @@
 </div>
 </main>
 </div>
-<script src="app.js?v=triad45"></script>
+<script src="app.js?v=triad53"></script>
 </body>
 </html>
 

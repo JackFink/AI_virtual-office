@@ -118,6 +118,10 @@ def _normalize_team_item(raw_team: Dict[str, Any], idx: int = 1) -> Dict[str, An
         or "https://drive.google.com/drive/my-drive",
     }
 
+    orch_mode = str(raw_team.get("orchestrator_mode") or "auto").strip().lower()
+    if orch_mode not in ("auto", "standard", "argon", "carbon"):
+        orch_mode = "auto"
+
     now = _utc_now()
     return {
         "id": tid,
@@ -125,6 +129,7 @@ def _normalize_team_item(raw_team: Dict[str, Any], idx: int = 1) -> Dict[str, An
         "description": desc,
         "color": color,
         "floor": floor,
+        "orchestrator_mode": orch_mode,
         "member_ids": members,
         "roles": roles,
         "workspace": ws,
@@ -394,6 +399,7 @@ def create_or_update_team(
             "description": str(payload.get("description") or "").strip(),
             "color": str(payload.get("color") or "#0f6848").strip(),
             "floor": str(payload.get("floor") or "1F").strip().upper(),
+            "orchestrator_mode": str(payload.get("orchestrator_mode") or "auto").strip().lower(),
             "member_ids": payload.get("member_ids") or ["01", "03", "04"],
             "roles": payload.get("roles") or dict(DEFAULT_ROLES),
             "workspace": dict(DEFAULT_WORKSPACE),
@@ -419,6 +425,10 @@ def create_or_update_team(
             fl = str(payload["floor"]).strip().upper()
             if re.fullmatch(r"\d+F", fl):
                 existing["floor"] = fl
+        if "orchestrator_mode" in payload and payload.get("orchestrator_mode"):
+            om = str(payload["orchestrator_mode"]).strip().lower()
+            if om in ("auto", "standard", "argon", "carbon"):
+                existing["orchestrator_mode"] = om
         if isinstance(payload.get("member_ids"), list) and payload["member_ids"]:
             existing["member_ids"] = [
                 str(m).strip().zfill(2) if str(m).strip().isdigit() else str(m).strip()
@@ -505,6 +515,55 @@ def set_active_team(team_id: str) -> Dict[str, Any]:
     if not any(t["id"] == team_id for t in doc["teams"]):
         raise ValueError(f"존재하지 않는 팀입니다: {team_id}")
     doc["active_team_id"] = team_id
+    return save_teams_config(doc)
+
+
+def assign_member_to_team(
+    agent_id: str,
+    team_id: str = "",
+    mode: str = "move",
+    floor_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    raw_aid = str(agent_id or "").strip()
+    if not raw_aid:
+        raise ValueError("배정할 AI 직원 ID를 지정해 주세요.")
+    aid = raw_aid.zfill(2) if raw_aid.isdigit() else raw_aid
+    tid = str(team_id or "").strip()
+    act = str(mode or "move").lower().strip()
+
+    doc = load_teams_config()
+    teams = doc["teams"]
+    now = _utc_now()
+
+    if act == "remove":
+        target = next((t for t in teams if t["id"] == tid), None)
+        if not target:
+            raise ValueError(f"존재하지 않는 팀입니다: {tid}")
+        if aid in target["member_ids"]:
+            if len(target["member_ids"]) <= 1:
+                raise ValueError(f"[{target['name']}] 팀에는 최소 1명 이상의 직원이 유지되어야 합니다.")
+            target["member_ids"] = [m for m in target["member_ids"] if m != aid]
+            target["updated_at"] = now
+        return save_teams_config(doc)
+
+    if act == "move":
+        for t in teams:
+            if t["id"] != tid and aid in t["member_ids"] and len(t["member_ids"]) > 1:
+                t["member_ids"] = [m for m in t["member_ids"] if m != aid]
+                t["updated_at"] = now
+
+    if tid:
+        target = next((t for t in teams if t["id"] == tid), None)
+        if not target:
+            raise ValueError(f"존재하지 않는 팀입니다: {tid}")
+        if aid not in target["member_ids"]:
+            target["member_ids"].append(aid)
+            target["updated_at"] = now
+        eff_floor = str(floor_override or target["floor"] or "1F").strip().upper()
+        _sync_members_floor_in_character_configs([aid], eff_floor, target["id"], target["name"])
+    elif floor_override:
+        _sync_members_floor_in_character_configs([aid], str(floor_override).strip().upper(), "", "")
+
     return save_teams_config(doc)
 
 

@@ -747,6 +747,7 @@
           cli: (spec.triadRole || 'head').toLowerCase(),
           agent_name: spec.name,
           custom_cli: spec.cliKey,
+          custom_model: spec.studioAgent?.cliModel || '',
           system_prompt: spec.studioAgent?.systemPrompt || '',
           skills: Array.isArray(spec.studioAgent?.skills) ? spec.studioAgent.skills : [],
           question: q
