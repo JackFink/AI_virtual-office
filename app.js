@@ -93,6 +93,17 @@
   let lastDiagnostics = null;
   let latestTeamsSummary = null;
   let initialQueryTeamApplied = false;
+  let lastTeamsGridHash = '';
+  let lastConnWsHash = '';
+  let lastAgentsBoardHash = '';
+  let localFsModalState = {
+    mode: 'explore',
+    currentDir: '',
+    teamId: null,
+    teamName: '',
+    onPicked: null,
+    isWritable: true
+  };
   let savedCharAiConfigs = {};
   try {
     savedCharAiConfigs = JSON.parse(localStorage.getItem(CHAR_AI_STORAGE_KEY) || '{}') || {};
@@ -3763,75 +3774,23 @@
       applyOutputDirRequest({ action: 'set', mirror_to_local: Boolean(chkMirror.checked) });
     });
 
-    btnBrowseLocal?.addEventListener('click', async () => {
-      const orig = btnBrowseLocal.textContent;
-      btnBrowseLocal.disabled = true;
-      btnBrowseLocal.textContent = '📂 폴더 창 열림...';
-      try {
-        const activeTeamObj = getSelectedSettingsTeam();
-        const res = await apiFetch('/ops/output-dir', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'browse',
-            team_id: activeTeamObj ? activeTeamObj.id : undefined,
-            initial_dir: activeTeamObj?.workspace_status?.effective_dir || undefined
-          })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && !data.cancelled) {
-          if (inputEl) delete inputEl.dataset.dirty;
-          if (data.teams_summary) {
-            renderTeamsAndWorkspacesDashboard(data.teams_summary);
-          }
-          if (activeTeamObj) {
-            syncSettingsBarFromTeam(activeTeamObj.id, `✓ [${activeTeamObj.name}] 작업 폴더가 [${data.selected_dir}]로 변경되었습니다.`);
-          } else if (data.status) {
-            renderOutputDirStatus(data.status, `✓ 선택한 폴더([${data.selected_dir}])로 저장 위치가 변경되었습니다.`, false);
-          }
-        } else if (!res.ok) {
-          if (latestOutputDirStatus) renderOutputDirStatus(latestOutputDirStatus, `❌ ${data.error || '폴더 선택 실패'}`, true);
-        }
-      } catch (_) {} finally {
-        btnBrowseLocal.disabled = false;
-        btnBrowseLocal.textContent = orig;
-      }
+    btnBrowseLocal?.addEventListener('click', () => {
+      const activeTeamObj = getSelectedSettingsTeam();
+      openLocalFolderPicker({
+        initialDir: activeTeamObj?.workspace_status?.effective_dir || latestOutputDirStatus?.output_dir || '',
+        teamId: activeTeamObj ? activeTeamObj.id : null,
+        teamName: activeTeamObj ? activeTeamObj.name : ''
+      });
     });
 
-    btnBrowseGd?.addEventListener('click', async () => {
+    btnBrowseGd?.addEventListener('click', () => {
       const gdRoot = btnBrowseGd.dataset.gdriveRoot || '';
-      const orig = btnBrowseGd.textContent;
-      btnBrowseGd.disabled = true;
-      btnBrowseGd.textContent = '☁️ 드라이브 창 열림...';
-      try {
-        const activeTeamObj = getSelectedSettingsTeam();
-        const res = await apiFetch('/ops/output-dir', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'browse',
-            initial_dir: gdRoot,
-            team_id: activeTeamObj ? activeTeamObj.id : undefined
-          })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && !data.cancelled) {
-          if (inputEl) delete inputEl.dataset.dirty;
-          if (data.teams_summary) {
-            renderTeamsAndWorkspacesDashboard(data.teams_summary);
-          }
-          if (activeTeamObj) {
-            syncSettingsBarFromTeam(activeTeamObj.id, `☁️ [${activeTeamObj.name}] 작업 폴더가 Google Drive([${data.selected_dir}])로 설정되었습니다.`);
-          } else if (data.status) {
-            renderOutputDirStatus(data.status, `☁️ Google Drive 폴더([${data.selected_dir}])로 저장 위치가 설정되었습니다.`, false);
-          }
-        } else if (!res.ok) {
-          if (latestOutputDirStatus) renderOutputDirStatus(latestOutputDirStatus, `❌ ${data.error || '구글 드라이브 폴더 선택 실패'}`, true);
-        }
-      } catch (_) {} finally {
-        btnBrowseGd.disabled = false;
-        btnBrowseGd.textContent = orig;
-      }
+      const activeTeamObj = getSelectedSettingsTeam();
+      openLocalFolderPicker({
+        initialDir: gdRoot || activeTeamObj?.workspace_status?.effective_dir || '',
+        teamId: activeTeamObj ? activeTeamObj.id : null,
+        teamName: activeTeamObj ? activeTeamObj.name : ''
+      });
     });
 
     btnQuickGd?.addEventListener('click', () => {
@@ -3844,22 +3803,18 @@
       applyOutputDirRequest({ action: 'set', output_dir: suggested, mirror_to_local: Boolean(chkMirror?.checked) }, btnQuickGd);
     });
 
-    const openExplorerHandler = async (btn) => {
-      if (btn) btn.disabled = true;
-      try {
-        const activeTeamObj = getSelectedSettingsTeam();
-        const targetDir = activeTeamObj?.workspace_status?.effective_dir || undefined;
-        await apiFetch('/ops/output-dir', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'open_explorer', target_dir: targetDir })
-        });
-      } catch (_) {} finally {
-        if (btn) btn.disabled = false;
+    const openExplorerHandler = () => {
+      const activeTeamObj = getSelectedSettingsTeam();
+      const ws = activeTeamObj?.workspace_status || {};
+      if (ws.is_cloud_primary && ws.gdrive_direct?.folder_url) {
+        window.open(ws.gdrive_direct.folder_url, '_blank', 'noopener');
+        return;
       }
+      const targetDir = ws.effective_dir || latestOutputDirStatus?.output_dir || '';
+      openLocalFolderExplorer(targetDir, activeTeamObj ? activeTeamObj.name : '전역 저장 폴더', activeTeamObj ? activeTeamObj.id : null);
     };
-    btnOpenExp?.addEventListener('click', () => openExplorerHandler(btnOpenExp));
-    btnDashOpenExp?.addEventListener('click', () => openExplorerHandler(btnDashOpenExp));
+    btnOpenExp?.addEventListener('click', openExplorerHandler);
+    btnDashOpenExp?.addEventListener('click', openExplorerHandler);
 
     btnReset?.addEventListener('click', () => {
       if (inputEl) {
@@ -3897,17 +3852,637 @@
   }
 
   // ========================================================================
+  // [신규] 웹 내장 로컬/드라이브 폴더 탐색기 & 작업 폴더 변경 모달 (#localFsModalBackdrop)
+  // ========================================================================
+  function formatByteSize(bytes) {
+    const n = Number(bytes || 0);
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function showTeamCardFlashMessage(teamId, text, isErr = false) {
+    if (!teamId) return;
+    const stBox = document.querySelector(`.team-dispatch-status[data-status-tid="${teamId}"]`);
+    if (!stBox) return;
+    stBox.style.display = 'block';
+    stBox.dataset.pinned = '1';
+    stBox.style.background = isErr ? '#fef2f2' : '#f0fdf4';
+    stBox.style.borderColor = isErr ? '#fecaca' : '#86efac';
+    stBox.style.color = isErr ? '#b91c1c' : '#166534';
+    stBox.textContent = text;
+    setTimeout(() => {
+      delete stBox.dataset.pinned;
+      stBox.style.display = 'none';
+    }, 6500);
+  }
+
+  function ensureLocalFsModal() {
+    if (document.getElementById('localFsModalBackdrop')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'localFsModalBackdrop';
+    wrap.className = 'cli-modal-backdrop';
+    wrap.style.zIndex = '1100';
+    wrap.innerHTML = `
+      <div class="cli-modal" role="dialog" aria-modal="true" aria-labelledby="lfsModalTitle" style="max-width:780px;width:96%">
+        <div class="cli-modal-head">
+          <div>
+            <div class="eyebrow" id="lfsModalEyebrow" style="color:#0f6848">TEAM WORKSPACE EXPLORER &amp; DIRECTORY PICKER</div>
+            <h2 id="lfsModalTitle">🗂️ 팀 작업 폴더 열기 &amp; 파일 탐색</h2>
+            <p id="lfsModalSub">폴더 내 프로젝트·리포트·소스 파일을 바로 확인하고, 새 폴더를 만들거나 작업 폴더 경로를 변경할 수 있습니다.</p>
+          </div>
+          <button type="button" class="cli-modal-close" id="btnCloseLfsModal" aria-label="닫기">✕</button>
+        </div>
+
+        <div class="cli-modal-body" style="gap:11px;padding:16px 22px">
+          <!-- 1. 빠른 루트 이동 버튼 바 -->
+          <div id="lfsRootsBar" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+
+          <!-- 2. 직접 경로 입력 & 복사 / OS 탐색기 실행 바 -->
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="lfsPathInput" class="triad-goal-input" style="height:33px;flex:1;min-width:240px;font-family:var(--font-mono);font-size:11px;background:#fff" placeholder="폴더 절대 경로 또는 deliverables/하위폴더 입력">
+            <button type="button" class="btn small" id="btnLfsGoPath" style="height:33px;padding:0 11px;font-size:11px">이동</button>
+            <button type="button" class="btn small" id="btnLfsCopyPath" style="height:33px;padding:0 10px;font-size:10.5px">📋 경로 복사</button>
+            <button type="button" class="btn small" id="btnLfsOpenNativeExp" style="height:33px;padding:0 10px;font-size:10.5px;background:#f8fafc">🪟 OS 탐색기</button>
+          </div>
+
+          <!-- 3. 브레드크럼 & 쓰기 권한 배지 -->
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:11px" id="lfsBreadcrumbs"></div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span id="lfsNativeHintBadge" style="display:none;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:999px"></span>
+              <span id="lfsWritableBadge" style="font-size:9.5px;font-weight:800;padding:2px 8px;border-radius:999px">확인 중...</span>
+            </div>
+          </div>
+
+          <!-- 4. 하위 폴더 & 파일 목록 -->
+          <div id="lfsItemsContainer" style="min-height:210px;max-height:310px;overflow-y:auto;border:1px solid #cbd5e1;border-radius:10px;background:#fff;padding:6px;display:flex;flex-direction:column;gap:4px">
+            <div style="padding:26px;text-align:center;color:#94a3b8;font-size:11.5px">폴더 내용을 불러오는 중입니다...</div>
+          </div>
+
+          <!-- 5. 파일 미리보기 패널 (클릭 시 표시) -->
+          <div id="lfsPreviewBox" style="display:none;border:1px solid #94a3b8;border-radius:9px;background:#0f172a;color:#f8fafc;padding:10px 12px;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+              <strong id="lfsPreviewTitle" style="font-size:11px;color:#38bdf8;font-family:var(--font-mono)">📄 파일 미리보기</strong>
+              <button type="button" id="btnCloseLfsPreview" style="border:0;background:#334155;color:#fff;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer">미리보기 닫기 ✕</button>
+            </div>
+            <pre id="lfsPreviewContent" style="margin:0;max-height:190px;overflow:auto;font-size:10.5px;line-height:1.45;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word;color:#e2e8f0"></pre>
+          </div>
+
+          <!-- 6. 새 하위 폴더 생성 바 -->
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="lfsNewFolderInput" class="triad-goal-input" style="height:31px;flex:1;min-width:200px;font-size:11px;background:#fff" placeholder="현재 폴더 아래에 새로 만들 폴더 이름 입력 (예: team_core_app)">
+            <button type="button" class="btn small" id="btnLfsMkdir" style="height:31px;padding:0 12px;font-size:10.5px;background:#f0fdf4;color:#0f6848;border-color:#86efac">➕ 새 하위 폴더 만들기</button>
+          </div>
+
+          <div id="lfsFeedback" style="font-size:11px;font-weight:700;min-height:16px;color:#0f6848"></div>
+        </div>
+
+        <div class="cli-modal-foot">
+          <div>
+            <button type="button" class="btn small" id="btnLfsNativeDialog" style="display:none;font-size:10.5px">🪟 Windows 기본 폴더선택창 띄우기</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button type="button" class="btn small" id="btnCancelLfsModal">닫기</button>
+            <button type="button" class="btn small primary" id="btnConfirmLfsFolder" style="background:#0f6848;border-color:#0f6848;padding:7px 15px">✓ 현재 폴더를 작업 폴더로 지정</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    const close = () => {
+      wrap.classList.remove('open');
+      const prev = document.getElementById('lfsPreviewBox');
+      if (prev) prev.style.display = 'none';
+    };
+    document.getElementById('btnCloseLfsModal')?.addEventListener('click', close);
+    document.getElementById('btnCancelLfsModal')?.addEventListener('click', close);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+
+    document.getElementById('btnCloseLfsPreview')?.addEventListener('click', () => {
+      const prev = document.getElementById('lfsPreviewBox');
+      if (prev) prev.style.display = 'none';
+    });
+
+    document.getElementById('btnLfsGoPath')?.addEventListener('click', () => {
+      const p = (document.getElementById('lfsPathInput')?.value || '').trim();
+      loadLocalFsDirectory(p);
+    });
+    document.getElementById('lfsPathInput')?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const p = (document.getElementById('lfsPathInput')?.value || '').trim();
+        loadLocalFsDirectory(p);
+      }
+    });
+
+    document.getElementById('btnLfsCopyPath')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const p = localFsModalState.currentDir || document.getElementById('lfsPathInput')?.value || '';
+      if (!p) return;
+      try {
+        await navigator.clipboard.writeText(p);
+        const orig = btn.textContent;
+        btn.textContent = '✓ 복사됨!';
+        setTimeout(() => { btn.textContent = orig; }, 1600);
+      } catch (_) {
+        const inp = document.getElementById('lfsPathInput');
+        if (inp) { inp.select(); document.execCommand('copy'); }
+      }
+    });
+
+    document.getElementById('btnLfsOpenNativeExp')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const p = localFsModalState.currentDir || document.getElementById('lfsPathInput')?.value || '';
+      const fb = document.getElementById('lfsFeedback');
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'open_explorer', target_dir: p })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (fb) {
+          if (d.native_window_opened) {
+            fb.style.color = '#0f6848';
+            fb.textContent = `✓ Windows 파일 탐색기 창을 열었습니다: ${d.opened_dir}`;
+          } else {
+            fb.style.color = '#b45309';
+            fb.textContent = '💡 현재 서버가 백그라운드 데몬 모드로 실행 중이어서 OS 탐색기 창 대신 이 웹 탐색기에서 바로 파일을 확인하실 수 있습니다. ([📋 경로 복사] 활용 가능)';
+          }
+        }
+      } catch (_) {} finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnLfsMkdir')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const inp = document.getElementById('lfsNewFolderInput');
+      const fb = document.getElementById('lfsFeedback');
+      const fname = (inp?.value || '').trim();
+      if (!fname) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 새로 만들 하위 폴더 이름을 입력해 주세요.'; }
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/ops/fs-browse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'mkdir', parent_dir: localFsModalState.currentDir, folder_name: fname })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || !d.ok) {
+          if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '새 폴더 생성 실패'}`; }
+          return;
+        }
+        if (inp) inp.value = '';
+        renderLocalFsListing(d);
+        if (fb) { fb.style.color = '#0f6848'; fb.textContent = `✓ ${d.message || '새 폴더가 생성되어 해당 폴더로 이동했습니다.'}`; }
+      } catch (_) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 서버 통신 오류가 발생했습니다.'; }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnLfsNativeDialog')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const fb = document.getElementById('lfsFeedback');
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Windows 창 대기 중...';
+      if (fb) { fb.style.color = '#0369a1'; fb.textContent = '🪟 Windows 폴더 선택 창을 요청했습니다 (표시되지 않으면 위 목록에서 바로 선택하세요)...'; }
+      try {
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'browse', pick_only: true, initial_dir: localFsModalState.currentDir })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok && !d.cancelled && d.selected_dir) {
+          await loadLocalFsDirectory(d.selected_dir);
+          if (fb) { fb.style.color = '#0f6848'; fb.textContent = `✓ [${d.selected_dir}] 경로를 불러왔습니다. 우측 하단 확정 버튼을 눌러 저장하세요.`; }
+        } else if (!res.ok) {
+          if (fb) { fb.style.color = '#b45309'; fb.textContent = `💡 ${d.error || '위 웹 폴더 목록에서 원하는 폴더를 클릭해 바로 선택할 수 있습니다.'}`; }
+        } else {
+          if (fb) fb.textContent = '';
+        }
+      } catch (_) {} finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+
+    document.getElementById('btnConfirmLfsFolder')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const fb = document.getElementById('lfsFeedback');
+      const chosenDir = (document.getElementById('lfsPathInput')?.value || localFsModalState.currentDir || '').trim();
+      if (!chosenDir) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 지정할 폴더 경로를 선택해 주세요.'; }
+        return;
+      }
+
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '연결 중...';
+
+      if (typeof localFsModalState.onPicked === 'function') {
+        try {
+          const rRes = await apiFetch('/ops/fs-browse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'resolve_gdrive_url', path: chosenDir })
+          });
+          const rData = await rRes.json().catch(() => ({}));
+          if (!rRes.ok) {
+            if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${rData.error || '경로 확인 실패'}`; }
+            return;
+          }
+          localFsModalState.onPicked(rData.resolved_path || chosenDir, rData.is_gdrive ? rData.folder : null);
+          close();
+          return;
+        } catch (_) {
+          localFsModalState.onPicked(chosenDir, null);
+          close();
+          return;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = orig;
+        }
+      }
+
+      try {
+        if (localFsModalState.teamId) {
+          const res = await apiFetch('/ops/teams', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'set_workspace',
+              team_id: localFsModalState.teamId,
+              workspace: { output_dir: chosenDir }
+            })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok || !d.ok) {
+            if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '팀 작업 폴더 저장 실패'}`; }
+            return;
+          }
+          if (d.teams_summary) {
+            renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
+          }
+          const savedWs = d.saved_team?.workspace || {};
+          const isGdBound = Boolean(savedWs.gdrive_direct_enabled && savedWs.gdrive_folder_url);
+          const finalMsg = isGdBound
+            ? `☁️ 작업 폴더가 Google Drive 웹 주소(${savedWs.gdrive_folder_url})로 연결되었습니다!`
+            : `✓ 작업 폴더가 [${chosenDir}]로 변경되었습니다!`;
+          syncSettingsBarFromTeam(localFsModalState.teamId, finalMsg);
+          showTeamCardFlashMessage(localFsModalState.teamId, finalMsg);
+          close();
+          return;
+        }
+
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set', output_dir: chosenDir })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '저장 폴더 변경 실패'}`; }
+          return;
+        }
+        const stObj = d.output_dir_status || d.status;
+        const isGlobalGd = Boolean(stObj?.gdrive_direct?.configured_enabled && stObj?.is_default);
+        const globalShown = isGlobalGd ? stObj.gdrive_direct.folder_url : chosenDir;
+        if (stObj) {
+          renderOutputDirStatus(
+            stObj,
+            isGlobalGd
+              ? `☁️ 저장 폴더가 Google Drive 웹 주소(${globalShown})로 연결되었습니다.`
+              : `✓ 저장 폴더가 [${globalShown}]로 설정되었습니다.`,
+            false
+          );
+        }
+        apiFetch('/ops/teams', { cache: 'no-store' })
+          .then(r => (r.ok ? r.json() : null))
+          .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts, true); })
+          .catch(() => {});
+        close();
+      } catch (_) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 서버 통신 오류가 발생했습니다.'; }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+  }
+
+  function renderLocalFsListing(data) {
+    if (!data) return;
+    localFsModalState.currentDir = data.current_dir || '';
+    localFsModalState.isWritable = Boolean(data.is_writable);
+
+    const pathInp = document.getElementById('lfsPathInput');
+    if (pathInp) pathInp.value = data.current_dir || '';
+
+    const rootsBar = document.getElementById('lfsRootsBar');
+    if (rootsBar && Array.isArray(data.roots)) {
+      const cloudPickBtn = `<button type="button" class="btn small" id="btnLfsSwitchToGdriveWeb" style="height:26px;padding:0 10px;font-size:10px;background:#e0f2fe;color:#0369a1;border-color:#7dd3fc;font-weight:800">☁️ Google Drive 웹 폴더 선택·생성</button>`;
+      rootsBar.innerHTML = cloudPickBtn + data.roots.map(r => {
+        const active = (data.current_dir || '').toLowerCase() === (r.path || '').toLowerCase();
+        return `<button type="button" class="btn small btn-lfs-root" data-rpath="${escHtml(r.path)}" style="height:26px;padding:0 9px;font-size:10px;${active ? 'background:#e6f9f1;color:#0f6848;border-color:#6ee7b7;font-weight:800' : ''}">${escHtml(r.label)}</button>`;
+      }).join('');
+      document.getElementById('btnLfsSwitchToGdriveWeb')?.addEventListener('click', () => {
+        const lfsModal = document.getElementById('localFsModalBackdrop');
+        lfsModal?.classList.remove('open');
+        openGdriveDirectModal(localFsModalState.teamId || null, localFsModalState.teamName || '');
+      });
+      rootsBar.querySelectorAll('.btn-lfs-root').forEach(b => {
+        b.addEventListener('click', () => loadLocalFsDirectory(b.dataset.rpath));
+      });
+    }
+
+    const bcEl = document.getElementById('lfsBreadcrumbs');
+    if (bcEl) {
+      const upBtn = data.parent_dir
+        ? `<button type="button" class="btn small" id="btnLfsParentDir" data-ppath="${escHtml(data.parent_dir)}" style="height:22px;padding:0 7px;font-size:9.5px;margin-right:4px">⬆️ 상위</button>`
+        : '';
+      const crumbs = (data.breadcrumbs || []).map((c, idx, arr) =>
+        `<button type="button" class="btn-lfs-crumb" data-cpath="${escHtml(c.path)}" style="border:0;background:transparent;padding:1px 3px;cursor:pointer;font-size:10.5px;font-weight:${idx === arr.length - 1 ? '800' : '600'};color:${idx === arr.length - 1 ? '#0f6848' : '#334155'};text-decoration:${idx === arr.length - 1 ? 'none' : 'underline'}">${escHtml(c.name)}</button>${idx < arr.length - 1 ? '<span style="color:#94a3b8">/</span>' : ''}`
+      ).join('');
+      bcEl.innerHTML = upBtn + crumbs;
+      document.getElementById('btnLfsParentDir')?.addEventListener('click', (ev) => {
+        loadLocalFsDirectory(ev.currentTarget.dataset.ppath);
+      });
+      bcEl.querySelectorAll('.btn-lfs-crumb').forEach(b => {
+        b.addEventListener('click', () => loadLocalFsDirectory(b.dataset.cpath));
+      });
+    }
+
+    const wBadge = document.getElementById('lfsWritableBadge');
+    localFsModalState.isGdriveMount = Boolean(data.is_gdrive_mount);
+    if (wBadge) {
+      if (data.is_gdrive_mount) {
+        wBadge.style.background = '#e0f2fe';
+        wBadge.style.color = '#0369a1';
+        wBadge.textContent = '☁️ Google Drive 폴더 · 확정 시 웹 주소(URL)로 자동 연결';
+      } else if (data.is_writable) {
+        wBadge.style.background = '#dcfce7';
+        wBadge.style.color = '#15803d';
+        wBadge.textContent = '✓ 쓰기·저장 가능';
+      } else {
+        wBadge.style.background = '#fef3c7';
+        wBadge.style.color = '#b45309';
+        wBadge.title = '현재 백그라운드 샌드박스 서버에서는 저장소 외부 쓰기가 제한될 수 있습니다. deliverables 하위 폴더를 권장합니다.';
+        wBadge.textContent = '⚠️ 쓰기 제한 (deliverables 하위 권장)';
+      }
+    }
+
+    const listEl = document.getElementById('lfsItemsContainer');
+    if (!listEl) return;
+    const folders = Array.isArray(data.folders) ? data.folders : [];
+    const files = Array.isArray(data.files) ? data.files : [];
+
+    if (folders.length === 0 && files.length === 0) {
+      listEl.innerHTML = `<div style="padding:28px;text-align:center;color:#64748b;font-size:11.5px">이 폴더는 현재 비어 있습니다. 아래에서 <b>➕ 새 하위 폴더 만들기</b>를 실행하거나 우측 하단 버튼으로 이 폴더를 선택할 수 있습니다.</div>`;
+      return;
+    }
+
+    const folderRows = folders.map(f => `
+      <div class="lfs-folder-row" data-fpath="${escHtml(f.path)}" style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:7px;border:1px solid ${f.is_project ? '#bbf7d0' : '#f1f5f9'};background:${f.is_project ? '#f0fdf4' : '#f8fafc'};cursor:pointer;gap:8px">
+        <div style="display:flex;align-items:center;gap:7px;min-width:0;flex:1">
+          <span style="font-size:13px">${f.is_project ? '📦' : '📁'}</span>
+          <strong style="font-size:11.5px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(f.name)}</strong>
+          ${f.is_project ? '<span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:800">AI 생성 프로젝트</span>' : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span style="font-size:9.5px;color:#64748b">${escHtml(f.mtime || '')}</span>
+          <span style="font-size:10px;color:#0f6848;font-weight:800">열기 →</span>
+        </div>
+      </div>
+    `).join('');
+
+    const fileRows = files.map(fl => {
+      const ico = fl.ext === '.md' ? '📄' : (fl.ext === '.py' ? '🐍' : (['.js', '.ts', '.html', '.css', '.json'].includes(fl.ext) ? '📜' : '📄'));
+      const previewable = ['.md', '.py', '.js', '.ts', '.json', '.html', '.css', '.txt', '.csv', '.yaml', '.yml', '.toml', '.bat', '.sh'].includes(fl.ext);
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 10px;border-radius:7px;border:1px solid #f1f5f9;background:#fff;gap:8px">
+          <div style="display:flex;align-items:center;gap:7px;min-width:0;flex:1">
+            <span style="font-size:12.5px">${ico}</span>
+            <span style="font-size:11px;color:#1e293b;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(fl.name)}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <span style="font-size:9.5px;color:#94a3b8">${formatByteSize(fl.size)} · ${escHtml(fl.mtime || '')}</span>
+            ${previewable ? `<button type="button" class="btn small btn-lfs-preview" data-file="${escHtml(fl.path)}" style="height:22px;padding:0 7px;font-size:9.5px">👁 내용 보기</button>` : ''}
+            ${fl.web_url ? `<a href="${escHtml(fl.web_url)}" target="_blank" class="btn small" style="height:22px;padding:0 7px;font-size:9.5px;background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">새 탭 ↗</a>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    listEl.innerHTML = folderRows + fileRows;
+    listEl.querySelectorAll('.lfs-folder-row').forEach(row => {
+      row.addEventListener('click', () => loadLocalFsDirectory(row.dataset.fpath));
+    });
+    listEl.querySelectorAll('.btn-lfs-preview').forEach(btn => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const fp = btn.dataset.file;
+        const prevBox = document.getElementById('lfsPreviewBox');
+        const prevTitle = document.getElementById('lfsPreviewTitle');
+        const prevContent = document.getElementById('lfsPreviewContent');
+        if (prevBox) prevBox.style.display = 'flex';
+        if (prevTitle) prevTitle.textContent = `📄 불러오는 중: ${fp}`;
+        if (prevContent) prevContent.textContent = '...';
+        try {
+          const res = await apiFetch('/ops/fs-browse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'read_file', file_path: fp })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok || !d.ok) {
+            if (prevTitle) prevTitle.textContent = '⚠️ 미리보기 실패';
+            if (prevContent) prevContent.textContent = d.error || '파일을 읽을 수 없습니다.';
+            return;
+          }
+          if (prevTitle) prevTitle.textContent = `📄 ${d.name} (${formatByteSize(d.size)}${d.truncated ? ' · 앞부분 64KB 표시' : ''})`;
+          if (prevContent) prevContent.textContent = d.content || '(빈 파일)';
+        } catch (_) {
+          if (prevContent) prevContent.textContent = '서버 통신 오류';
+        }
+      });
+    });
+  }
+
+  async function loadLocalFsDirectory(targetDir = '') {
+    ensureLocalFsModal();
+    const fb = document.getElementById('lfsFeedback');
+    const prev = document.getElementById('lfsPreviewBox');
+    if (prev) prev.style.display = 'none';
+    try {
+      const qs = targetDir ? `?path=${encodeURIComponent(targetDir)}` : '';
+      const res = await apiFetch(`/ops/fs-browse${qs}`, { cache: 'no-store' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok && !d.current_dir) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '폴더를 불러올 수 없습니다.'}`; }
+        return;
+      }
+      renderLocalFsListing(d);
+      if (fb) {
+        if (d.error) {
+          fb.style.color = '#dc2626';
+          fb.textContent = `⚠️ ${d.error}`;
+        } else if (d.fallback_notice) {
+          fb.style.color = '#b45309';
+          fb.textContent = `💡 ${d.fallback_notice}`;
+        } else {
+          fb.textContent = '';
+        }
+      }
+    } catch (_) {
+      if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 서버와 통신할 수 없습니다.'; }
+    }
+  }
+
+  function openLocalFolderExplorer(targetDir = '', teamName = '', teamId = null) {
+    ensureLocalFsModal();
+    localFsModalState = {
+      mode: 'explore',
+      currentDir: targetDir || '',
+      teamId: teamId || null,
+      teamName: teamName || '',
+      onPicked: null,
+      isWritable: true
+    };
+    const modal = document.getElementById('localFsModalBackdrop');
+    const titleEl = document.getElementById('lfsModalTitle');
+    const subEl = document.getElementById('lfsModalSub');
+    const confirmBtn = document.getElementById('btnConfirmLfsFolder');
+    const nativeDlgBtn = document.getElementById('btnLfsNativeDialog');
+    const nativeBadge = document.getElementById('lfsNativeHintBadge');
+
+    if (titleEl) {
+      titleEl.textContent = teamName ? `🗂️ [${teamName}] 작업 폴더 열기 & 파일 탐색` : '🗂️ 작업 폴더 열기 & 파일 탐색';
+    }
+    if (subEl) {
+      subEl.textContent = '생성된 프로젝트 폴더·리포트·소스 파일을 클릭해 바로 열람하거나 하위 폴더를 관리할 수 있습니다.';
+    }
+    if (confirmBtn) {
+      confirmBtn.style.display = teamId ? 'inline-flex' : 'none';
+      confirmBtn.textContent = teamName ? `📂 현재 폴더를 [${teamName}] 작업 폴더로 변경` : '✓ 현재 폴더로 지정';
+    }
+    if (nativeDlgBtn) nativeDlgBtn.style.display = 'none';
+    if (nativeBadge) nativeBadge.style.display = 'none';
+
+    modal?.classList.add('open');
+    loadLocalFsDirectory(targetDir);
+
+    // 동시에 OS 파일 탐색기 열기도 백그라운드 시도 후 상태 배지 안내
+    apiFetch('/ops/output-dir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'open_explorer', target_dir: targetDir })
+    })
+      .then(r => r.json().catch(() => ({})))
+      .then(d => {
+        if (!nativeBadge) return;
+        nativeBadge.style.display = 'inline-flex';
+        if (d.native_window_opened) {
+          nativeBadge.style.background = '#dcfce7';
+          nativeBadge.style.color = '#15803d';
+          nativeBadge.textContent = '🪟 Windows 탐색기 함께 열림';
+        } else {
+          nativeBadge.style.background = '#e0f2fe';
+          nativeBadge.style.color = '#0369a1';
+          nativeBadge.textContent = '💻 웹 내장 폴더 탐색기 활성';
+        }
+      })
+      .catch(() => {});
+  }
+
+  function openLocalFolderPicker({ initialDir = '', teamId = null, teamName = '', onPicked = null } = {}) {
+    ensureLocalFsModal();
+    localFsModalState = {
+      mode: 'pick',
+      currentDir: initialDir || '',
+      teamId: teamId || null,
+      teamName: teamName || '',
+      onPicked: typeof onPicked === 'function' ? onPicked : null,
+      isWritable: true
+    };
+    const modal = document.getElementById('localFsModalBackdrop');
+    const titleEl = document.getElementById('lfsModalTitle');
+    const subEl = document.getElementById('lfsModalSub');
+    const confirmBtn = document.getElementById('btnConfirmLfsFolder');
+    const nativeDlgBtn = document.getElementById('btnLfsNativeDialog');
+    const nativeBadge = document.getElementById('lfsNativeHintBadge');
+
+    if (titleEl) {
+      titleEl.textContent = teamName ? `📂 [${teamName}] 작업 폴더 변경 · 위치 선택` : '📂 작업 폴더 위치 선택';
+    }
+    if (subEl) {
+      subEl.textContent = '원하는 드라이브·폴더로 이동하거나 새 하위 폴더를 만든 뒤 우측 하단 확정 버튼을 클릭하세요.';
+    }
+    if (confirmBtn) {
+      confirmBtn.style.display = 'inline-flex';
+      confirmBtn.textContent = teamName ? `✓ 이 폴더를 [${teamName}] 작업 폴더로 확정` : '✓ 이 폴더로 선택 확정';
+    }
+    if (nativeDlgBtn) nativeDlgBtn.style.display = 'inline-flex';
+    if (nativeBadge) nativeBadge.style.display = 'none';
+
+    modal?.classList.add('open');
+    loadLocalFsDirectory(initialDir);
+  }
+
+  window.openLocalFolderExplorer = openLocalFolderExplorer;
+  window.openLocalFolderPicker = openLocalFolderPicker;
+
+  // ========================================================================
   // [신규] Google Drive 직접 연결 (OAuth 2.0 + 실시간 클라우드 폴더 탐색기 모달)
   // ========================================================================
   let gdriveBreadcrumbs = [{ id: 'root', name: '내 드라이브 (루트)' }];
   let gdriveCurrentBrowseId = 'root';
   let gdriveCurrentBrowseMeta = { id: 'root', name: '내 드라이브 (루트)', webViewLink: 'https://drive.google.com/drive/my-drive' };
+  let gdriveTargetTeamId = null;
+  let gdriveTargetTeamName = '';
+
+  function syncPickedCloudFolderToOpenTeamModal(folderObj, teamsSummary) {
+    if (teamsSummary) {
+      renderTeamsAndWorkspacesDashboard(teamsSummary, true);
+    }
+    if (!folderObj) return;
+    if (gdriveTargetTeamId) {
+      showTeamCardFlashMessage(
+        gdriveTargetTeamId,
+        `☁️ Google Drive 웹 폴더(${folderObj.webViewLink || folderObj.name})가 [${gdriveTargetTeamName || '팀'}] 작업 폴더로 지정되었습니다!`
+      );
+    }
+    const tbModal = document.getElementById('teamBuilderModalBackdrop');
+    if (tbModal && tbModal.classList.contains('open')) {
+      const gdChk = document.getElementById('tbGdEnabledChk');
+      const gdInp = document.getElementById('tbGdFolderInput');
+      const gdBadge = document.getElementById('tbGdFolderNameBadge');
+      const locInp = document.getElementById('tbLocalDirInput');
+      if (gdChk) gdChk.checked = true;
+      if (gdInp) gdInp.value = folderObj.id === 'root' ? '' : (folderObj.webViewLink || folderObj.id || '');
+      if (gdBadge) gdBadge.textContent = `현재: ${folderObj.name || '내 드라이브 (루트)'}`;
+      if (locInp && !(locInp.value || '').trim()) {
+        locInp.value = '';
+      }
+    }
+  }
 
   function ensureGdriveDirectModal() {
     if (document.getElementById('gdriveDirectModalBackdrop')) return;
     const modalWrap = document.createElement('div');
     modalWrap.id = 'gdriveDirectModalBackdrop';
     modalWrap.className = 'cli-modal-backdrop';
+    modalWrap.style.zIndex = '1150';
     modalWrap.innerHTML = `
       <div class="cli-modal" role="dialog" aria-modal="true" aria-label="Google Drive 직접 연결 및 클라우드 폴더 지정" style="max-width:680px;width:95%">
         <div class="cli-modal-head" style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #e2e8f0;padding-bottom:12px">
@@ -4118,16 +4693,17 @@
         const res = await apiFetch('/ops/gdrive/connect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'set_folder', folder_url: val })
+          body: JSON.stringify({ action: 'set_folder', folder_url: val, team_id: gdriveTargetTeamId || undefined })
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.folder) {
           if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+          syncPickedCloudFolderToOpenTeamModal(data.folder, data.teams_summary);
           gdriveBreadcrumbs = [{ id: 'root', name: '내 드라이브 (루트)' }];
           if (data.folder.id !== 'root') gdriveBreadcrumbs.push({ id: data.folder.id, name: data.folder.name });
           await loadGdriveSubfolders(data.folder.id);
           await refreshGdriveModalState(false);
-          setModalFeedback(`✓ 클라우드 폴더 [${data.folder.name}]로 저장 위치가 지정되었습니다!`, false);
+          setModalFeedback(`✓ Google Drive 웹 폴더(${data.folder.webViewLink || data.folder.name})로 저장 위치가 지정되었습니다!`, false);
         } else {
           setModalFeedback(`❌ ${data.error || '폴더 확인 실패'}`, true);
         }
@@ -4145,13 +4721,14 @@
         const res = await apiFetch('/ops/gdrive/connect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'set_folder', folder_id: gdriveCurrentBrowseId || 'root' })
+          body: JSON.stringify({ action: 'set_folder', folder_id: gdriveCurrentBrowseId || 'root', team_id: gdriveTargetTeamId || undefined })
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.folder) {
           if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+          syncPickedCloudFolderToOpenTeamModal(data.folder, data.teams_summary);
           await refreshGdriveModalState(false);
-          setModalFeedback(`☁️ [${data.folder.name}] 폴더가 프로젝트 자동 업로드 위치로 확정되었습니다!`, false);
+          setModalFeedback(`☁️ Google Drive 웹 폴더(${data.folder.webViewLink || data.folder.name})가 저장 위치로 확정되었습니다!`, false);
         } else {
           setModalFeedback(`❌ ${data.error || '폴더 지정 실패'}`, true);
         }
@@ -4184,12 +4761,14 @@
           const setRes = await apiFetch('/ops/gdrive/connect', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'set_folder', folder_id: data.folder.id })
+            body: JSON.stringify({ action: 'set_folder', folder_id: data.folder.id, team_id: gdriveTargetTeamId || undefined })
           });
           const setData = await setRes.json().catch(() => ({}));
           if (setData.output_dir_status) renderOutputDirStatus(setData.output_dir_status);
+          syncPickedCloudFolderToOpenTeamModal(setData.folder || data.folder, setData.teams_summary);
           await refreshGdriveModalState(false);
-          setModalFeedback(`☁️ 새 폴더 [${data.folder.name}] 생성 및 프로젝트 저장 위치 지정 완료!`, false);
+          const shownUrl = (setData.folder && setData.folder.webViewLink) || data.folder.webViewLink || data.folder.name;
+          setModalFeedback(`☁️ 새 Google Drive 폴더(${shownUrl}) 생성 및 저장 위치 지정 완료!`, false);
         } else {
           setModalFeedback(`❌ ${data.error || '폴더 생성 실패'}`, true);
         }
@@ -4284,16 +4863,17 @@
             const r = await apiFetch('/ops/gdrive/connect', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'set_folder', folder_id: b.dataset.fid })
+              body: JSON.stringify({ action: 'set_folder', folder_id: b.dataset.fid, team_id: gdriveTargetTeamId || undefined })
             });
             const d = await r.json().catch(() => ({}));
             if (r.ok && d.folder) {
               if (d.output_dir_status) renderOutputDirStatus(d.output_dir_status);
+              syncPickedCloudFolderToOpenTeamModal(d.folder, d.teams_summary);
               await refreshGdriveModalState(false);
               const fb = document.getElementById('gdModalFeedbackBar');
               if (fb) {
                 fb.style.color = '#0f6848';
-                fb.textContent = `☁️ [${d.folder.name}] 폴더가 프로젝트 저장 위치로 지정되었습니다!`;
+                fb.textContent = `☁️ Google Drive 웹 폴더(${d.folder.webViewLink || d.folder.name})가 저장 위치로 지정되었습니다!`;
               }
             }
           } catch (_) {} finally {
@@ -4346,9 +4926,17 @@
     } catch (_) {}
   }
 
-  function openGdriveDirectModal() {
+  function openGdriveDirectModal(teamId = null, teamName = '') {
+    gdriveTargetTeamId = teamId || null;
+    gdriveTargetTeamName = teamName || '';
     ensureGdriveDirectModal();
     const modal = document.getElementById('gdriveDirectModalBackdrop');
+    const titleNode = modal?.querySelector('.panel-title');
+    if (titleNode) {
+      titleNode.textContent = teamName
+        ? `☁️ [${teamName}] Google Drive 웹 클라우드 폴더 지정`
+        : '☁️ Google Drive 직접 연결 & 클라우드 저장 폴더 지정';
+    }
     modal?.classList.add('open');
     refreshGdriveModalState(true);
   }
@@ -4376,6 +4964,8 @@
     }
 
     const ws = team.workspace_status || {};
+    const gd = ws.gdrive_direct || {};
+    const isCloudPrimary = Boolean(ws.is_cloud_primary && gd.folder_url);
     const badgeEl = document.getElementById('outputDirModeBadge');
     const activeTxtEl = document.getElementById('outputDirActiveText');
     const inputEl = document.getElementById('outputDirInput');
@@ -4383,21 +4973,26 @@
     const fbEl = document.getElementById('outputDirFeedbackText');
 
     if (badgeEl) {
-      badgeEl.style.background = ws.is_google_drive_local ? '#e0f2fe' : '#dcfce7';
-      badgeEl.style.color = ws.is_google_drive_local ? '#0369a1' : '#15803d';
-      badgeEl.textContent = `${ws.is_google_drive_local ? '☁️' : '🏢'} [${team.name}] 전용 작업 폴더`;
+      badgeEl.style.background = (isCloudPrimary || ws.is_google_drive_local) ? '#e0f2fe' : '#dcfce7';
+      badgeEl.style.color = (isCloudPrimary || ws.is_google_drive_local) ? '#0369a1' : '#15803d';
+      badgeEl.textContent = isCloudPrimary
+        ? `☁️ [${team.name}] Google Drive 웹 폴더`
+        : `${ws.is_google_drive_local ? '☁️' : '🏢'} [${team.name}] 전용 작업 폴더`;
     }
     if (activeTxtEl) {
-      activeTxtEl.textContent = ws.effective_dir || 'deliverables/';
+      if (isCloudPrimary) {
+        activeTxtEl.innerHTML = `<a href="${escHtml(gd.folder_url)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline">${escHtml(gd.folder_url)}</a>`;
+      } else {
+        activeTxtEl.textContent = ws.effective_dir || 'deliverables/';
+      }
     }
     if (inputEl && document.activeElement !== inputEl && !inputEl.dataset.dirty) {
-      inputEl.value = ws.configured_dir || '';
+      inputEl.value = isCloudPrimary ? gd.folder_url : (ws.configured_dir || '');
     }
     if (chkMirrorEl) {
       chkMirrorEl.checked = Boolean(ws.mirror_to_local);
     }
 
-    const gd = ws.gdrive_direct || {};
     const gdBadge = document.getElementById('gdriveDirectBadge');
     const gdSum = document.getElementById('gdriveDirectSummaryText');
     const gdWebBtn = document.getElementById('gdriveDirectOpenWebBtn');
@@ -4425,7 +5020,8 @@
       fbEl.textContent = customFeedback;
     } else if (fbEl) {
       fbEl.style.color = '#475569';
-      fbEl.textContent = `💡 현재 선택된 [${team.name}] 팀의 작업 폴더(${ws.effective_dir || 'deliverables/'})에 결과물이 저장됩니다.${ws.has_non_ascii_or_space ? ' (한글/공백 포함: Flutter/RN 앱 빌드시 영문 경로 권장)' : ''}`;
+      const dispLoc = isCloudPrimary ? gd.folder_url : (ws.effective_dir || 'deliverables/');
+      fbEl.textContent = `💡 현재 선택된 [${team.name}] 팀의 작업 폴더(${dispLoc})에 결과물이 저장됩니다.${(!isCloudPrimary && ws.has_non_ascii_or_space) ? ' (한글/공백 포함: Flutter/RN 앱 빌드시 영문 경로 권장)' : ''}`;
     }
   }
 
@@ -4444,19 +5040,22 @@
     if (cTeamsBadge) cTeamsBadge.textContent = `등록 팀 ${teams.length}개`;
     if (cWsBadge) cWsBadge.textContent = `연결된 작업 폴더 ${connected.length}개`;
 
-    // 1) Render Team Cards Grid on index.html (protecting active typing or pinned status during 3s polling)
+    // 1) Render Team Cards Grid on index.html (hash-guarded so 3s polling never destroys unchanged DOM or active clicks)
     const gridEl = document.getElementById('dashboardTeamsGrid');
+    const teamsSig = JSON.stringify([teams, gdGlobal]);
     const skipTeamGridRebuild = Boolean(
       gridEl &&
       !forceRender &&
       gridEl.children.length === teams.length &&
       (
+        teamsSig === lastTeamsGridHash ||
         gridEl.contains(document.activeElement) ||
         Array.from(gridEl.querySelectorAll('.team-dispatch-input')).some(inp => (inp.value || '').trim().length > 0) ||
         Array.from(gridEl.querySelectorAll('.team-dispatch-status')).some(st => st.dataset.pinned === '1')
       )
     );
     if (gridEl && !skipTeamGridRebuild) {
+      lastTeamsGridHash = teamsSig;
       gridEl.innerHTML = teams.map(t => {
         const ws = t.workspace_status || {};
         const gd = ws.gdrive_direct || {};
@@ -4468,18 +5067,23 @@
           `<span class="team-member-chip" title="${escHtml(m.role)} · ${escHtml(m.cli)}"><b style="color:${color}">#${escHtml(m.id)}</b> ${escHtml(m.name)}</span>`
         ).join('') + (members.length > 6 ? `<span class="team-member-chip">+${members.length - 6}명</span>` : '');
 
-        const nonAsciiWarn = ws.has_non_ascii_or_space
+        const isCloudPrimary = Boolean(ws.is_cloud_primary && gd.folder_url);
+        const cloudWebUrl = gd.folder_url || 'https://drive.google.com/drive/my-drive';
+        const nonAsciiWarn = (!isCloudPrimary && ws.has_non_ascii_or_space)
           ? `<span style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:1px 6px;border-radius:5px;font-size:9px;font-weight:700" title="Flutter/RN 등 네이티브 앱 빌드 시 영문 전용 폴더 권장">한글/공백 포함</span>`
           : '';
 
         const gdLineHtml = gd.configured_enabled
           ? `<div class="team-folder-row" style="border-top:1px dashed #cbd5e1;padding-top:5px;margin-top:2px">
-               <span style="color:#0369a1;font-weight:700">☁️ 클라우드 폴더: <b>${escHtml(gd.folder_name)}</b> ${gd.connected ? '<span style="color:#15803d">(자동 업로드 ON)</span>' : '<span style="color:#d97706">(로그인 대기)</span>'}</span>
-               <a href="${escHtml(gd.folder_url || 'https://drive.google.com/drive/my-drive')}" target="_blank" style="color:#0284c7;font-weight:800;font-size:10px;text-decoration:underline">웹 열기 ↗</a>
+               <span style="color:#0369a1;font-weight:700">☁️ 클라우드 폴더명: <b>${escHtml(gd.folder_name)}</b> ${gd.connected ? '<span style="color:#15803d">(자동 업로드 ON)</span>' : '<span style="color:#d97706">(로그인 대기)</span>'}</span>
+               <div style="display:flex;gap:8px;align-items:center">
+                 <button type="button" class="btn-change-team-gdrive" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="border:0;background:transparent;color:#0369a1;font-weight:800;font-size:10px;cursor:pointer;padding:0;text-decoration:underline">다른 웹 폴더 선택</button>
+                 <a href="${escHtml(cloudWebUrl)}" target="_blank" rel="noopener" style="color:#0284c7;font-weight:800;font-size:10px;text-decoration:underline">웹 열기 ↗</a>
+               </div>
              </div>`
           : `<div class="team-folder-row" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:2px;color:#64748b;font-size:10px">
                <span>☁️ Google Drive 클라우드 폴더 미지정</span>
-               <button type="button" class="btn-quick-team-gdrive" data-tid="${escHtml(t.id)}" style="border:0;background:transparent;color:#0284c7;font-weight:800;font-size:10px;cursor:pointer;padding:0;text-decoration:underline">${gdGlobal.connected ? '+ 클라우드 전용폴더 자동생성' : '구글 계정 연결하기'}</button>
+               <button type="button" class="btn-quick-team-gdrive" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="border:0;background:transparent;color:#0284c7;font-weight:800;font-size:10px;cursor:pointer;padding:0;text-decoration:underline">${gdGlobal.connected ? '+ 클라우드 전용폴더 자동생성' : '구글 계정 연결하기'}</button>
              </div>`;
 
         return `
@@ -4510,20 +5114,20 @@
 
             <div class="team-folder-box">
               <div class="team-folder-row">
-                <span style="font-weight:800;color:${ws.is_google_drive_local ? '#0369a1' : '#0f172a'}">${ws.is_google_drive_local ? '☁️ 마운트 드라이브 폴더' : (ws.is_default ? '📁 기본 작업 폴더' : '📂 팀 전용 작업 폴더')}</span>
+                <span style="font-weight:800;color:${(isCloudPrimary || ws.is_google_drive_local) ? '#0369a1' : '#0f172a'}">${isCloudPrimary ? '☁️ Google Drive 클라우드 전용 폴더' : (ws.is_google_drive_local ? '☁️ 로컬 마운트 드라이브 폴더' : (ws.is_default ? '📁 기본 작업 폴더' : '📂 팀 전용 작업 폴더'))}</span>
                 <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
                   ${nonAsciiWarn}
-                  <span style="background:${ws.is_accessible ? '#dcfce7' : '#fee2e2'};color:${ws.is_accessible ? '#15803d' : '#b91c1c'};padding:1px 6px;border-radius:5px;font-size:9px;font-weight:800">${ws.is_accessible ? '✓ 연결됨' : '접근불가'}</span>
+                  <span style="background:${(isCloudPrimary ? gd.connected : ws.is_accessible) ? '#dcfce7' : '#fee2e2'};color:${(isCloudPrimary ? gd.connected : ws.is_accessible) ? '#15803d' : '#b91c1c'};padding:1px 6px;border-radius:5px;font-size:9px;font-weight:800">${(isCloudPrimary ? gd.connected : ws.is_accessible) ? '✓ 연결됨' : '확인 필요'}</span>
                   <span style="font-size:9.5px;color:#475569;font-weight:700">프로젝트 ${ws.project_count || 0} · 리포트 ${ws.report_count || 0} · 파일 ${ws.file_count || 0}</span>
                 </div>
               </div>
-              <div class="team-folder-path">${escHtml(ws.effective_dir || 'deliverables/')}</div>
+              <div class="team-folder-path">${isCloudPrimary ? `<a href="${escHtml(cloudWebUrl)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline;word-break:break-all">${escHtml(cloudWebUrl)}</a>` : escHtml(ws.effective_dir || 'deliverables/')}</div>
               ${gdLineHtml}
             </div>
 
             <div class="team-ws-actions">
-              <button type="button" class="btn small btn-team-open-exp" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">🗂️ 폴더 열기</button>
-              <button type="button" class="btn small btn-team-browse-dir" data-tid="${escHtml(t.id)}" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">📂 작업 폴더 변경</button>
+              <button type="button" class="btn small btn-team-open-exp" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.effective_dir || '')}" data-cloud-url="${isCloudPrimary ? escHtml(cloudWebUrl) : ''}" style="height:28px;padding:0 9px;font-size:10px">${isCloudPrimary ? '☁️ 웹 폴더 열기 ↗' : '🗂️ 폴더 열기'}</button>
+              <button type="button" class="btn small btn-team-browse-dir" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">📂 작업 폴더 변경</button>
               <button type="button" class="btn small btn-team-edit" data-tid="${escHtml(t.id)}" style="height:28px;padding:0 10px;font-size:10px">✏️ 팀 &amp; 폴더 상세편집</button>
               <a href="settings.html?team=${encodeURIComponent(t.id)}#triadGoalForm" class="btn small" style="height:28px;padding:0 10px;font-size:10px;margin-left:auto;color:${escHtml(color)};border-color:${escHtml(color)}55;background:${escHtml(color)}0d">⚙ 상세 설정 ↗</a>
             </div>
@@ -4631,31 +5235,27 @@
 
       gridEl.querySelectorAll('.btn-team-open-exp').forEach(btn => {
         btn.addEventListener('click', () => {
-          apiFetch('/ops/output-dir', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'open_explorer', target_dir: btn.dataset.dir })
-          }).catch(() => {});
+          if (btn.dataset.cloudUrl) {
+            window.open(btn.dataset.cloudUrl, '_blank', 'noopener');
+            return;
+          }
+          openLocalFolderExplorer(btn.dataset.dir, btn.dataset.tname || '', btn.dataset.tid || null);
+        });
+      });
+
+      gridEl.querySelectorAll('.btn-change-team-gdrive').forEach(btn => {
+        btn.addEventListener('click', () => {
+          openGdriveDirectModal(btn.dataset.tid || null, btn.dataset.tname || '');
         });
       });
 
       gridEl.querySelectorAll('.btn-team-browse-dir').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const orig = btn.textContent;
-          btn.disabled = true;
-          btn.textContent = '창 열림...';
-          try {
-            const res = await apiFetch('/ops/output-dir', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'browse', team_id: btn.dataset.tid, initial_dir: btn.dataset.dir })
-            });
-            const d = await res.json().catch(() => ({}));
-            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
-          } catch (_) {} finally {
-            btn.disabled = false;
-            btn.textContent = orig;
-          }
+        btn.addEventListener('click', () => {
+          openLocalFolderPicker({
+            initialDir: btn.dataset.dir || '',
+            teamId: btn.dataset.tid || null,
+            teamName: btn.dataset.tname || ''
+          });
         });
       });
 
@@ -4669,6 +5269,7 @@
             openGdriveDirectModal();
             return;
           }
+          const tid = btn.dataset.tid;
           const orig = btn.textContent;
           btn.disabled = true;
           btn.textContent = '생성 중...';
@@ -4676,11 +5277,18 @@
             const res = await apiFetch('/ops/teams', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'create_gdrive_team_folder', team_id: btn.dataset.tid })
+              body: JSON.stringify({ action: 'create_gdrive_team_folder', team_id: tid })
             });
             const d = await res.json().catch(() => ({}));
-            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
+            if (res.ok && d.teams_summary) {
+              renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
+              showTeamCardFlashMessage(tid, `☁️ ${d.message || 'Google Drive 전용 클라우드 폴더가 생성되어 팀에 연결되었습니다!'}`);
+            } else {
+              showTeamCardFlashMessage(tid, `❌ ${d.error || '클라우드 전용 폴더 생성 실패'}`, true);
+            }
           } catch (_) {
+            showTeamCardFlashMessage(tid, '❌ 서버 통신 오류가 발생했습니다.', true);
+          } finally {
             btn.disabled = false;
             btn.textContent = orig;
           }
@@ -4695,7 +5303,9 @@
       const gdAcc = gdGlobal.connected ? ` · ☁️ Google Drive 계정 연결됨(${gdGlobal.account_email || 'OAuth'})` : '';
       wsSumLbl.textContent = `총 ${connected.length}개 활성 작업 폴더 연결됨${unboundGdrives.length ? ` · 감지된 로컬 드라이브 ${unboundGdrives.length}개` : ''}${gdAcc}`;
     }
-    if (wsListEl) {
+    const connSig = JSON.stringify([connected, unboundGdrives, gdGlobal]);
+    if (wsListEl && (forceRender || connSig !== lastConnWsHash)) {
+      lastConnWsHash = connSig;
       const rowsHtml = connected.map(w => {
         const isCloud = w.kind === 'gdrive_cloud';
         const teamBadges = (w.teams || []).length > 0
@@ -4704,7 +5314,7 @@
 
         const actionBtn = isCloud
           ? `<a href="${escHtml(w.web_url || 'https://drive.google.com/drive/my-drive')}" target="_blank" class="btn small" style="height:26px;padding:0 10px;font-size:10px;background:#e0f2fe;color:#0369a1;border-color:#7dd3fc">☁️ 웹 드라이브 열기 ↗</a>`
-          : `<button type="button" class="btn small btn-conn-ws-open" data-dir="${escHtml(w.path)}" style="height:26px;padding:0 10px;font-size:10px">🗂️ 탐색기 열기</button>`;
+          : `<button type="button" class="btn small btn-conn-ws-open" data-dir="${escHtml(w.path)}" data-wname="${escHtml(w.display_name || '')}" style="height:26px;padding:0 10px;font-size:10px">🗂️ 탐색기 열기</button>`;
 
         return `
           <div class="connected-ws-row">
@@ -4742,11 +5352,7 @@
       wsListEl.innerHTML = rowsHtml + unboundHtml;
       wsListEl.querySelectorAll('.btn-conn-ws-open').forEach(b => {
         b.addEventListener('click', () => {
-          apiFetch('/ops/output-dir', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
-          }).catch(() => {});
+          openLocalFolderExplorer(b.dataset.dir || '', b.dataset.wname || '연결된 작업 폴더');
         });
       });
       wsListEl.querySelectorAll('.btn-bind-mounted-gd').forEach(b => {
@@ -4772,14 +5378,18 @@
       }
       if (!teams.some(t => t.id === desiredId)) desiredId = ts.active_team_id || teams[0]?.id || '';
 
-      teamSel.innerHTML = teams.map(t =>
-        `<option value="${escHtml(t.id)}" ${t.id === desiredId ? 'selected' : ''}>[${escHtml(t.floor)}] ${escHtml(t.name)} (${(t.member_ids || []).length}명 · ${escHtml(t.workspace_status?.is_default ? 'deliverables/' : (t.workspace?.output_dir || t.workspace_status?.effective_dir || 'deliverables/'))})</option>`
-      ).join('');
+      teamSel.innerHTML = teams.map(t => {
+        const tws = t.workspace_status || {};
+        const tLoc = tws.is_cloud_primary
+          ? (tws.gdrive_direct?.folder_url || 'Google Drive')
+          : (tws.is_default ? 'deliverables/' : (t.workspace?.output_dir || tws.effective_dir || 'deliverables/'));
+        return `<option value="${escHtml(t.id)}" ${t.id === desiredId ? 'selected' : ''}>[${escHtml(t.floor)}] ${escHtml(t.name)} (${(t.member_ids || []).length}명 · ${escHtml(tLoc)})</option>`;
+      }).join('');
       syncSettingsBarFromTeam(desiredId);
     }
 
     // 4) Render AI 직원 관리(agents.html)의 팀 추가·수정 & 오피스 배치 보드 동기화
-    renderAgentsTeamPlacementBoard(ts);
+    renderAgentsTeamPlacementBoard(ts, forceRender);
     if (studioRefreshDirectoryFn) studioRefreshDirectoryFn();
   }
 
@@ -4834,7 +5444,7 @@
     }
   }
 
-  function renderAgentsTeamPlacementBoard(ts) {
+  function renderAgentsTeamPlacementBoard(ts, forceRender = false) {
     const boardEl = document.getElementById('agentsTeamCardsBoard');
     const tbodyEl = document.getElementById('agentsPlacementTableBody');
     const countBadge = document.getElementById('agentsTeamsCountBadge');
@@ -4844,6 +5454,26 @@
     if (countBadge) {
       countBadge.textContent = `등록 팀 ${teams.length}개 · 활성 직원 ${modularAgents.length}명`;
     }
+
+    const agentsBoardSig = JSON.stringify([
+      teams,
+      modularAgents.map(a => [a.id, a.name, a.triadRole, a.cliProvider, a.cliModel]),
+      lastDiagnostics?.checked_at || ''
+    ]);
+    if (
+      !forceRender &&
+      agentsBoardSig === lastAgentsBoardHash &&
+      (!boardEl || boardEl.children.length === teams.length)
+    ) {
+      return;
+    }
+    if (
+      !forceRender &&
+      ((boardEl && boardEl.contains(document.activeElement)) || (tbodyEl && tbodyEl.contains(document.activeElement)))
+    ) {
+      return;
+    }
+    lastAgentsBoardHash = agentsBoardSig;
 
     const placementsMap = loadOfficePlacementsMap();
 
@@ -4892,10 +5522,10 @@
                     ? '<span class="orch-tier-pill pro">🔷 Argon</span>'
                     : ''}
                 </div>
-                <div style="font-size:10px;color:#64748b;margin-top:3px;font-family:var(--font-mono)">📂 폴더: ${escHtml(ws.effective_dir || 'deliverables/')}</div>
+                <div style="font-size:10px;color:${ws.is_cloud_primary ? '#0284c7' : '#64748b'};margin-top:3px;font-family:var(--font-mono);word-break:break-all">${ws.is_cloud_primary ? `☁️ 웹 폴더: <a href="${escHtml(ws.gdrive_direct?.folder_url || '')}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline">${escHtml(ws.gdrive_direct?.folder_url || '')}</a>` : `📂 폴더: ${escHtml(ws.effective_dir || 'deliverables/')}`}</div>
               </div>
               <div style="display:flex;gap:5px;align-items:center">
-                <button type="button" class="btn small btn-ag-open-dir" data-dir="${escHtml(ws.effective_dir || '')}" style="height:25px;padding:0 8px;font-size:9.5px">🗂️ 폴더</button>
+                <button type="button" class="btn small btn-ag-open-dir" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.effective_dir || '')}" data-cloud-url="${ws.is_cloud_primary ? escHtml(ws.gdrive_direct?.folder_url || '') : ''}" style="height:25px;padding:0 8px;font-size:9.5px">${ws.is_cloud_primary ? '☁️ 웹 폴더 ↗' : '🗂️ 폴더'}</button>
                 <button type="button" class="btn small btn-ag-edit-team" data-tid="${escHtml(t.id)}" style="height:25px;padding:0 9px;font-size:9.5px;background:#f0fdf4;color:#0f6848;border-color:#86efac">✏️ 팀 수정</button>
                 ${teams.length > 1 ? `<button type="button" class="btn small btn-ag-del-team" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="height:25px;padding:0 7px;font-size:9.5px;background:#fef2f2;color:#dc2626;border-color:#fecaca" title="팀 삭제">🗑</button>` : ''}
               </div>
@@ -4954,11 +5584,11 @@
       });
       boardEl.querySelectorAll('.btn-ag-open-dir').forEach(b => {
         b.addEventListener('click', () => {
-          apiFetch('/ops/output-dir', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
-          }).catch(() => {});
+          if (b.dataset.cloudUrl) {
+            window.open(b.dataset.cloudUrl, '_blank', 'noopener');
+            return;
+          }
+          openLocalFolderExplorer(b.dataset.dir || '', b.dataset.tname || '', b.dataset.tid || null);
         });
       });
       boardEl.querySelectorAll('.btn-ag-set-active').forEach(b => {
@@ -5237,50 +5867,44 @@
       openGdriveDirectModal();
     });
 
-    document.getElementById('btnTbBrowseLocal')?.addEventListener('click', async (ev) => {
-      const btn = ev.currentTarget;
-      const orig = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = '창 열림...';
-      try {
-        const curDir = document.getElementById('tbLocalDirInput')?.value || '';
-        const res = await apiFetch('/ops/output-dir', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'browse', pick_only: true, initial_dir: curDir })
-        });
-        const d = await res.json().catch(() => ({}));
-        if (res.ok && !d.cancelled && d.selected_dir) {
-          const inp = document.getElementById('tbLocalDirInput');
-          if (inp) inp.value = d.selected_dir;
+    const applyTbPickedFolder = (chosenDir, gdFolder = null) => {
+      const locInp = document.getElementById('tbLocalDirInput');
+      const gdChk = document.getElementById('tbGdEnabledChk');
+      const gdInp = document.getElementById('tbGdFolderInput');
+      const gdBadge = document.getElementById('tbGdFolderNameBadge');
+      const fb = document.getElementById('tbModalFeedback');
+      if (gdFolder) {
+        if (locInp) locInp.value = '';
+        if (gdChk) gdChk.checked = true;
+        if (gdInp) gdInp.value = gdFolder.id === 'root' ? 'https://drive.google.com/drive/my-drive' : (gdFolder.webViewLink || gdFolder.id);
+        if (gdBadge) gdBadge.textContent = `현재: ${gdFolder.name || '내 드라이브 (루트)'}`;
+        if (fb) {
+          fb.style.color = '#0369a1';
+          fb.textContent = `☁️ 선택한 Google Drive 폴더가 웹 주소(${gdFolder.webViewLink})로 연결되도록 설정되었습니다.`;
         }
-      } catch (_) {} finally {
-        btn.disabled = false;
-        btn.textContent = orig;
+      } else {
+        if (locInp) locInp.value = chosenDir;
       }
+    };
+
+    document.getElementById('btnTbBrowseLocal')?.addEventListener('click', () => {
+      const curDir = document.getElementById('tbLocalDirInput')?.value || '';
+      const tName = document.getElementById('tbNameInput')?.value || '';
+      openLocalFolderPicker({
+        initialDir: curDir,
+        teamName: tName,
+        onPicked: applyTbPickedFolder
+      });
     });
 
-    document.getElementById('btnTbBrowseMountedGd')?.addEventListener('click', async (ev) => {
-      const btn = ev.currentTarget;
-      const orig = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = '드라이브 열림...';
-      try {
-        const gdRoot = (latestOutputDirStatus?.detected_google_drives?.[0]?.root) || '';
-        const res = await apiFetch('/ops/output-dir', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'browse', pick_only: true, initial_dir: gdRoot })
-        });
-        const d = await res.json().catch(() => ({}));
-        if (res.ok && !d.cancelled && d.selected_dir) {
-          const inp = document.getElementById('tbLocalDirInput');
-          if (inp) inp.value = d.selected_dir;
-        }
-      } catch (_) {} finally {
-        btn.disabled = false;
-        btn.textContent = orig;
-      }
+    document.getElementById('btnTbBrowseMountedGd')?.addEventListener('click', () => {
+      const gdRoot = (latestOutputDirStatus?.detected_google_drives?.[0]?.root) || '';
+      const tName = document.getElementById('tbNameInput')?.value || '';
+      openLocalFolderPicker({
+        initialDir: gdRoot,
+        teamName: tName,
+        onPicked: applyTbPickedFolder
+      });
     });
 
     document.getElementById('btnTbDeleteTeam')?.addEventListener('click', async (ev) => {
@@ -5660,11 +6284,7 @@
             replyText.innerHTML = `<div style="white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;font-family:var(--font-mono,monospace);font-size:11px">${preview.replace(/</g, '&lt;')}</div>${locPillHtml}${filesLinksHtml}<div style="margin-top:6px"><a href="${latestMission.deliverable_file}" target="_blank" style="color:#0f6848;font-weight:800;text-decoration:underline">📄 전체 산출물 리포트 열기 (${latestMission.deliverable_file}) ↗</a></div>`;
             replyText.querySelectorAll('.btn-open-mission-dir').forEach(b => {
               b.addEventListener('click', () => {
-                apiFetch('/ops/output-dir', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
-                }).catch(() => {});
+                openLocalFolderExplorer(b.dataset.dir || '', '미션 산출물 폴더');
               });
             });
           }
@@ -5701,11 +6321,7 @@
           `;
           cardEl.querySelectorAll('.btn-open-deliv-dir').forEach(b => {
             b.addEventListener('click', () => {
-              apiFetch('/ops/output-dir', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
-              }).catch(() => {});
+              openLocalFolderExplorer(b.dataset.dir || '', '프로젝트 산출물 폴더');
             });
           });
           delivBox.prepend(cardEl);

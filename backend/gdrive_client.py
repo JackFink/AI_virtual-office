@@ -498,6 +498,190 @@ def get_folder_metadata(folder_id: str) -> Dict[str, Any]:
     }
 
 
+def get_folder_path_segments(folder_id: str) -> List[str]:
+    """Resolves the folder hierarchy from My Drive root down to folder_id (e.g. ['Projects', 'NEXUS_Team'])."""
+    fid = extract_folder_id_from_input(folder_id)
+    if fid == "root":
+        return []
+    try:
+        root_meta = _drive_api_json("GET", f"{DRIVE_API_BASE}/files/root?fields=id")
+        root_id = str(root_meta.get("id") or "")
+    except Exception:
+        root_id = ""
+
+    segments: List[str] = []
+    cur_id = fid
+    visited = set()
+    for _ in range(10):
+        if not cur_id or cur_id in visited or cur_id in ("root", root_id):
+            break
+        visited.add(cur_id)
+        params = urlencode({"fields": "id,name,parents", "supportsAllDrives": "true"})
+        meta = _drive_api_json("GET", f"{DRIVE_API_BASE}/files/{cur_id}?{params}")
+        if str(meta.get("id") or "") == root_id:
+            break
+        name = str(meta.get("name") or cur_id).strip()
+        if name:
+            segments.insert(0, name)
+        parents = meta.get("parents") or []
+        if not parents or parents[0] in ("root", root_id):
+            break
+        cur_id = str(parents[0])
+    return segments
+
+
+def resolve_mounted_gdrive_path(
+    folder_id: str,
+    folder_name: str,
+    detected_gdrives: List[Dict[str, str]],
+    create_if_missing: bool = True,
+) -> Optional[Path]:
+    """Maps a Google Drive folder ID/name to the local mounted Google Drive volume (e.g. F:\\내 드라이브\\NEXUS_팀명) if present."""
+    if not detected_gdrives:
+        return None
+    gd_root_str = str(detected_gdrives[0].get("root") or "").strip()
+    if not gd_root_str:
+        return None
+    gd_root = Path(gd_root_str)
+    try:
+        if not gd_root.exists():
+            return None
+    except OSError:
+        return None
+
+    fid = extract_folder_id_from_input(folder_id or "root")
+    if fid == "root":
+        return gd_root
+
+    segments: List[str] = []
+    try:
+        segments = get_folder_path_segments(fid)
+    except Exception:
+        segments = []
+    if not segments and folder_name and folder_name not in ("root", "내 드라이브 (루트)"):
+        segments = [folder_name.strip()]
+    if not segments:
+        return gd_root
+
+    target_p = gd_root.joinpath(*segments)
+    if create_if_missing:
+        try:
+            target_p.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    try:
+        return target_p if target_p.exists() else None
+    except OSError:
+        return None
+
+
+def resolve_local_gdrive_path_to_cloud_folder(
+    local_path: Path,
+    detected_gdrives: List[Dict[str, str]],
+) -> Optional[Dict[str, Any]]:
+    """
+    If local_path points inside a mounted Google Drive volume (e.g. F:\\내 드라이브\\AI오피스-테스트 or
+    F:\\.shortcut-targets-by-id\\<ID>\\...), resolves it via Google Drive REST API v3 to its cloud folder
+    metadata {'id', 'name', 'webViewLink'} so the workspace binds as a Google Drive web URL.
+    Returns None if local_path is NOT a Google Drive path.
+    """
+    raw_str = str(local_path).strip()
+    if not raw_str:
+        return None
+
+    # 1) Handle .shortcut-targets-by-id/<ID>[/<subpath>]
+    m_sc = re.search(r"\.shortcut-targets-by-id[\\/]([a-zA-Z0-9_-]+)(?:[\\/](.*))?$", raw_str, flags=re.IGNORECASE)
+    if m_sc:
+        gd_conn = get_gdrive_connection_status()
+        if not gd_conn.get("connected"):
+            raise ValueError(
+                "선택한 Google Drive 폴더를 웹 주소(https://drive.google.com/...)로 연결하려면 "
+                "먼저 [🔑 Google Drive 직접 연결] 로그인을 완료해 주세요."
+            )
+        cur_meta = get_folder_metadata(m_sc.group(1))
+        rem = (m_sc.group(2) or "").strip("\\/")
+        if rem:
+            for seg in [x for x in re.split(r"[\\/]+", rem) if x]:
+                cur_meta = create_subfolder(seg, parent_id=cur_meta["id"])
+        return {
+            "id": cur_meta["id"],
+            "name": cur_meta.get("name") or cur_meta["id"],
+            "webViewLink": cur_meta.get("webViewLink") or f"https://drive.google.com/drive/folders/{cur_meta['id']}",
+        }
+
+    # 2) Handle mounted Google Drive volumes (e.g. F:\내 드라이브, G:\My Drive)
+    try:
+        resolved_p = local_path.resolve()
+    except OSError:
+        resolved_p = local_path
+
+    matched_rel_parts: Optional[Tuple[str, ...]] = None
+    is_drive_root = False
+    for gd in (detected_gdrives or []):
+        gd_root_str = str(gd.get("root") or "").strip()
+        gd_drv_str = str(gd.get("drive") or "").strip()
+        if gd_root_str:
+            try:
+                gd_root_p = Path(gd_root_str).resolve()
+            except OSError:
+                gd_root_p = Path(gd_root_str)
+            # Case-insensitive path prefix match on Windows
+            if os.name == "nt":
+                rp_str = str(resolved_p).rstrip("\\/")
+                gr_str = str(gd_root_p).rstrip("\\/")
+                if rp_str.lower() == gr_str.lower():
+                    matched_rel_parts = ()
+                    break
+                if rp_str.lower().startswith(gr_str.lower() + "\\"):
+                    tail = rp_str[len(gr_str) + 1 :]
+                    matched_rel_parts = tuple(x for x in tail.split("\\") if x)
+                    break
+            else:
+                try:
+                    rel = resolved_p.relative_to(gd_root_p)
+                    matched_rel_parts = rel.parts
+                    break
+                except ValueError:
+                    pass
+        if gd_drv_str and str(resolved_p).rstrip("\\/").lower() == gd_drv_str.rstrip("\\/").lower():
+            is_drive_root = True
+            matched_rel_parts = ()
+            break
+
+    if matched_rel_parts is None and not is_drive_root:
+        return None
+
+    gd_conn = get_gdrive_connection_status()
+    if not gd_conn.get("connected"):
+        raise ValueError(
+            "선택한 Google Drive 폴더를 웹 주소(https://drive.google.com/...)로 연결하려면 "
+            "먼저 [🔑 Google Drive 직접 연결] 로그인을 완료해 주세요."
+        )
+
+    if not matched_rel_parts:
+        return {
+            "id": "root",
+            "name": "내 드라이브 (루트)",
+            "webViewLink": "https://drive.google.com/drive/my-drive",
+        }
+
+    cur_id = "root"
+    cur_meta: Dict[str, Any] = {
+        "id": "root",
+        "name": "내 드라이브 (루트)",
+        "webViewLink": "https://drive.google.com/drive/my-drive",
+    }
+    for seg in matched_rel_parts:
+        cur_meta = create_subfolder(seg, parent_id=cur_id)
+        cur_id = cur_meta["id"]
+
+    return {
+        "id": cur_meta["id"],
+        "name": cur_meta.get("name") or matched_rel_parts[-1],
+        "webViewLink": cur_meta.get("webViewLink") or f"https://drive.google.com/drive/folders/{cur_meta['id']}",
+    }
+
+
 def list_subfolders(parent_id: str = "root") -> Dict[str, Any]:
     pid = extract_folder_id_from_input(parent_id)
     parent_meta = get_folder_metadata(pid)

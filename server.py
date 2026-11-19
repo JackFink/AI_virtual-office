@@ -46,6 +46,8 @@ from backend.gdrive_client import (
     get_gdrive_connection_status,
     launch_gcloud_drive_login,
     list_subfolders as gdrive_list_subfolders,
+    resolve_local_gdrive_path_to_cloud_folder,
+    resolve_mounted_gdrive_path,
     save_oauth_client_json,
     upload_file_to_folder as gdrive_upload_file,
     upload_mission_bundle,
@@ -659,6 +661,7 @@ def save_workspace_settings(
     cfg = load_workspace_settings()
     gdrives = detect_google_drive_paths()
 
+    converted_gd = False
     if output_dir_raw is not None:
         raw_clean = str(output_dir_raw).strip()
         if not raw_clean or raw_clean.replace("\\", "/").rstrip("/") == "deliverables":
@@ -672,31 +675,41 @@ def save_workspace_settings(
                 cfg["gdrive_folder_id"] = meta["id"]
                 cfg["gdrive_folder_name"] = meta["name"]
                 cfg["gdrive_folder_url"] = meta["webViewLink"]
+                cfg["output_dir"] = ""
+                converted_gd = True
             else:
-                target_p = _resolve_custom_output_input(raw_clean, gdrives)
-                cfg["output_dir"] = str(target_p)
+                raise ValueError("Google Drive 웹 폴더 주소를 지정하려면 먼저 [🔑 Google Drive 직접 연결] 로그인을 완료해 주세요.")
         else:
             target_p = _resolve_custom_output_input(raw_clean, gdrives)
-            try:
-                target_p.mkdir(parents=True, exist_ok=True)
-                probe_file = target_p / f".nexus_write_test_{os.getpid()}.tmp"
-                probe_file.write_text("ok", encoding="utf-8")
-                probe_file.unlink(missing_ok=True)
-            except Exception as exc:
-                raise ValueError(f"지정한 폴더에 접근하거나 파일을 생성할 수 없습니다 ({target_p}): {exc}") from exc
-
-            if target_p.resolve() == DELIVERABLES_DIR.resolve():
+            gd_meta = resolve_local_gdrive_path_to_cloud_folder(target_p, gdrives) if target_p.resolve() != DELIVERABLES_DIR.resolve() else None
+            if gd_meta:
+                cfg["gdrive_direct_enabled"] = True
+                cfg["gdrive_folder_id"] = gd_meta["id"]
+                cfg["gdrive_folder_name"] = gd_meta["name"]
+                cfg["gdrive_folder_url"] = gd_meta["webViewLink"]
                 cfg["output_dir"] = ""
+                converted_gd = True
             else:
-                norm_str = str(target_p)
-                cfg["output_dir"] = norm_str
-                recents = [d for d in cfg.get("recent_dirs", []) if d.lower() != norm_str.lower()]
-                recents.insert(0, norm_str)
-                cfg["recent_dirs"] = recents[:10]
+                try:
+                    target_p.mkdir(parents=True, exist_ok=True)
+                    probe_file = target_p / f".nexus_write_test_{os.getpid()}.tmp"
+                    probe_file.write_text("ok", encoding="utf-8")
+                    probe_file.unlink(missing_ok=True)
+                except Exception as exc:
+                    raise ValueError(f"지정한 폴더에 접근하거나 파일을 생성할 수 없습니다 ({target_p}): {exc}") from exc
+
+                if target_p.resolve() == DELIVERABLES_DIR.resolve():
+                    cfg["output_dir"] = ""
+                else:
+                    norm_str = str(target_p)
+                    cfg["output_dir"] = norm_str
+                    recents = [d for d in cfg.get("recent_dirs", []) if d.lower() != norm_str.lower()]
+                    recents.insert(0, norm_str)
+                    cfg["recent_dirs"] = recents[:10]
 
     if mirror_to_local is not None:
         cfg["mirror_to_local"] = bool(mirror_to_local)
-    if gdrive_direct_enabled is not None:
+    if gdrive_direct_enabled is not None and not converted_gd:
         cfg["gdrive_direct_enabled"] = bool(gdrive_direct_enabled)
     if gdrive_folder_id is not None:
         cfg["gdrive_folder_id"] = str(gdrive_folder_id).strip() or "root"
@@ -778,16 +791,229 @@ def get_output_dir_status(force_gdrive_refresh: bool = False) -> Dict[str, Any]:
     return res_out
 
 
+def _resolve_browse_path(raw_path: Optional[str]) -> Path:
+    s = str(raw_path or "").strip()
+    if not s:
+        return DELIVERABLES_DIR.resolve()
+    p = Path(s).expanduser()
+    if not p.is_absolute():
+        p = (ROOT / p).resolve()
+    else:
+        try:
+            p = p.resolve()
+        except OSError:
+            pass
+    return p
+
+
+def _probe_dir_writable(folder_p: Path) -> bool:
+    try:
+        if not folder_p.exists() or not folder_p.is_dir():
+            return False
+        probe = folder_p / f".nexus_write_test_{os.getpid()}.tmp"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def list_local_fs_directory(target_dir_str: Optional[str] = None) -> Dict[str, Any]:
+    """Lists drives, breadcrumbs, subdirectories, and files so web UI can browse & open folders without relying on OS Explorer."""
+    gdrives = detect_google_drive_paths()
+    roots: List[Dict[str, str]] = [
+        {"label": "📁 기본 작업 폴더 (deliverables)", "path": str(DELIVERABLES_DIR.resolve()), "kind": "deliverables"},
+        {"label": "🏠 프로젝트 루트", "path": str(ROOT.resolve()), "kind": "repo"},
+    ]
+    for gd in gdrives:
+        gd_r = str(gd.get("root") or "").strip()
+        if gd_r:
+            roots.append({"label": f"☁️ {gd.get('label') or gd_r}", "path": gd_r, "kind": "gdrive"})
+
+    if os.name == "nt":
+        for code in range(ord("C"), ord("Z") + 1):
+            drv = f"{chr(code)}:\\"
+            try:
+                if Path(drv).exists():
+                    if not any(r["path"].upper().startswith(drv) and r["kind"] == "gdrive" for r in roots):
+                        roots.append({"label": f"💾 로컬 디스크 ({chr(code)}:)", "path": drv, "kind": "drive"})
+            except OSError:
+                continue
+    else:
+        roots.append({"label": "🏠 홈 폴더", "path": str(Path.home()), "kind": "drive"})
+
+    cur_p = _resolve_browse_path(target_dir_str)
+    fallback_msg = None
+    if not cur_p.exists():
+        try:
+            cur_p.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            fallback_msg = f"요청한 경로({cur_p})가 존재하지 않아 상위 또는 기본 폴더를 표시합니다."
+            while not cur_p.exists() and cur_p.parent != cur_p:
+                cur_p = cur_p.parent
+            if not cur_p.exists():
+                cur_p = DELIVERABLES_DIR.resolve()
+                cur_p.mkdir(parents=True, exist_ok=True)
+
+    if cur_p.is_file():
+        cur_p = cur_p.parent
+
+    # Build breadcrumbs
+    breadcrumbs: List[Dict[str, str]] = []
+    parts = cur_p.parts
+    if parts:
+        accum = Path(parts[0])
+        breadcrumbs.append({"name": parts[0].rstrip("\\/") or parts[0], "path": str(accum)})
+        for seg in parts[1:]:
+            accum = accum / seg
+            breadcrumbs.append({"name": seg, "path": str(accum)})
+
+    parent_dir = str(cur_p.parent) if cur_p.parent != cur_p else None
+    is_writable = _probe_dir_writable(cur_p)
+
+    folders: List[Dict[str, Any]] = []
+    files: List[Dict[str, Any]] = []
+    root_resolved = ROOT.resolve()
+    hidden_skip = {".git", "__pycache__", "node_modules", ".venv", "venv"}
+
+    try:
+        for entry in cur_p.iterdir():
+            name = entry.name
+            if name.startswith(".nexus_write_test"):
+                continue
+            try:
+                st = entry.stat()
+                mtime_iso = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                if entry.is_dir():
+                    if name in hidden_skip:
+                        continue
+                    folders.append(
+                        {
+                            "name": name,
+                            "path": str(entry),
+                            "mtime": mtime_iso,
+                            "is_project": name.endswith("_project"),
+                        }
+                    )
+                elif entry.is_file():
+                    web_url = None
+                    try:
+                        rel_to_root = entry.resolve().relative_to(root_resolved)
+                        web_url = "/" + rel_to_root.as_posix()
+                    except Exception:
+                        web_url = None
+                    files.append(
+                        {
+                            "name": name,
+                            "path": str(entry),
+                            "size": st.st_size,
+                            "mtime": mtime_iso,
+                            "ext": entry.suffix.lower(),
+                            "web_url": web_url,
+                        }
+                    )
+            except OSError:
+                continue
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"폴더 목록을 읽을 수 없습니다 ({cur_p}): {exc}",
+            "current_dir": str(cur_p),
+            "parent_dir": parent_dir,
+            "breadcrumbs": breadcrumbs,
+            "roots": roots,
+            "folders": [],
+            "files": [],
+            "is_writable": False,
+        }
+
+    folders.sort(key=lambda x: (0 if x.get("is_project") else 1, x["name"].lower()))
+    files.sort(key=lambda x: x["mtime"], reverse=True)
+
+    return {
+        "ok": True,
+        "current_dir": str(cur_p),
+        "parent_dir": parent_dir,
+        "breadcrumbs": breadcrumbs,
+        "roots": roots,
+        "folders": folders[:250],
+        "files": files[:250],
+        "is_writable": is_writable,
+        "is_gdrive_mount": _is_google_drive_path(cur_p, gdrives),
+        "has_non_ascii_or_space": any(ord(ch) > 127 or ch == " " for ch in str(cur_p)),
+        "fallback_notice": fallback_msg,
+    }
+
+
+def create_local_fs_subfolder(parent_dir_str: str, folder_name: str) -> Dict[str, Any]:
+    clean_name = str(folder_name or "").strip().strip("\\/")
+    if not clean_name or clean_name in (".", "..") or any(ch in clean_name for ch in '<>:"|?*'):
+        raise ValueError("유효한 새 폴더 이름을 입력해 주세요 (특수문자 <>:\"|?* 제외).")
+    parent_p = _resolve_browse_path(parent_dir_str)
+    gdrives = detect_google_drive_paths()
+    new_p = parent_p / clean_name
+    created_gd = None
+
+    if _is_google_drive_path(parent_p, gdrives) and get_gdrive_connection_status().get("connected"):
+        parent_meta = resolve_local_gdrive_path_to_cloud_folder(parent_p, gdrives)
+        if parent_meta:
+            created_gd = gdrive_create_subfolder(clean_name, parent_id=parent_meta["id"])
+            for _ in range(6):
+                if new_p.exists():
+                    break
+                time.sleep(0.25)
+
+    try:
+        new_p.mkdir(parents=True, exist_ok=True)
+        probe = new_p / f".nexus_write_test_{os.getpid()}.tmp"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except PermissionError as exc:
+        raise ValueError(
+            f"현재 서버 실행 환경(백그라운드 샌드박스)에서는 저장소 외부 경로({new_p})에 폴더를 생성할 수 없습니다. "
+            f"deliverables 하위 폴더를 선택하거나, 일반 Windows 터미널에서 start_director.bat(또는 python server.py 8080)으로 실행해 주세요."
+        ) from exc
+    except Exception as exc:
+        raise ValueError(f"새 폴더 생성 실패 ({new_p}): {exc}") from exc
+    _OUTPUT_DIR_STATUS_CACHE.clear()
+    listing = list_local_fs_directory(str(new_p))
+    listing["created_dir"] = str(new_p)
+    if created_gd:
+        listing["gdrive_folder"] = created_gd
+    listing["message"] = f"새 폴더 [{clean_name}]가 생성되었습니다."
+    return listing
+
+
+def preview_local_fs_file(file_path_str: str) -> Dict[str, Any]:
+    fp = _resolve_browse_path(file_path_str)
+    if not fp.exists() or not fp.is_file():
+        raise ValueError(f"파일을 찾을 수 없습니다: {fp}")
+    low_name = fp.name.lower()
+    if low_name.startswith(".env") or any(tok in low_name for tok in ("token", "oauth", "secret", "credential")):
+        raise ValueError("보안상 인증·환경변수 파일은 미리보기가 제한됩니다.")
+    size = fp.stat().st_size
+    raw_bytes = fp.read_bytes()[:65536]
+    text = raw_bytes.decode("utf-8", errors="replace")
+    return {
+        "ok": True,
+        "name": fp.name,
+        "path": str(fp),
+        "size": size,
+        "truncated": size > 65536,
+        "content": text,
+    }
+
+
 def browse_output_folder_dialog(
     initial_dir: Optional[str] = None,
     pick_only: bool = False,
     team_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Opens native OS folder picker dialog (Windows FolderBrowserDialog with TopMost owner) so user can pick local or Google Drive folder."""
+    """Opens native OS folder picker dialog (Windows FolderBrowserDialog with foreground TopMost owner) with short timeout."""
     status_now = get_output_dir_status()
     start_dir = (initial_dir or "").strip() or status_now["output_dir"]
     if os.name != "nt":
-        return {"ok": False, "error": "현재 OS 환경에서는 네이티브 폴더 선택창 대신 경로 직접 입력을 사용해 주세요."}
+        return {"ok": False, "error": "현재 OS 환경에서는 웹 내장 폴더 선택기를 사용해 주세요."}
 
     ps_exe = shutil.which("powershell") or "powershell.exe"
     safe_init = start_dir.replace("'", "''")
@@ -796,14 +1022,16 @@ def browse_output_folder_dialog(
         "Add-Type -AssemblyName System.Windows.Forms; "
         "$owner = New-Object System.Windows.Forms.Form; "
         "$owner.TopMost = $true; "
+        "$owner.Width = 1; $owner.Height = 1; $owner.ShowInTaskbar = $false; $owner.Opacity = 0; "
         "$owner.StartPosition = 'CenterScreen'; "
+        "$owner.Show(); $owner.Activate(); "
         "$dlg = New-Object System.Windows.Forms.FolderBrowserDialog; "
         "$dlg.Description = '프로젝트 저장 폴더 선택 (로컬 디스크 또는 Google Drive 내 드라이브)'; "
         "$dlg.ShowNewFolderButton = $true; "
         f"if (Test-Path -LiteralPath '{safe_init}') {{ $dlg.SelectedPath = '{safe_init}' }}; "
         "$res = $dlg.ShowDialog($owner); "
         "if ($res -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dlg.SelectedPath }; "
-        "$owner.Dispose()"
+        "$owner.Close(); $owner.Dispose()"
     )
     try:
         res = subprocess.run(
@@ -812,7 +1040,7 @@ def browse_output_folder_dialog(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=120.0,
+            timeout=25.0,
         )
         chosen = (res.stdout or "").strip()
         if not chosen:
@@ -821,6 +1049,7 @@ def browse_output_folder_dialog(
             return {"ok": True, "cancelled": False, "selected_dir": chosen}
         if team_id:
             updated_team, _ = update_team_workspace_only(team_id, {"output_dir": chosen}, detect_google_drive_paths())
+            _OUTPUT_DIR_STATUS_CACHE.clear()
             return {
                 "ok": True,
                 "cancelled": False,
@@ -832,25 +1061,48 @@ def browse_output_folder_dialog(
         updated = save_workspace_settings(output_dir_raw=chosen)
         return {"ok": True, "cancelled": False, "selected_dir": chosen, "status": updated, "teams_summary": get_teams_payload()}
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "폴더 선택 창 대기 시간이 초과되었습니다(120초)."}
+        return {"ok": False, "error": "Windows 폴더 창이 백그라운드 제한으로 표시되지 않았습니다. 웹 폴더 선택기를 이용해 주세요."}
     except Exception as exc:
-        return {"ok": False, "error": f"폴더 선택 창 실행 오류: {exc}"}
+        return {"ok": False, "error": f"폴더 선택 오류: {exc}"}
 
 
 def open_output_folder_in_explorer(target_dir_str: Optional[str] = None) -> Dict[str, Any]:
     status_now = get_output_dir_status()
-    target_p = Path(target_dir_str).expanduser() if (target_dir_str and target_dir_str.strip()) else Path(status_now["output_dir"])
+    target_p = _resolve_browse_path(target_dir_str) if (target_dir_str and target_dir_str.strip()) else Path(status_now["output_dir"])
     try:
         target_p.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    native_opened = False
+    try:
         if os.name == "nt":
+            ps_exe = shutil.which("powershell") or "powershell.exe"
+            safe_t = str(target_p.resolve()).replace("'", "''")
             subprocess.Popen(["explorer.exe", str(target_p)], shell=False)
+            time.sleep(0.45)
+            chk = subprocess.run(
+                [
+                    ps_exe,
+                    "-NoProfile",
+                    "-Command",
+                    f"$t = [uri]::new('{safe_t}').AbsoluteUri.TrimEnd('/'); "
+                    "$m = @((New-Object -ComObject Shell.Application).Windows() | Where-Object { $_.LocationURL -and $_.LocationURL.TrimEnd('/') -eq $t }); "
+                    "Write-Output $m.Count",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=3.0,
+            )
+            native_opened = int((chk.stdout or "0").strip() or "0") > 0
         elif shutil.which("open"):
             subprocess.Popen(["open", str(target_p)], shell=False)
+            native_opened = True
         elif shutil.which("xdg-open"):
             subprocess.Popen(["xdg-open", str(target_p)], shell=False)
-        return {"ok": True, "opened_dir": str(target_p)}
+            native_opened = True
+        return {"ok": True, "opened_dir": str(target_p), "native_window_opened": native_opened}
     except Exception as exc:
-        return {"ok": False, "error": f"폴더 열기 실패: {exc}"}
+        return {"ok": True, "opened_dir": str(target_p), "native_window_opened": False, "notice": str(exc)}
 
 
 def resolve_cli(name: str) -> Optional[str]:
@@ -3964,6 +4216,11 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             force = qs.get("refresh", ["0"])[0] in ("1", "true", "yes")
             return self._send_json(get_output_dir_status(force_gdrive_refresh=force))
+        if path == "/ops/fs-browse":
+            qs = parse_qs(parsed.query)
+            req_path = qs.get("path", [""])[0]
+            listing = list_local_fs_directory(req_path or None)
+            return self._send_json(listing, 200 if listing.get("ok") else 400)
         if path == "/ops/gdrive/status":
             qs = parse_qs(parsed.query)
             force = qs.get("refresh", ["0"])[0] in ("1", "true", "yes")
@@ -4581,8 +4838,33 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
 
                 if action == "set_folder":
                     folder_input = str(payload.get("folder_id") or payload.get("folder_url") or "root").strip()
+                    target_tid = str(payload.get("team_id") or "").strip()
                     meta = gdrive_get_folder_metadata(folder_input)
+                    _OUTPUT_DIR_STATUS_CACHE.clear()
+                    if target_tid:
+                        updated_team, _ = update_team_workspace_only(
+                            target_tid,
+                            {
+                                "output_dir": "",
+                                "gdrive_direct_enabled": True,
+                                "gdrive_folder_id": meta["id"],
+                                "gdrive_folder_name": meta["name"],
+                                "gdrive_folder_url": meta["webViewLink"],
+                            },
+                            detect_google_drive_paths(),
+                        )
+                        return self._send_json(
+                            {
+                                "ok": True,
+                                "folder": meta,
+                                "saved_team": updated_team,
+                                "output_dir_status": get_output_dir_status(),
+                                "teams_summary": get_teams_payload(),
+                                "message": f"[{updated_team['name']}] 팀 작업 폴더가 Google Drive 웹 주소({meta['webViewLink']})로 설정되었습니다.",
+                            }
+                        )
                     st_after = save_workspace_settings(
+                        output_dir_raw="",
                         gdrive_direct_enabled=True,
                         gdrive_folder_id=meta["id"],
                         gdrive_folder_name=meta["name"],
@@ -4595,7 +4877,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                                 "at": utc_now_iso(),
                                 "run_id": f"gdrive-folder-{int(time.time())}",
                                 "to_state": "GDRIVE_FOLDER",
-                                "state_ko": f"☁️ Google Drive 클라우드 저장 폴더 지정: {meta['name']} ({meta['id']})",
+                                "state_ko": f"☁️ Google Drive 클라우드 저장 폴더 지정: {meta['name']} ({meta['webViewLink']})",
                                 "project": STATE["project_name"],
                                 "role": "DIRECTOR",
                             },
@@ -4605,7 +4887,8 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                             "ok": True,
                             "folder": meta,
                             "output_dir_status": st_after,
-                            "message": f"Google Drive 클라우드 폴더 [{meta['name']}]가 프로젝트 저장 위치로 지정되었습니다.",
+                            "teams_summary": get_teams_payload(),
+                            "message": f"Google Drive 클라우드 폴더({meta['webViewLink']})가 프로젝트 저장 위치로 지정되었습니다.",
                         }
                     )
 
@@ -4613,7 +4896,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     parent_id = str(payload.get("parent_id") or "root").strip() or "root"
                     folder_name = str(payload.get("name") or "").strip()
                     created = gdrive_create_subfolder(folder_name, parent_id=parent_id)
-                    return self._send_json({"ok": True, "folder": created, "message": f"Google Drive에 새 폴더 [{created['name']}]가 준비되었습니다."})
+                    return self._send_json({"ok": True, "folder": created, "message": f"Google Drive에 새 클라우드 폴더 [{created['name']}] ({created['webViewLink']})가 생성되었습니다."})
 
                 if action == "test_upload":
                     st_cur = get_output_dir_status(force_gdrive_refresh=True)
@@ -4643,6 +4926,44 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": f"지원하지 않는 action입니다: {action}"}, 400)
             except Exception as exc:
                 return self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        if path == "/ops/fs-browse":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                action = str(payload.get("action") or "list").lower().strip()
+                if action == "mkdir":
+                    parent_d = str(payload.get("parent_dir") or "").strip()
+                    fname = str(payload.get("folder_name") or "").strip()
+                    res = create_local_fs_subfolder(parent_d, fname)
+                    return self._send_json(res, 200)
+                if action == "read_file":
+                    fpath = str(payload.get("file_path") or "").strip()
+                    res = preview_local_fs_file(fpath)
+                    return self._send_json(res, 200)
+                if action == "resolve_gdrive_url":
+                    raw_p = str(payload.get("path") or "").strip()
+                    if raw_p.lower().startswith(("http://", "https://")) and "drive.google.com" in raw_p.lower():
+                        meta = gdrive_get_folder_metadata(raw_p)
+                        return self._send_json({"ok": True, "is_gdrive": True, "folder": meta, "resolved_path": meta["webViewLink"]}, 200)
+                    resolved_p = _resolve_browse_path(raw_p)
+                    gd_meta = resolve_local_gdrive_path_to_cloud_folder(resolved_p, detect_google_drive_paths())
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "is_gdrive": bool(gd_meta),
+                            "folder": gd_meta,
+                            "resolved_path": gd_meta["webViewLink"] if gd_meta else str(resolved_p),
+                        },
+                        200,
+                    )
+                listing = list_local_fs_directory(str(payload.get("path") or "").strip() or None)
+                return self._send_json(listing, 200 if listing.get("ok") else 400)
+            except ValueError as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": f"폴더 탐색 작업 오류: {exc}"}, 500)
 
         if path == "/ops/output-dir":
             try:
@@ -4707,6 +5028,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     payload = {}
                 action = str(payload.get("action") or "save").lower().strip()
                 gdrives = detect_google_drive_paths()
+                _OUTPUT_DIR_STATUS_CACHE.clear()
 
                 if action == "save":
                     team_in = payload.get("team") if isinstance(payload.get("team"), dict) else payload
@@ -4770,13 +5092,18 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     tid = str(payload.get("team_id") or "").strip()
                     parent_id = str(payload.get("parent_id") or "root").strip() or "root"
                     custom_name = str(payload.get("folder_name") or "").strip() or None
-                    created_folder, _ = create_and_bind_gdrive_team_folder(tid, parent_folder_id=parent_id, custom_folder_name=custom_name)
+                    created_folder, _ = create_and_bind_gdrive_team_folder(
+                        tid,
+                        parent_folder_id=parent_id,
+                        custom_folder_name=custom_name,
+                        detected_gdrives=gdrives,
+                    )
                     return self._send_json(
                         {
                             "ok": True,
                             "folder": created_folder,
                             "teams_summary": get_teams_payload(),
-                            "message": f"Google Drive 클라우드에 [{created_folder['name']}] 전용 폴더를 생성하고 팀에 연결했습니다!",
+                            "message": f"Google Drive 클라우드 폴더 [{created_folder['name']}] ({created_folder['webViewLink']})를 생성하고 팀 작업 폴더로 연결했습니다!",
                         }
                     )
 

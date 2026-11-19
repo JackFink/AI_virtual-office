@@ -26,6 +26,8 @@ from backend.gdrive_client import (
     create_subfolder as gdrive_create_subfolder,
     get_folder_metadata as gdrive_get_folder_metadata,
     get_gdrive_connection_status,
+    resolve_local_gdrive_path_to_cloud_folder,
+    resolve_mounted_gdrive_path,
 )
 
 
@@ -287,6 +289,7 @@ def _validate_and_apply_workspace_dict(
 ) -> Dict[str, Any]:
     ws = dict(DEFAULT_WORKSPACE)
     ws.update(existing_ws or {})
+    converted_local_gdrive = False
 
     if "output_dir" in incoming_ws and incoming_ws["output_dir"] is not None:
         raw_out = str(incoming_ws["output_dir"]).strip()
@@ -300,33 +303,51 @@ def _validate_and_apply_workspace_dict(
                 ws["gdrive_folder_id"] = meta["id"]
                 ws["gdrive_folder_name"] = meta["name"]
                 ws["gdrive_folder_url"] = meta["webViewLink"]
+                ws["output_dir"] = ""
+                converted_local_gdrive = True
             else:
-                target_p, is_def = resolve_team_local_path(raw_out, detected_gdrives)
-                ws["output_dir"] = "" if is_def else str(target_p)
+                raise ValueError("Google Drive 웹 폴더 주소를 지정하려면 먼저 [🔑 Google Drive 직접 연결] 로그인을 완료해 주세요.")
         else:
             target_p, is_def = resolve_team_local_path(raw_out, detected_gdrives)
-            try:
-                target_p.mkdir(parents=True, exist_ok=True)
-                probe = target_p / f".nexus_write_test_{os.getpid()}.tmp"
-                probe.write_text("ok", encoding="utf-8")
-                probe.unlink(missing_ok=True)
-            except Exception as exc:
-                raise ValueError(f"팀 작업 폴더에 접근하거나 파일을 쓸 수 없습니다 ({target_p}): {exc}") from exc
-
-            if is_def:
+            gd_cloud_meta = resolve_local_gdrive_path_to_cloud_folder(target_p, detected_gdrives) if not is_def else None
+            if gd_cloud_meta:
+                # Google Drive 내 폴더를 선택한 경우 자동으로 Google Drive 웹 URL로 연결!
+                ws["gdrive_direct_enabled"] = True
+                ws["gdrive_folder_id"] = gd_cloud_meta["id"]
+                ws["gdrive_folder_name"] = gd_cloud_meta["name"]
+                ws["gdrive_folder_url"] = gd_cloud_meta["webViewLink"]
                 ws["output_dir"] = ""
+                converted_local_gdrive = True
             else:
-                # Preserve clean relative path if inside deliverables/, else full path
                 try:
-                    rel_root = target_p.resolve().relative_to(ROOT.resolve())
-                    ws["output_dir"] = rel_root.as_posix() if str(raw_out).startswith("deliverables") else str(target_p)
-                except ValueError:
-                    ws["output_dir"] = str(target_p)
+                    target_p.mkdir(parents=True, exist_ok=True)
+                    probe = target_p / f".nexus_write_test_{os.getpid()}.tmp"
+                    probe.write_text("ok", encoding="utf-8")
+                    probe.unlink(missing_ok=True)
+                except PermissionError as exc:
+                    raise ValueError(
+                        f"현재 서버가 IDE 백그라운드 샌드박스 환경에서 실행 중이어서 저장소 외부 폴더({target_p}) 쓰기가 제한됩니다. "
+                        f"deliverables 하위 폴더(예: deliverables/team_app)를 선택하거나, 일반 터미널에서 start_director.bat(또는 python server.py 8080)으로 실행해 주세요."
+                    ) from exc
+                except Exception as exc:
+                    raise ValueError(f"팀 작업 폴더에 접근하거나 파일을 쓸 수 없습니다 ({target_p}): {exc}") from exc
+
+                if is_def:
+                    ws["output_dir"] = ""
+                else:
+                    if "gdrive_direct_enabled" not in incoming_ws:
+                        ws["gdrive_direct_enabled"] = False
+                    # Preserve clean relative path if inside deliverables/, else full path
+                    try:
+                        rel_root = target_p.resolve().relative_to(ROOT.resolve())
+                        ws["output_dir"] = rel_root.as_posix() if str(raw_out).startswith("deliverables") else str(target_p)
+                    except ValueError:
+                        ws["output_dir"] = str(target_p)
 
     if "mirror_to_local" in incoming_ws and incoming_ws["mirror_to_local"] is not None:
         ws["mirror_to_local"] = bool(incoming_ws["mirror_to_local"])
 
-    if "gdrive_direct_enabled" in incoming_ws and incoming_ws["gdrive_direct_enabled"] is not None:
+    if "gdrive_direct_enabled" in incoming_ws and incoming_ws["gdrive_direct_enabled"] is not None and not converted_local_gdrive:
         ws["gdrive_direct_enabled"] = bool(incoming_ws["gdrive_direct_enabled"])
 
     if "gdrive_folder_input" in incoming_ws and incoming_ws["gdrive_folder_input"]:
@@ -337,6 +358,8 @@ def _validate_and_apply_workspace_dict(
             ws["gdrive_folder_id"] = meta["id"]
             ws["gdrive_folder_name"] = meta["name"]
             ws["gdrive_folder_url"] = meta["webViewLink"]
+            if not str(incoming_ws.get("output_dir") or "").strip():
+                ws["output_dir"] = ""
         else:
             ws["gdrive_folder_id"] = raw_gd
 
@@ -478,6 +501,7 @@ def create_and_bind_gdrive_team_folder(
     team_id: str,
     parent_folder_id: str = "root",
     custom_folder_name: Optional[str] = None,
+    detected_gdrives: Optional[List[Dict[str, str]]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     doc = load_teams_config()
     target = next((t for t in doc["teams"] if t["id"] == team_id), None)
@@ -492,6 +516,8 @@ def create_and_bind_gdrive_team_folder(
     target["workspace"]["gdrive_folder_id"] = created["id"]
     target["workspace"]["gdrive_folder_name"] = created["name"]
     target["workspace"]["gdrive_folder_url"] = created["webViewLink"]
+    # 클라우드 전용폴더 생성 시 작업 폴더 주소는 로컬 디스크 경로가 아닌 Google Drive 웹 URL을 주 경로로 사용
+    target["workspace"]["output_dir"] = ""
     target["updated_at"] = _utc_now()
     saved_doc = save_teams_config(doc)
     return created, saved_doc
@@ -594,9 +620,38 @@ def build_teams_and_workspaces_payload(
     # Map normalized local path -> connected workspace entry
     local_ws_map: Dict[str, Dict[str, Any]] = {}
     cloud_ws_list: List[Dict[str, Any]] = []
+    auto_cleaned = False
 
     for t in doc["teams"]:
         ws = t["workspace"]
+        cur_out_str = str(ws.get("output_dir") or "").strip()
+        gd_fname_chk = str(ws.get("gdrive_folder_name") or "").strip()
+        if (
+            ws.get("gdrive_direct_enabled")
+            and (ws.get("gdrive_folder_id") or "root") != "root"
+            and cur_out_str
+            and (
+                cur_out_str.replace("\\", "/").startswith("deliverables")
+                or (gd_fname_chk and cur_out_str.endswith(gd_fname_chk))
+            )
+        ):
+            ws["output_dir"] = ""
+            auto_cleaned = True
+        elif cur_out_str and gdrive_conn.get("connected") and detected_gdrives:
+            try:
+                cand_local_p = Path(cur_out_str)
+                if _is_gdrive_local_path(cand_local_p, detected_gdrives):
+                    migrated_meta = resolve_local_gdrive_path_to_cloud_folder(cand_local_p, detected_gdrives)
+                    if migrated_meta:
+                        ws["gdrive_direct_enabled"] = True
+                        ws["gdrive_folder_id"] = migrated_meta["id"]
+                        ws["gdrive_folder_name"] = migrated_meta["name"]
+                        ws["gdrive_folder_url"] = migrated_meta["webViewLink"]
+                        ws["output_dir"] = ""
+                        auto_cleaned = True
+            except Exception:
+                pass
+
         try:
             eff_path, is_def = resolve_team_local_path(ws.get("output_dir", ""), detected_gdrives)
         except Exception:
@@ -625,9 +680,20 @@ def build_teams_and_workspaces_payload(
                 }
             )
 
+        gd_fid = ws.get("gdrive_folder_id") or "root"
+        gd_fname_val = ws.get("gdrive_folder_name") or "내 드라이브 (루트)"
+        gd_web_url = ws.get("gdrive_folder_url") or (
+            "https://drive.google.com/drive/my-drive"
+            if gd_fid == "root"
+            else f"https://drive.google.com/drive/folders/{gd_fid}"
+        )
+        is_cloud_primary = bool(ws.get("gdrive_direct_enabled") and is_def)
+
         ws_status = {
             "configured_dir": ws.get("output_dir") or "",
             "effective_dir": str(eff_path),
+            "display_path": gd_web_url if is_cloud_primary else str(eff_path),
+            "is_cloud_primary": is_cloud_primary,
             "is_default": is_def,
             "is_google_drive_local": is_gd_local,
             "mirror_to_local": bool(ws.get("mirror_to_local", False)),
@@ -637,9 +703,9 @@ def build_teams_and_workspaces_payload(
                 "account_email": gdrive_conn.get("account_email"),
                 "enabled": bool(ws.get("gdrive_direct_enabled", False) and gdrive_conn.get("connected")),
                 "configured_enabled": bool(ws.get("gdrive_direct_enabled", False)),
-                "folder_id": ws.get("gdrive_folder_id") or "root",
-                "folder_name": ws.get("gdrive_folder_name") or "내 드라이브 (루트)",
-                "folder_url": ws.get("gdrive_folder_url") or "https://drive.google.com/drive/my-drive",
+                "folder_id": gd_fid,
+                "folder_name": gd_fname_val,
+                "folder_url": gd_web_url,
             },
         }
 
@@ -661,29 +727,30 @@ def build_teams_and_workspaces_payload(
         }
         enriched_teams.append(enriched_team)
 
-        # Register into connected_workspaces map
-        norm_key = str(eff_path).lower()
-        if norm_key not in local_ws_map:
-            local_ws_map[norm_key] = {
-                "id": f"ws-local-{len(local_ws_map) + 1}",
-                "kind": "gdrive_mounted" if is_gd_local else ("default_local" if is_def else "custom_local"),
-                "kind_label": "☁️ Google Drive (로컬 마운트)" if is_gd_local else ("📁 기본 로컬 폴더" if is_def else "📂 팀 전용 로컬 폴더"),
-                "path": str(eff_path),
-                "display_name": eff_path.name or str(eff_path),
-                "is_accessible": stats["is_accessible"],
-                "has_non_ascii_or_space": stats["has_non_ascii_or_space"],
-                "project_count": stats["project_count"],
-                "report_count": stats["report_count"],
-                "file_count": stats["file_count"],
-                "last_modified_at": stats["last_modified_at"],
-                "teams": [],
-                "web_url": None,
-            }
-        local_ws_map[norm_key]["teams"].append(
-            {"id": t["id"], "name": t["name"], "color": t["color"], "floor": t["floor"], "is_active": t["id"] == active_id}
-        )
+        # Register into connected_workspaces map (skip default deliverables for cloud-primary teams unless mirror_to_local is ON)
+        if not is_cloud_primary or bool(ws.get("mirror_to_local")):
+            norm_key = str(eff_path).lower()
+            if norm_key not in local_ws_map:
+                local_ws_map[norm_key] = {
+                    "id": f"ws-local-{len(local_ws_map) + 1}",
+                    "kind": "gdrive_mounted" if is_gd_local else ("default_local" if is_def else "custom_local"),
+                    "kind_label": "☁️ Google Drive (로컬 마운트)" if is_gd_local else ("📁 기본 로컬 폴더" if is_def else "📂 팀 전용 로컬 폴더"),
+                    "path": str(eff_path),
+                    "display_name": eff_path.name or str(eff_path),
+                    "is_accessible": stats["is_accessible"],
+                    "has_non_ascii_or_space": stats["has_non_ascii_or_space"],
+                    "project_count": stats["project_count"],
+                    "report_count": stats["report_count"],
+                    "file_count": stats["file_count"],
+                    "last_modified_at": stats["last_modified_at"],
+                    "teams": [],
+                    "web_url": None,
+                }
+            local_ws_map[norm_key]["teams"].append(
+                {"id": t["id"], "name": t["name"], "color": t["color"], "floor": t["floor"], "is_active": t["id"] == active_id}
+            )
 
-        # Also add direct cloud folder if enabled or explicitly bound to a specific folder
+        # Add direct cloud folder with its real Google Drive web URL
         if ws.get("gdrive_direct_enabled") or (ws.get("gdrive_folder_id") and ws.get("gdrive_folder_id") != "root"):
             fid = ws.get("gdrive_folder_id") or "root"
             existing_cloud = next((c for c in cloud_ws_list if c.get("folder_id") == fid), None)
@@ -691,9 +758,9 @@ def build_teams_and_workspaces_payload(
                 existing_cloud = {
                     "id": f"ws-cloud-{len(cloud_ws_list) + 1}",
                     "kind": "gdrive_cloud",
-                    "kind_label": "☁️ Google Drive (클라우드 직접 연결)",
-                    "path": f"gdrive://{fid} ({ws.get('gdrive_folder_name') or '내 드라이브'})",
-                    "display_name": ws.get("gdrive_folder_name") or "내 드라이브 (루트)",
+                    "kind_label": f"☁️ Google Drive 웹 폴더 ({gd_fname_val})",
+                    "path": gd_web_url,
+                    "display_name": gd_fname_val,
                     "folder_id": fid,
                     "is_accessible": bool(gdrive_conn.get("connected")),
                     "has_non_ascii_or_space": False,
@@ -702,13 +769,19 @@ def build_teams_and_workspaces_payload(
                     "file_count": sum(int(m.get("gdrive_uploaded_count") or 0) for m in team_missions),
                     "last_modified_at": t.get("updated_at"),
                     "teams": [],
-                    "web_url": ws.get("gdrive_folder_url") or "https://drive.google.com/drive/my-drive",
+                    "web_url": gd_web_url,
                     "account_email": gdrive_conn.get("account_email"),
                 }
                 cloud_ws_list.append(existing_cloud)
             existing_cloud["teams"].append(
                 {"id": t["id"], "name": t["name"], "color": t["color"], "floor": t["floor"], "is_active": t["id"] == active_id}
             )
+
+    if auto_cleaned:
+        try:
+            save_teams_config(doc)
+        except Exception:
+            pass
 
     # Ensure global custom output_dir (if set and distinct) is also visible in connected_workspaces
     glob_dir_str = str(global_out_status.get("output_dir") or "").strip()
@@ -741,8 +814,8 @@ def build_teams_and_workspaces_payload(
                 {
                     "id": f"ws-cloud-global",
                     "kind": "gdrive_cloud",
-                    "kind_label": "☁️ Google Drive (전역 클라우드 연결)",
-                    "path": f"gdrive://{gfid} ({glob_gd.get('folder_name') or '내 드라이브'})",
+                    "kind_label": f"☁️ Google Drive 전역 웹 폴더 ({glob_gd.get('folder_name') or '내 드라이브'})",
+                    "path": glob_gd.get("folder_url") or "https://drive.google.com/drive/my-drive",
                     "display_name": glob_gd.get("folder_name") or "내 드라이브 (루트)",
                     "folder_id": gfid,
                     "is_accessible": bool(glob_gd.get("connected")),
