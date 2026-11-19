@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NEXUS · AI 설정 & 직원 질문 / 미션 컨트롤</title>
-<link rel="stylesheet" href="styles.css?v=triad37">
+<link rel="stylesheet" href="styles.css?v=triad38">
 </head>
 <body data-page="settings">
 <div class="app">
@@ -187,6 +187,20 @@
     </div>
     <div class="settings-panel-body" style="display:flex;flex-direction:column;gap:12px">
       <form class="settings-question-form" id="triadGoalForm">
+        <!-- [신규] 작업 수행 팀 선택 & 팀 구성 관리 바 -->
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-radius:10px;background:#f0fdf4;border:1px solid #86efac">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:240px">
+            <span style="background:#0f6848;color:#fff;padding:3px 9px;border-radius:6px;font-size:10.5px;font-weight:800;white-space:nowrap">🏢 작업 수행 팀 선택</span>
+            <select id="triadTeamSelect" class="triad-cli-select" style="height:32px;font-size:11.5px;min-width:230px;background:#ffffff;border-color:#86efac" aria-label="미션 수행 팀 선택"></select>
+            <span id="triadTeamMetaText" style="font-size:10.5px;color:#166534">선택한 팀의 소속 AI 역할과 팀 전용 작업 폴더로 미션이 실행됩니다.</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn small" id="btnEditSelectedTeam" style="height:30px;padding:0 10px;font-size:10.5px;background:#fff">✏️ 선택 팀 &amp; 폴더 편집</button>
+            <button type="button" class="btn small primary" id="btnSettingsCreateTeam" style="height:30px;padding:0 11px;font-size:10.5px;background:#0f6848;border-color:#0f6848">➕ 새 팀 만들기</button>
+            <a href="index.html#teamsWorkspaceDashboardSection" class="btn small" style="height:30px;padding:0 10px;font-size:10.5px;background:#fff">📂 전체 작업폴더 현황판 ↗</a>
+          </div>
+        </div>
+
         <div class="settings-question-selectors">
           <label class="settings-select-field">
             <span>👤 질문 / 지시할 AI 직원 선택</span>
@@ -210,6 +224,47 @@
             </select>
           </label>
         </div>
+
+        <!-- [신규] 프로젝트 저장 폴더 지정 (로컬 디스크 & Google Drive 직접 연결 연동) -->
+        <div id="projectOutputDirBar" style="display:flex;flex-direction:column;gap:9px;padding:12px 14px;border-radius:11px;background:#f8fafc;border:1px solid #cbd5e1">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span id="outputDirModeBadge" style="background:#e6f9f1;color:#0f6848;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:800">📁 기본 저장 폴더 (deliverables/)</span>
+              <span style="font-size:11px;color:#334155">로컬 경로: <strong id="outputDirActiveText" style="font-family:var(--font-mono,monospace);color:#0f172a">deliverables/</strong></span>
+            </div>
+            <label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#475569;cursor:pointer;user-select:none" title="외부 폴더나 Google Drive에 저장할 때 로컬 deliverables/ 폴더에도 백업 사본을 함께 생성합니다.">
+              <input type="checkbox" id="chkMirrorLocalDeliverables" style="accent-color:#0f6848">
+              <span>로컬 <code>deliverables/</code>에도 사본 함께 보관</span>
+            </label>
+          </div>
+
+          <!-- [직접 연결] Google Drive REST API v3 클라우드 직접 연결 상태 & 폴더 지정 바 -->
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 11px;border-radius:9px;background:#f0f9ff;border:1px solid #bae6fd">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span id="gdriveDirectBadge" style="background:#e2e8f0;color:#475569;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:800">☁️ Google Drive 직접 연결 안 됨</span>
+              <span id="gdriveDirectSummaryText" style="font-size:11px;color:#0c4a6e">구글 계정을 직접 연결하면 데스크톱 앱 없이도 클라우드 Google Drive 폴더를 탐색·지정하여 자동 업로드합니다.</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <a id="gdriveDirectOpenWebBtn" href="https://drive.google.com/drive/my-drive" target="_blank" class="btn small" style="display:none;height:30px;padding:0 10px;font-size:10.5px;background:#fff;color:#0284c7;border-color:#7dd3fc">☁️ 웹 드라이브 열기 ↗</a>
+              <button type="button" class="btn small primary" id="btnOpenGdriveModal" style="height:30px;padding:0 12px;font-size:11px;background:#0284c7;border-color:#0284c7;white-space:nowrap">🔑 Google Drive 직접 연결 &amp; 클라우드 폴더 지정</button>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="outputDirInput" class="triad-goal-input" style="height:34px;font-size:11.5px;flex:1;min-width:240px;background:#ffffff" placeholder="로컬 경로(예: D:\MyProjects, F:\내 드라이브\...) 또는 Google Drive 폴더 URL 붙여넣기">
+            <button type="button" class="btn small primary" id="btnApplyOutputDir" style="height:34px;padding:0 12px;white-space:nowrap">💾 저장 폴더 지정</button>
+            <button type="button" class="btn small" id="btnBrowseLocalDir" style="height:34px;padding:0 11px;white-space:nowrap" title="Windows 폴더 선택 창에서 로컬/네트워크 폴더 선택">📂 내 PC 찾아보기</button>
+            <button type="button" class="btn small" id="btnBrowseGoogleDriveDir" style="height:34px;padding:0 11px;white-space:nowrap;background:#e0f2fe;color:#0369a1;border-color:#7dd3fc" title="연결된 Google Drive(내 드라이브) 로컬 마운트에서 폴더 선택">📂 로컬 드라이브(F:) 선택</button>
+            <button type="button" class="btn small" id="btnQuickSetGoogleDrive" style="display:none;height:34px;padding:0 11px;white-space:nowrap;background:#f0f9ff;color:#0284c7;border-color:#bae6fd" title="감지된 Google Drive 안에 전용 프로젝트 폴더를 자동 생성 및 지정합니다">⚡ 로컬 드라이브 자동 지정</button>
+            <button type="button" class="btn small" id="btnOpenOutputExplorer" style="height:34px;padding:0 10px;white-space:nowrap" title="현재 지정된 저장 폴더를 파일 탐색기로 열기">🗂️ 폴더 열기</button>
+            <button type="button" class="btn small" id="btnResetOutputDir" style="height:34px;padding:0 9px;white-space:nowrap" title="기본 deliverables/ 폴더로 복원">↺ 기본값</button>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <span id="outputDirFeedbackText" style="font-size:10.5px;color:#64748b">💡 로컬 디스크 폴더, 마운트된 드라이브(F:), 또는 <b>Google Drive 클라우드 직접 연결</b>을 모두 지원합니다.</span>
+            <select id="recentOutputDirsSelect" class="triad-cli-select" style="display:none;height:26px;font-size:10px;max-width:300px" aria-label="최근 사용한 저장 폴더 빠른 선택"></select>
+          </div>
+        </div>
+
         <div class="settings-question-input-row">
           <input type="text" class="triad-goal-input" id="triadGoalInput" placeholder="선택한 AI 직원에게 간단한 질문을 하거나, 실행 모드를 '1사이클 미션'으로 바꿔 목표를 지시하세요!" required>
           <button type="submit" class="btn primary" id="triadGoalSubmit" style="height:40px;padding:0 18px;white-space:nowrap;flex-shrink:0">질문 / 미션 실행 ↗</button>
@@ -233,60 +288,12 @@
     </div>
   </section>
 
-  <!-- [3] 최근 파이프라인 활동 & 산출물 바로가기 -->
-  <section class="overview-grid" style="margin-bottom:18px">
-    <div class="panel activity-panel">
-      <div class="panel-head settings-panel-head">
-        <div>
-          <div class="panel-title">03 · 실시간 파이프라인 실행 로그</div>
-          <div class="panel-sub">HEAD · BUILDER · REVIEWER · RESEARCHER · DIRECTOR 최근 이벤트</div>
-        </div>
-        <a href="logs.html" class="text-link">전체 로그 ↗</a>
-      </div>
-      <div class="activity-list" id="dashboardActivity">
-        <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">HEAD 최종 PASS 판정 · 산출물 저장 완료</div><div class="event-desc">HEAD (Claude Code CLI) · deliverables/mission-20558.md</div></div><div class="event-time">방금 전</div></div>
-        <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">REVIEWER 독립 코드 검수 통과 (P0:0, P1:0)</div><div class="event-desc">REVIEWER (OpenAI Codex CLI) · read-only 샌드박스</div></div><div class="event-time">1분 전</div></div>
-        <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">BUILDER 파이썬 코드 생성 및 실행 검증 통과</div><div class="event-desc">BUILDER (Google Antigravity CLI) · Scope Guard 통과</div></div><div class="event-time">2분 전</div></div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head settings-panel-head">
-        <div>
-          <div class="panel-title">생성된 프로젝트 폴더 &amp; 미션 산출물 리포트</div>
-          <div class="panel-sub">실제 생성된 소스 파일(`deliverables/*_project/`) 및 5단계 검증 `.md` 리포트입니다.</div>
-        </div>
-        <a href="logs.html" class="text-link">실행 기록 ↗</a>
-      </div>
-      <div class="settings-panel-body" id="deliverablesListBox" style="display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px">
-          <a href="deliverables/mission-90909.md" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800">
-            <span>📄 deliverables/mission-90909.md — 파이썬 미니 가계부 프로젝트 (DEEP · 모듈 분할 PASS)</span>
-            <span style="white-space:nowrap">리포트 열기 ↗</span>
-          </a>
-          <div style="display:flex;flex-wrap:wrap;gap:5px">
-            <a href="deliverables/mission-90909_project/core_module.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/core_module.py ↗</a>
-            <a href="deliverables/mission-90909_project/app_runner.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/app_runner.py ↗</a>
-          </div>
-        </div>
-        <a href="deliverables/mission-20558.md" target="_blank" class="settings-deliverable-card">
-          <span>📄 deliverables/mission-20558.md — 파이썬 로또 번호 5세트 자동 추천기 함수 (5/5 PASS)</span>
-          <span style="white-space:nowrap;flex-shrink:0">리포트 열기 ↗</span>
-        </a>
-        <div class="right-note" style="margin:0">
-          <strong>💡 프로젝트 빌더 &amp; 자동 수정 루프(Auto-Repair) 안내</strong>
-          <p><b>Standard</b> 모드는 실제 소스 파일 생성과 검증 실패 시 최대 2회 자동 재수정을 수행하며, <b>Deep</b> 모드는 큰 목표를 2개 모듈로 분할해 <b>BUILDER(계정 1)</b>와 <b>SUB-BUILDER(계정 2)</b>가 분담 구현하고 최대 3회 자동 수정 루프를 실행합니다.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- [4] 통합된 CLI 로그인 상태 확인 & 실행 경로 설정 섹션 -->
+  <!-- [3] 통합된 CLI 로그인 상태 확인 & 실행 경로 설정 섹션 -->
   <section class="panel settings-section-panel" id="cliAuthSection">
     <div class="panel-head settings-panel-head">
       <div style="flex:1;min-width:260px">
         <div class="eyebrow">SUBSCRIPTION CLI AUTHENTICATION &amp; DIAGNOSTICS</div>
-        <div class="panel-title" style="font-size:15px;margin-top:2px">04 · 🔑 AI CLI 로그인 상태 확인 &amp; 실행 경로 설정 (5대 AI · 구글 멀티 계정 지원)</div>
+        <div class="panel-title" style="font-size:15px;margin-top:2px">03 · 🔑 AI CLI 로그인 상태 확인 &amp; 실행 경로 설정 (5대 AI · 구글 멀티 계정 지원)</div>
         <div class="panel-sub">Claude Code(claude), Google Antigravity(agy · 계정 1), Google Gemini 2(gemini · 서브 계정 2), OpenAI Codex(codex), xAI Grok(grok)의 설치·구독 로그인 세션 상태와 실행 파일 경로를 관리합니다.</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0">
@@ -345,7 +352,7 @@
 </div>
 </main>
 </div>
-<script src="app.js?v=triad39"></script>
+<script src="app.js?v=triad45"></script>
 </body>
 </html>
 

@@ -19,6 +19,13 @@ CLI_PATHS_FILE = CLI_CONFIG_DIR / "cli_paths.json"
 CLI_PATHS_SAMPLE_FILE = CLI_CONFIG_DIR / "cli_paths.sample.json"
 CLI_SLOTS_FILE = CLI_CONFIG_DIR / "cli_slots.json"
 CLI_SLOTS_SAMPLE_FILE = CLI_CONFIG_DIR / "cli_slots.sample.json"
+WORKSPACE_SETTINGS_FILE = CLI_CONFIG_DIR / "workspace_settings.json"
+WORKSPACE_SETTINGS_SAMPLE_FILE = CLI_CONFIG_DIR / "workspace_settings.sample.json"
+GDRIVE_OAUTH_CLIENT_FILE = CLI_CONFIG_DIR / "gdrive_oauth_client.json"
+GDRIVE_OAUTH_CLIENT_SAMPLE_FILE = CLI_CONFIG_DIR / "gdrive_oauth_client.sample.json"
+GDRIVE_TOKEN_FILE = CLI_CONFIG_DIR / "gdrive_token.json"
+TEAMS_CONFIG_FILE = CLI_CONFIG_DIR / "teams.json"
+TEAMS_CONFIG_SAMPLE_FILE = CLI_CONFIG_DIR / "teams.sample.json"
 
 # [2] 캐릭터 시뮬레이터 코디 · 페르소나 · 스킬 전용 폴더 (config/characters/)
 CHAR_CONFIG_DIR = ROOT / "config" / "characters"
@@ -42,6 +49,8 @@ def ensure_config_directories() -> None:
         (ROLE_SETTINGS_PATH, ROLE_SETTINGS_SAMPLE_PATH),
         (CLI_SLOTS_FILE, CLI_SLOTS_SAMPLE_FILE),
         (CHARACTER_CONFIGS_FILE, CHARACTER_CONFIGS_SAMPLE_FILE),
+        (WORKSPACE_SETTINGS_FILE, WORKSPACE_SETTINGS_SAMPLE_FILE),
+        (TEAMS_CONFIG_FILE, TEAMS_CONFIG_SAMPLE_FILE),
     ):
         if not target.exists() and sample.exists():
             try:

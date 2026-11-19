@@ -1740,7 +1740,7 @@
     if (Array.isArray(events) && events.length > 0) {
       const dashFeed = document.getElementById('dashboardActivity');
       if (dashFeed) {
-        dashFeed.innerHTML = events.slice(0, 4).map(ev => {
+        dashFeed.innerHTML = events.slice(0, 5).map(ev => {
           const icoClass = ev.role === 'REVIEWER' ? 'ico-amber' : ev.role === 'BUILDER' ? 'ico-blue' : ev.role === 'DIRECTOR' ? 'ico-purple' : 'ico-mint';
           const icoChar = ev.to_state === 'PASS' ? '✓' : ev.role === 'REVIEWER' ? '◷' : ev.role === 'BUILDER' ? '↗' : '⌁';
           return `<div class="activity-item">
@@ -1848,13 +1848,14 @@
     localPipelineTimer = setInterval(stepFn, 1600);
   }
 
-  async function dispatchMissionGoal(goal, profile = 'standard') {
+  async function dispatchMissionGoal(goal, profile = 'standard', teamId = null) {
     if (!goal || !goal.trim()) return;
+    const effTeamId = teamId || document.getElementById('triadTeamSelect')?.value || (window.NEXUS_TEAMS_SUMMARY && window.NEXUS_TEAMS_SUMMARY.active_team_id) || null;
     try {
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: goal.trim(), profile })
+        body: JSON.stringify({ message: goal.trim(), profile, team_id: effTeamId })
       });
       if (res.ok || res.status === 202) {
         pollOrchestrator();
@@ -1973,9 +1974,12 @@
       return;
     }
 
-    if (replyRole) replyRole.textContent = `[개발 미션 가동 · ${mode.toUpperCase()}]`;
-    if (replyText) replyText.textContent = `'${goal}' 미션이 시작되었습니다. 아래 5단계 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)으로 진행됩니다.`;
-    await dispatchMissionGoal(goal, mode);
+    const selTeamEl = document.getElementById('triadTeamSelect');
+    const chosenTeamId = selTeamEl?.value || null;
+    const chosenTeamLabel = selTeamEl?.options?.[selTeamEl.selectedIndex]?.text || '';
+    if (replyRole) replyRole.textContent = `[개발 미션 가동${chosenTeamLabel ? ` · ${chosenTeamLabel}` : ''} · ${mode.toUpperCase()}]`;
+    if (replyText) replyText.textContent = `'${goal}' 미션이 시작되었습니다. 선택한 팀의 역할 구성과 작업 폴더로 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)이 진행됩니다.`;
+    await dispatchMissionGoal(goal, mode, chosenTeamId);
   });
 
   // Bind "+ 미션 목표 지시" button on agents.html
@@ -2747,6 +2751,1601 @@
   }
 
   let lastRenderedMissionId = null;
+  let latestOutputDirStatus = null;
+
+  function renderOutputDirStatus(st, customFeedback = null, isError = false) {
+    if (!st) return;
+    latestOutputDirStatus = st;
+
+    const badgeEl = document.getElementById('outputDirModeBadge');
+    const activeTxtEl = document.getElementById('outputDirActiveText');
+    const inputEl = document.getElementById('outputDirInput');
+    const chkMirrorEl = document.getElementById('chkMirrorLocalDeliverables');
+    const btnQuickGd = document.getElementById('btnQuickSetGoogleDrive');
+    const btnBrowseGd = document.getElementById('btnBrowseGoogleDriveDir');
+    const fbEl = document.getElementById('outputDirFeedbackText');
+    const recentSel = document.getElementById('recentOutputDirsSelect');
+
+    const dashBadgeEl = document.getElementById('dashOutputDirBadge');
+    const dashTxtEl = document.getElementById('dashOutputDirText');
+
+    const isGd = Boolean(st.is_google_drive);
+    const isDef = Boolean(st.is_default);
+    const outPath = st.output_dir || 'deliverables/';
+
+    if (badgeEl) {
+      if (isGd) {
+        badgeEl.style.background = '#e0f2fe';
+        badgeEl.style.color = '#0369a1';
+        badgeEl.textContent = '☁️ Google Drive 동기화 폴더 지정됨';
+      } else if (isDef) {
+        badgeEl.style.background = '#e6f9f1';
+        badgeEl.style.color = '#0f6848';
+        badgeEl.textContent = '📁 기본 저장 폴더 (deliverables/)';
+      } else {
+        badgeEl.style.background = '#fef3c7';
+        badgeEl.style.color = '#b45309';
+        badgeEl.textContent = '📂 사용자 지정 로컬 폴더';
+      }
+    }
+    if (activeTxtEl) activeTxtEl.textContent = outPath;
+    if (inputEl && document.activeElement !== inputEl && !inputEl.dataset.dirty) {
+      inputEl.value = isDef ? '' : outPath;
+    }
+    if (chkMirrorEl) chkMirrorEl.checked = Boolean(st.mirror_to_local);
+
+    if (dashBadgeEl) {
+      const gdDirect = st.gdrive_direct || {};
+      if (gdDirect.enabled && gdDirect.connected) {
+        dashBadgeEl.style.background = '#dbeafe';
+        dashBadgeEl.style.color = '#1d4ed8';
+        dashBadgeEl.textContent = '☁️ Google Drive 클라우드 직접 연결됨';
+      } else {
+        dashBadgeEl.style.background = isGd ? '#e0f2fe' : (isDef ? '#e6f9f1' : '#fef3c7');
+        dashBadgeEl.style.color = isGd ? '#0369a1' : (isDef ? '#0f6848' : '#b45309');
+        dashBadgeEl.textContent = isGd ? '☁️ Google Drive(로컬F:) 저장 중' : (isDef ? '📁 기본 저장 폴더' : '📂 지정 저장 폴더');
+      }
+    }
+    if (dashTxtEl) {
+      const gdDirect = st.gdrive_direct || {};
+      dashTxtEl.textContent = (gdDirect.enabled && gdDirect.connected)
+        ? `클라우드 [${gdDirect.folder_name}] + 로컬 [${outPath}]`
+        : outPath;
+    }
+
+    // Update Google Drive Direct Cloud bar in settings.html
+    const gdDirect = st.gdrive_direct || {};
+    const gdBadgeEl = document.getElementById('gdriveDirectBadge');
+    const gdSumEl = document.getElementById('gdriveDirectSummaryText');
+    const gdWebBtn = document.getElementById('gdriveDirectOpenWebBtn');
+    if (gdBadgeEl) {
+      if (gdDirect.connected && gdDirect.enabled) {
+        gdBadgeEl.style.background = '#dcfce7';
+        gdBadgeEl.style.color = '#15803d';
+        gdBadgeEl.textContent = `☁️ Google Drive 직접 연결됨 (${gdDirect.account_email || '활성'})`;
+      } else if (gdDirect.connected && !gdDirect.enabled) {
+        gdBadgeEl.style.background = '#fef3c7';
+        gdBadgeEl.style.color = '#b45309';
+        gdBadgeEl.textContent = `☁️ 연결됨 · 자동 업로드 OFF (${gdDirect.account_email || ''})`;
+      } else {
+        gdBadgeEl.style.background = '#e2e8f0';
+        gdBadgeEl.style.color = '#475569';
+        gdBadgeEl.textContent = '☁️ Google Drive 직접 연결 안 됨';
+      }
+    }
+    if (gdSumEl) {
+      if (gdDirect.connected) {
+        gdSumEl.innerHTML = `대상 클라우드 폴더: <strong>📁 ${(gdDirect.folder_name || '내 드라이브').replace(/</g, '&lt;')}</strong> <span style="color:#64748b">(${gdDirect.enabled ? '미션 완료 시 자동 업로드 ON' : '자동 업로드 일시정지'})</span>`;
+      } else if (gdDirect.gcloud_pending_email) {
+        gdSumEl.innerHTML = `PC에 로그인된 구글 계정(<strong>${gdDirect.gcloud_pending_email}</strong>) 감지됨 — 우측 버튼에서 <b>[🔑 원클릭 권한 허용]</b>만 누르면 즉시 직접 연결됩니다!`;
+      } else {
+        gdSumEl.textContent = '구글 계정을 직접 연결하면 데스크톱 앱 없이도 클라우드 Google Drive 폴더를 탐색·지정하여 자동 업로드합니다.';
+      }
+    }
+    if (gdWebBtn) {
+      if (gdDirect.connected && gdDirect.folder_url) {
+        gdWebBtn.style.display = 'inline-flex';
+        gdWebBtn.href = gdDirect.folder_url;
+      } else {
+        gdWebBtn.style.display = 'none';
+      }
+    }
+
+    const gdrives = Array.isArray(st.detected_google_drives) ? st.detected_google_drives : [];
+    if (btnQuickGd) {
+      if (gdrives.length > 0) {
+        btnQuickGd.style.display = 'inline-flex';
+        btnQuickGd.textContent = `⚡ 구글 드라이브 자동 지정 (${gdrives[0].drive || 'GDrive'})`;
+        btnQuickGd.dataset.suggested = gdrives[0].suggested || gdrives[0].root || '';
+      } else {
+        btnQuickGd.style.display = 'none';
+      }
+    }
+    if (btnBrowseGd) {
+      btnBrowseGd.dataset.gdriveRoot = gdrives.length > 0 ? (gdrives[0].root || '') : '';
+    }
+
+    if (recentSel) {
+      const recents = Array.isArray(st.recent_dirs) ? st.recent_dirs : [];
+      const gdSuggested = gdrives.map(g => g.suggested).filter(Boolean);
+      const merged = Array.from(new Set([...gdSuggested, ...recents]));
+      if (merged.length > 0) {
+        recentSel.style.display = 'inline-block';
+        recentSel.innerHTML = `<option value="">🕘 빠른 폴더 전환 (${merged.length}개)...</option>` +
+          merged.map(d => `<option value="${d.replace(/"/g, '&quot;')}">${d}</option>`).join('');
+      } else {
+        recentSel.style.display = 'none';
+      }
+    }
+
+    if (fbEl) {
+      if (customFeedback) {
+        fbEl.style.color = isError ? '#dc2626' : '#0f6848';
+        fbEl.textContent = customFeedback;
+      } else if (st.fallback_notice) {
+        fbEl.style.color = '#d97706';
+        fbEl.textContent = `⚠️ ${st.fallback_notice}`;
+      } else if (isGd) {
+        fbEl.style.color = '#0369a1';
+        fbEl.textContent = `☁️ Google Drive 폴더(${outPath})에 미션 프로젝트 및 리포트가 저장·자동 동기화됩니다.${st.has_non_ascii_or_space ? ' (참고: 한글/공백 경로 포함 — 파이썬·웹·문서 저장은 정상이나 Flutter/RN 앱 빌드 시에는 영문 경로 권장)' : ''}`;
+      } else if (!isDef) {
+        fbEl.style.color = '#0f6848';
+        fbEl.textContent = `✓ 지정된 폴더(${outPath})에 다음 미션부터 모든 산출물과 프로젝트 파일이 저장됩니다.${st.has_non_ascii_or_space ? ' (참고: 한글/공백 경로 포함 — Flutter/RN 네이티브 빌드 시에는 영문 전용 경로 권장)' : ''}`;
+      } else {
+        const gdHint = gdrives.length > 0 ? ` (감지된 Google Drive: ${gdrives[0].root})` : '';
+        fbEl.style.color = '#64748b';
+        fbEl.textContent = `💡 기본 폴더(deliverables/) 사용 중입니다. 원하는 로컬 폴더 또는 Google Drive 폴더를 지정할 수 있습니다.${gdHint}`;
+      }
+    }
+  }
+
+  function bindProjectOutputDirControls() {
+    const inputEl = document.getElementById('outputDirInput');
+    const btnApply = document.getElementById('btnApplyOutputDir');
+    const btnBrowseLocal = document.getElementById('btnBrowseLocalDir');
+    const btnBrowseGd = document.getElementById('btnBrowseGoogleDriveDir');
+    const btnQuickGd = document.getElementById('btnQuickSetGoogleDrive');
+    const btnOpenExp = document.getElementById('btnOpenOutputExplorer');
+    const btnDashOpenExp = document.getElementById('btnDashOpenOutputExplorer');
+    const btnReset = document.getElementById('btnResetOutputDir');
+    const chkMirror = document.getElementById('chkMirrorLocalDeliverables');
+    const recentSel = document.getElementById('recentOutputDirsSelect');
+
+    inputEl?.addEventListener('input', () => {
+      inputEl.dataset.dirty = '1';
+    });
+    inputEl?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        btnApply?.click();
+      }
+    });
+
+    function getSelectedSettingsTeam() {
+      const selEl = document.getElementById('triadTeamSelect');
+      const tid = selEl?.value || '';
+      if (!tid || !latestTeamsSummary || !Array.isArray(latestTeamsSummary.teams)) return null;
+      return latestTeamsSummary.teams.find(t => t.id === tid) || null;
+    }
+
+    async function applyOutputDirRequest(payload, loadingBtn = null) {
+      const origTxt = loadingBtn?.textContent || '';
+      if (loadingBtn) {
+        loadingBtn.disabled = true;
+        loadingBtn.textContent = '처리 중...';
+      }
+      try {
+        const activeTeamObj = getSelectedSettingsTeam();
+        if (activeTeamObj && (payload.action === 'set' || payload.action === 'reset')) {
+          const wsUpdate = payload.action === 'reset'
+            ? { output_dir: '' }
+            : {
+                ...(payload.output_dir !== undefined ? { output_dir: payload.output_dir } : {}),
+                ...(payload.mirror_to_local !== undefined ? { mirror_to_local: payload.mirror_to_local } : {})
+              };
+          const tRes = await apiFetch('/ops/teams', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_workspace', team_id: activeTeamObj.id, workspace: wsUpdate })
+          });
+          const tData = await tRes.json().catch(() => ({}));
+          if (!tRes.ok) {
+            if (latestOutputDirStatus) renderOutputDirStatus(latestOutputDirStatus, `❌ ${tData.error || '팀 작업 폴더 설정 실패'}`, true);
+            return;
+          }
+          if (inputEl) delete inputEl.dataset.dirty;
+          if (tData.teams_summary) {
+            renderTeamsAndWorkspacesDashboard(tData.teams_summary);
+            syncSettingsBarFromTeam(activeTeamObj.id, `✓ [${activeTeamObj.name}] 작업 폴더 설정이 저장되었습니다.`);
+          }
+          return;
+        }
+
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (latestOutputDirStatus) {
+            renderOutputDirStatus(latestOutputDirStatus, `❌ ${data.error || '저장 폴더 설정 실패'}`, true);
+          }
+          return;
+        }
+        if (inputEl) delete inputEl.dataset.dirty;
+        const stObj = data.output_dir_status || data.status;
+        if (stObj && typeof stObj === 'object' && stObj.output_dir) {
+          renderOutputDirStatus(stObj, `✓ ${data.message || `저장 폴더가 [${stObj.output_dir}]로 설정되었습니다.`}`, false);
+        }
+      } catch (_) {
+        if (latestOutputDirStatus) {
+          renderOutputDirStatus(latestOutputDirStatus, '❌ 서버와 통신할 수 없습니다 (python server.py 8080 실행 확인).', true);
+        }
+      } finally {
+        if (loadingBtn) {
+          loadingBtn.disabled = false;
+          loadingBtn.textContent = origTxt;
+        }
+      }
+    }
+
+    btnApply?.addEventListener('click', () => {
+      const val = (inputEl?.value || '').trim();
+      applyOutputDirRequest({ action: 'set', output_dir: val, mirror_to_local: Boolean(chkMirror?.checked) }, btnApply);
+    });
+
+    chkMirror?.addEventListener('change', () => {
+      applyOutputDirRequest({ action: 'set', mirror_to_local: Boolean(chkMirror.checked) });
+    });
+
+    btnBrowseLocal?.addEventListener('click', async () => {
+      const orig = btnBrowseLocal.textContent;
+      btnBrowseLocal.disabled = true;
+      btnBrowseLocal.textContent = '📂 폴더 창 열림...';
+      try {
+        const activeTeamObj = getSelectedSettingsTeam();
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'browse',
+            team_id: activeTeamObj ? activeTeamObj.id : undefined,
+            initial_dir: activeTeamObj?.workspace_status?.effective_dir || undefined
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && !data.cancelled) {
+          if (inputEl) delete inputEl.dataset.dirty;
+          if (data.teams_summary) {
+            renderTeamsAndWorkspacesDashboard(data.teams_summary);
+          }
+          if (activeTeamObj) {
+            syncSettingsBarFromTeam(activeTeamObj.id, `✓ [${activeTeamObj.name}] 작업 폴더가 [${data.selected_dir}]로 변경되었습니다.`);
+          } else if (data.status) {
+            renderOutputDirStatus(data.status, `✓ 선택한 폴더([${data.selected_dir}])로 저장 위치가 변경되었습니다.`, false);
+          }
+        } else if (!res.ok) {
+          if (latestOutputDirStatus) renderOutputDirStatus(latestOutputDirStatus, `❌ ${data.error || '폴더 선택 실패'}`, true);
+        }
+      } catch (_) {} finally {
+        btnBrowseLocal.disabled = false;
+        btnBrowseLocal.textContent = orig;
+      }
+    });
+
+    btnBrowseGd?.addEventListener('click', async () => {
+      const gdRoot = btnBrowseGd.dataset.gdriveRoot || '';
+      const orig = btnBrowseGd.textContent;
+      btnBrowseGd.disabled = true;
+      btnBrowseGd.textContent = '☁️ 드라이브 창 열림...';
+      try {
+        const activeTeamObj = getSelectedSettingsTeam();
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'browse',
+            initial_dir: gdRoot,
+            team_id: activeTeamObj ? activeTeamObj.id : undefined
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && !data.cancelled) {
+          if (inputEl) delete inputEl.dataset.dirty;
+          if (data.teams_summary) {
+            renderTeamsAndWorkspacesDashboard(data.teams_summary);
+          }
+          if (activeTeamObj) {
+            syncSettingsBarFromTeam(activeTeamObj.id, `☁️ [${activeTeamObj.name}] 작업 폴더가 Google Drive([${data.selected_dir}])로 설정되었습니다.`);
+          } else if (data.status) {
+            renderOutputDirStatus(data.status, `☁️ Google Drive 폴더([${data.selected_dir}])로 저장 위치가 설정되었습니다.`, false);
+          }
+        } else if (!res.ok) {
+          if (latestOutputDirStatus) renderOutputDirStatus(latestOutputDirStatus, `❌ ${data.error || '구글 드라이브 폴더 선택 실패'}`, true);
+        }
+      } catch (_) {} finally {
+        btnBrowseGd.disabled = false;
+        btnBrowseGd.textContent = orig;
+      }
+    });
+
+    btnQuickGd?.addEventListener('click', () => {
+      const suggested = btnQuickGd.dataset.suggested || '';
+      if (!suggested) return;
+      if (inputEl) {
+        inputEl.value = suggested;
+        delete inputEl.dataset.dirty;
+      }
+      applyOutputDirRequest({ action: 'set', output_dir: suggested, mirror_to_local: Boolean(chkMirror?.checked) }, btnQuickGd);
+    });
+
+    const openExplorerHandler = async (btn) => {
+      if (btn) btn.disabled = true;
+      try {
+        const activeTeamObj = getSelectedSettingsTeam();
+        const targetDir = activeTeamObj?.workspace_status?.effective_dir || undefined;
+        await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'open_explorer', target_dir: targetDir })
+        });
+      } catch (_) {} finally {
+        if (btn) btn.disabled = false;
+      }
+    };
+    btnOpenExp?.addEventListener('click', () => openExplorerHandler(btnOpenExp));
+    btnDashOpenExp?.addEventListener('click', () => openExplorerHandler(btnDashOpenExp));
+
+    btnReset?.addEventListener('click', () => {
+      if (inputEl) {
+        inputEl.value = '';
+        delete inputEl.dataset.dirty;
+      }
+      applyOutputDirRequest({ action: 'reset' }, btnReset);
+    });
+
+    recentSel?.addEventListener('change', () => {
+      const chosen = recentSel.value;
+      if (!chosen) return;
+      recentSel.value = '';
+      if (inputEl) {
+        inputEl.value = chosen;
+        delete inputEl.dataset.dirty;
+      }
+      applyOutputDirRequest({ action: 'set', output_dir: chosen, mirror_to_local: Boolean(chkMirror?.checked) });
+    });
+
+    document.getElementById('btnOpenGdriveModal')?.addEventListener('click', () => openGdriveDirectModal());
+    document.getElementById('btnDashOpenGdriveModal')?.addEventListener('click', () => openGdriveDirectModal());
+
+    window.addEventListener('message', (ev) => {
+      if (ev.data && ev.data.type === 'NEXUS_GDRIVE_CONNECTED') {
+        refreshGdriveModalState(true);
+      }
+    });
+
+    // Initial fetch of output_dir status
+    apiFetch('/ops/output-dir', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(st => { if (st) renderOutputDirStatus(st); })
+      .catch(() => {});
+  }
+
+  // ========================================================================
+  // [신규] Google Drive 직접 연결 (OAuth 2.0 + 실시간 클라우드 폴더 탐색기 모달)
+  // ========================================================================
+  let gdriveBreadcrumbs = [{ id: 'root', name: '내 드라이브 (루트)' }];
+  let gdriveCurrentBrowseId = 'root';
+  let gdriveCurrentBrowseMeta = { id: 'root', name: '내 드라이브 (루트)', webViewLink: 'https://drive.google.com/drive/my-drive' };
+
+  function ensureGdriveDirectModal() {
+    if (document.getElementById('gdriveDirectModalBackdrop')) return;
+    const modalWrap = document.createElement('div');
+    modalWrap.id = 'gdriveDirectModalBackdrop';
+    modalWrap.className = 'cli-modal-backdrop';
+    modalWrap.innerHTML = `
+      <div class="cli-modal" role="dialog" aria-modal="true" aria-label="Google Drive 직접 연결 및 클라우드 폴더 지정" style="max-width:680px;width:95%">
+        <div class="cli-modal-head" style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #e2e8f0;padding-bottom:12px">
+          <div>
+            <div class="eyebrow" style="color:#0284c7">GOOGLE DRIVE REST API V3 DIRECT INTEGRATION</div>
+            <div class="panel-title" style="font-size:16px;margin-top:2px">☁️ Google Drive 직접 연결 &amp; 클라우드 저장 폴더 지정</div>
+          </div>
+          <button type="button" class="btn small" id="btnCloseGdriveModalTop">✕ 닫기</button>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:13px;padding-top:12px;max-height:76vh;overflow-y:auto">
+          <!-- 1. 연결 상태 & 원클릭 OAuth 인증 -->
+          <div style="padding:12px 14px;border-radius:11px;background:#f0f9ff;border:1px solid #bae6fd;display:flex;flex-direction:column;gap:9px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span id="gdModalStatusPill" style="background:#e2e8f0;color:#334155;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:800">확인 중...</span>
+                <strong id="gdModalAccountLabel" style="font-size:12px;color:#0f172a">Google 계정을 연결해 주세요</strong>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button type="button" class="btn small" id="btnGdRefreshStatus" style="height:30px;padding:0 10px;font-size:11px">🔄 연결 상태 새로고침</button>
+                <button type="button" class="btn small" id="btnGdDisconnect" style="display:none;height:30px;padding:0 10px;font-size:11px;color:#dc2626">연결 해제</button>
+              </div>
+            </div>
+
+            <div id="gdModalAuthHint" style="font-size:11px;color:#0c4a6e;line-height:1.5">
+              별도 API 키나 복잡한 설정 없이 아래 <b>[🔑 구글 계정 원클릭 브라우저 로그인]</b> 버튼을 누르고 Google Drive 권한을 허용(Allow)하면 즉시 직접 연결됩니다.
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn small primary" id="btnGdGcloudLogin" style="height:34px;padding:0 14px;background:#0284c7;border-color:#0284c7;font-size:11.5px">🔑 구글 계정 원클릭 브라우저 로그인 (권장)</button>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#0f172a;font-weight:700;cursor:pointer;margin-left:auto">
+                <input type="checkbox" id="chkGdModalAutoSync" style="accent-color:#0284c7">
+                <span>미션 완료 시 Google Drive 자동 업로드 활성화</span>
+              </label>
+            </div>
+
+            <details style="font-size:11px;color:#475569;margin-top:2px">
+              <summary style="cursor:pointer;font-weight:700;color:#0369a1">⚙️ 고급: Google Cloud SDK가 없는 PC용 OAuth client_secret.json 직접 등록</summary>
+              <div style="margin-top:8px;padding:10px;background:#ffffff;border:1px solid #cbd5e1;border-radius:8px;display:flex;flex-direction:column;gap:7px">
+                <div style="font-size:10.5px;color:#64748b">Google Cloud Console의 OAuth 2.0 클라이언트 JSON(리디렉션 URI: <code>http://127.0.0.1:8080/ops/gdrive/oauth/callback</code>)을 붙여넣거나 파일을 선택하세요.</div>
+                <textarea id="gdOauthJsonInput" rows="3" style="width:100%;font-family:monospace;font-size:10.5px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px" placeholder='{"installed":{"client_id":"...","client_secret":"..."}}'></textarea>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="file" id="gdOauthJsonFile" accept=".json,application/json" style="font-size:10.5px">
+                  <button type="button" class="btn small primary" id="btnGdSaveOauthAndStart" style="height:30px;padding:0 12px">🌐 JSON 저장 &amp; OAuth 로그인 창 열기</button>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <!-- 2. 현재 지정된 클라우드 폴더 & 웹 URL 직접 입력 -->
+          <div style="padding:12px 14px;border-radius:11px;background:#ffffff;border:1px solid #cbd5e1;display:flex;flex-direction:column;gap:9px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <div style="font-size:11.5px;color:#1e293b">
+                🎯 지정된 클라우드 저장 폴더: <strong id="gdModalTargetFolderName" style="color:#0284c7">내 드라이브 (루트)</strong>
+                <code id="gdModalTargetFolderId" style="font-size:10px;color:#64748b;margin-left:4px">(root)</code>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button type="button" class="btn small" id="btnGdTestUpload" style="height:28px;padding:0 10px;font-size:10.5px;background:#ecfdf5;color:#0f6848;border-color:#a7f3d0">🧪 테스트 파일 업로드</button>
+                <a id="gdModalTargetWebLink" href="https://drive.google.com/drive/my-drive" target="_blank" class="btn small" style="height:28px;padding:0 10px;font-size:10.5px">웹 드라이브 열기 ↗</a>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="gdFolderUrlInput" class="triad-goal-input" style="height:32px;font-size:11px;flex:1;min-width:220px" placeholder="Google Drive 폴더 웹 링크(https://drive.google.com/drive/folders/...) 또는 폴더 ID 입력">
+              <button type="button" class="btn small primary" id="btnGdApplyFolderUrl" style="height:32px;padding:0 12px;white-space:nowrap">🔗 링크로 폴더 지정</button>
+            </div>
+          </div>
+
+          <!-- 3. 실시간 Google Drive 클라우드 폴더 탐색기 & 새 폴더 생성 -->
+          <div style="padding:12px 14px;border-radius:11px;background:#f8fafc;border:1px solid #cbd5e1;display:flex;flex-direction:column;gap:9px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <strong style="font-size:12px;color:#0f172a">📂 내 Google Drive 클라우드 폴더 실시간 탐색</strong>
+              <button type="button" class="btn small primary" id="btnGdSelectCurrentBrowseFolder" style="height:28px;padding:0 11px;font-size:11px;background:#0f6848;border-color:#0f6848">✓ 현재 보고 있는 폴더로 저장 위치 확정</button>
+            </div>
+
+            <div id="gdBreadcrumbBar" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:11px;color:#334155;padding:5px 8px;background:#fff;border:1px solid #e2e8f0;border-radius:7px"></div>
+
+            <div id="gdFolderListContainer" style="min-height:120px;max-height:210px;overflow-y:auto;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px">
+              <div style="padding:22px;text-align:center;color:#94a3b8;font-size:11.5px">Google Drive에 로그인하면 클라우드 폴더 목록이 여기에 실시간으로 표시됩니다.</div>
+            </div>
+
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="gdNewFolderNameInput" class="triad-goal-input" style="height:30px;font-size:11px;flex:1;min-width:180px;background:#fff" placeholder="현재 위치에 새로 만들 폴더 이름 (예: AI_Virtual_Office_Projects)">
+              <button type="button" class="btn small" id="btnGdCreateNewFolder" style="height:30px;padding:0 11px;font-size:11px;white-space:nowrap">➕ 새 클라우드 폴더 생성</button>
+            </div>
+          </div>
+
+          <div id="gdModalFeedbackBar" style="font-size:11px;color:#475569;min-height:18px"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modalWrap);
+
+    const closeFn = () => modalWrap.classList.remove('open');
+    document.getElementById('btnCloseGdriveModalTop')?.addEventListener('click', closeFn);
+    modalWrap.addEventListener('click', (e) => { if (e.target === modalWrap) closeFn(); });
+
+    const setModalFeedback = (msg, isErr = false) => {
+      const fb = document.getElementById('gdModalFeedbackBar');
+      if (fb) {
+        fb.style.color = isErr ? '#dc2626' : '#0f6848';
+        fb.innerHTML = msg;
+      }
+    };
+
+    document.getElementById('btnGdRefreshStatus')?.addEventListener('click', () => refreshGdriveModalState(true));
+
+    document.getElementById('btnGdGcloudLogin')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      setModalFeedback('🔑 새 터미널과 웹 브라우저에서 Google Drive 권한 승인 창을 여는 중입니다...', false);
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'gcloud_login' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setModalFeedback(`✓ ${data.message || '브라우저에서 권한을 허용한 뒤 [🔄 연결 상태 새로고침]을 눌러주세요.'}`, false);
+          if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+        } else {
+          setModalFeedback(`❌ ${data.error || '로그인 창 실행 실패'}`, true);
+        }
+      } catch (_) {
+        setModalFeedback('❌ 서버 통신 오류가 발생했습니다.', true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('gdOauthJsonFile')?.addEventListener('change', (ev) => {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const ta = document.getElementById('gdOauthJsonInput');
+        if (ta) ta.value = String(reader.result || '');
+      };
+      reader.readAsText(f, 'utf-8');
+    });
+
+    document.getElementById('btnGdSaveOauthAndStart')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const rawJson = (document.getElementById('gdOauthJsonInput')?.value || '').trim();
+      if (!rawJson) {
+        setModalFeedback('❌ client_secret.json 내용을 붙여넣거나 파일을 선택해 주세요.', true);
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save_oauth_client', client_secret_json: rawJson })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.oauth_start_url) {
+          setModalFeedback('✓ OAuth 클라이언트 저장 완료! 새 창에서 Google 로그인을 진행해 주세요.', false);
+          window.open(data.oauth_start_url, '_blank', 'width=540,height=680');
+        } else {
+          setModalFeedback(`❌ ${data.error || 'OAuth 설정 저장 실패'}`, true);
+        }
+      } catch (_) {
+        setModalFeedback('❌ 서버 통신 오류가 발생했습니다.', true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnGdDisconnect')?.addEventListener('click', async () => {
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'disconnect' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+        await refreshGdriveModalState(true);
+        setModalFeedback('✓ 연결이 해제되었습니다.', false);
+      } catch (_) {}
+    });
+
+    document.getElementById('chkGdModalAutoSync')?.addEventListener('change', async (ev) => {
+      const en = Boolean(ev.target.checked);
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'toggle_sync', enabled: en })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+        setModalFeedback(`✓ ${data.message || '동기화 설정이 변경되었습니다.'}`, false);
+      } catch (_) {}
+    });
+
+    document.getElementById('btnGdApplyFolderUrl')?.addEventListener('click', async (ev) => {
+      const val = (document.getElementById('gdFolderUrlInput')?.value || '').trim();
+      if (!val) {
+        setModalFeedback('❌ Google Drive 폴더 링크 또는 ID를 입력해 주세요.', true);
+        return;
+      }
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set_folder', folder_url: val })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.folder) {
+          if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+          gdriveBreadcrumbs = [{ id: 'root', name: '내 드라이브 (루트)' }];
+          if (data.folder.id !== 'root') gdriveBreadcrumbs.push({ id: data.folder.id, name: data.folder.name });
+          await loadGdriveSubfolders(data.folder.id);
+          await refreshGdriveModalState(false);
+          setModalFeedback(`✓ 클라우드 폴더 [${data.folder.name}]로 저장 위치가 지정되었습니다!`, false);
+        } else {
+          setModalFeedback(`❌ ${data.error || '폴더 확인 실패'}`, true);
+        }
+      } catch (_) {
+        setModalFeedback('❌ 서버 통신 오류가 발생했습니다.', true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnGdSelectCurrentBrowseFolder')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set_folder', folder_id: gdriveCurrentBrowseId || 'root' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.folder) {
+          if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+          await refreshGdriveModalState(false);
+          setModalFeedback(`☁️ [${data.folder.name}] 폴더가 프로젝트 자동 업로드 위치로 확정되었습니다!`, false);
+        } else {
+          setModalFeedback(`❌ ${data.error || '폴더 지정 실패'}`, true);
+        }
+      } catch (_) {} finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnGdCreateNewFolder')?.addEventListener('click', async (ev) => {
+      const inp = document.getElementById('gdNewFolderNameInput');
+      const nameVal = (inp?.value || '').trim();
+      if (!nameVal) {
+        setModalFeedback('❌ 새로 만들 폴더 이름을 입력해 주세요.', true);
+        return;
+      }
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create_folder', parent_id: gdriveCurrentBrowseId || 'root', name: nameVal })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.folder) {
+          if (inp) inp.value = '';
+          gdriveBreadcrumbs.push({ id: data.folder.id, name: data.folder.name });
+          await loadGdriveSubfolders(data.folder.id);
+          // Also auto-select the newly created folder for convenience!
+          const setRes = await apiFetch('/ops/gdrive/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_folder', folder_id: data.folder.id })
+          });
+          const setData = await setRes.json().catch(() => ({}));
+          if (setData.output_dir_status) renderOutputDirStatus(setData.output_dir_status);
+          await refreshGdriveModalState(false);
+          setModalFeedback(`☁️ 새 폴더 [${data.folder.name}] 생성 및 프로젝트 저장 위치 지정 완료!`, false);
+        } else {
+          setModalFeedback(`❌ ${data.error || '폴더 생성 실패'}`, true);
+        }
+      } catch (_) {} finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnGdTestUpload')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '업로드 중...';
+      try {
+        const res = await apiFetch('/ops/gdrive/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'test_upload' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.uploaded) {
+          setModalFeedback(`✅ ${data.message} — <a href="${data.uploaded.webViewLink}" target="_blank" style="color:#0284c7;font-weight:800;text-decoration:underline">구글 드라이브에서 업로드된 파일 열기 ↗</a>`, false);
+        } else {
+          setModalFeedback(`❌ ${data.error || '테스트 업로드 실패'}`, true);
+        }
+      } catch (_) {
+        setModalFeedback('❌ 서버 통신 오류가 발생했습니다.', true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+  }
+
+  async function loadGdriveSubfolders(folderId = 'root') {
+    const listEl = document.getElementById('gdFolderListContainer');
+    const crumbEl = document.getElementById('gdBreadcrumbBar');
+    gdriveCurrentBrowseId = folderId || 'root';
+
+    if (crumbEl) {
+      crumbEl.innerHTML = gdriveBreadcrumbs.map((b, idx) => {
+        const isLast = idx === gdriveBreadcrumbs.length - 1;
+        return `<button type="button" data-crumb-idx="${idx}" style="border:0;background:${isLast ? '#e0f2fe' : 'transparent'};color:${isLast ? '#0369a1' : '#475569'};font-weight:${isLast ? '800' : '600'};padding:2px 6px;border-radius:5px;cursor:pointer;font-size:11px">${idx === 0 ? '☁️ ' : ''}${b.name.replace(/</g, '&lt;')}</button>${!isLast ? '<span style="color:#cbd5e1">/</span>' : ''}`;
+      }).join('');
+      crumbEl.querySelectorAll('[data-crumb-idx]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.dataset.crumbIdx);
+          const target = gdriveBreadcrumbs[i];
+          if (!target) return;
+          gdriveBreadcrumbs = gdriveBreadcrumbs.slice(0, i + 1);
+          loadGdriveSubfolders(target.id);
+        });
+      });
+    }
+
+    if (listEl) {
+      listEl.innerHTML = `<div style="padding:18px;text-align:center;color:#64748b;font-size:11px">☁️ Google Drive에서 하위 폴더 목록을 불러오는 중...</div>`;
+    }
+    try {
+      const res = await apiFetch(`/ops/gdrive/folders?parent_id=${encodeURIComponent(gdriveCurrentBrowseId)}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        if (listEl) {
+          listEl.innerHTML = `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:11px">${(data.error || '먼저 Google Drive 로그인을 완료해 주세요.').replace(/</g, '&lt;')}</div>`;
+        }
+        return;
+      }
+      gdriveCurrentBrowseMeta = data.parent || { id: gdriveCurrentBrowseId, name: gdriveCurrentBrowseId };
+      const folders = Array.isArray(data.folders) ? data.folders : [];
+      if (!listEl) return;
+      if (folders.length === 0) {
+        listEl.innerHTML = `<div style="padding:18px;text-align:center;color:#64748b;font-size:11px">이 폴더 안에는 하위 폴더가 없습니다. 우측 상단 <b>[✓ 현재 보고 있는 폴더로 저장 위치 확정]</b>을 누르거나 아래에서 새 폴더를 만드세요.</div>`;
+        return;
+      }
+      listEl.innerHTML = folders.map(f => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 9px;border-radius:7px;border:1px solid #f1f5f9;background:#f8fafc;gap:8px">
+          <button type="button" class="gd-enter-folder-btn" data-fid="${f.id}" data-fname="${f.name.replace(/"/g, '&quot;')}" style="border:0;background:transparent;text-align:left;cursor:pointer;font-size:11.5px;font-weight:700;color:#1e293b;flex:1">📁 ${f.name.replace(/</g, '&lt;')}</button>
+          <button type="button" class="btn small gd-pick-folder-btn" data-fid="${f.id}" style="height:24px;padding:0 9px;font-size:10px;background:#e0f2fe;color:#0369a1;border-color:#7dd3fc">이 폴더 선택</button>
+        </div>
+      `).join('');
+
+      listEl.querySelectorAll('.gd-enter-folder-btn').forEach(b => {
+        b.addEventListener('click', () => {
+          gdriveBreadcrumbs.push({ id: b.dataset.fid, name: b.dataset.fname });
+          loadGdriveSubfolders(b.dataset.fid);
+        });
+      });
+      listEl.querySelectorAll('.gd-pick-folder-btn').forEach(b => {
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          try {
+            const r = await apiFetch('/ops/gdrive/connect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'set_folder', folder_id: b.dataset.fid })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (r.ok && d.folder) {
+              if (d.output_dir_status) renderOutputDirStatus(d.output_dir_status);
+              await refreshGdriveModalState(false);
+              const fb = document.getElementById('gdModalFeedbackBar');
+              if (fb) {
+                fb.style.color = '#0f6848';
+                fb.textContent = `☁️ [${d.folder.name}] 폴더가 프로젝트 저장 위치로 지정되었습니다!`;
+              }
+            }
+          } catch (_) {} finally {
+            b.disabled = false;
+          }
+        });
+      });
+    } catch (_) {}
+  }
+
+  async function refreshGdriveModalState(forceRefresh = false) {
+    try {
+      const res = await apiFetch(`/ops/gdrive/status${forceRefresh ? '?refresh=1' : ''}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const st = await res.json();
+      renderOutputDirStatus(st);
+      const gd = st.gdrive_direct || {};
+
+      const pill = document.getElementById('gdModalStatusPill');
+      const accLbl = document.getElementById('gdModalAccountLabel');
+      const hint = document.getElementById('gdModalAuthHint');
+      const btnDisc = document.getElementById('btnGdDisconnect');
+      const chkAuto = document.getElementById('chkGdModalAutoSync');
+      const tName = document.getElementById('gdModalTargetFolderName');
+      const tId = document.getElementById('gdModalTargetFolderId');
+      const tLink = document.getElementById('gdModalTargetWebLink');
+
+      if (pill) {
+        pill.style.background = gd.connected ? '#dcfce7' : '#fee2e2';
+        pill.style.color = gd.connected ? '#15803d' : '#b91c1c';
+        pill.textContent = gd.connected ? '✓ Google Drive API 연결됨' : '미연결 (권한 승인 필요)';
+      }
+      if (accLbl) {
+        accLbl.textContent = gd.connected
+          ? `${gd.account_email || 'Google 계정'}${gd.display_name ? ` (${gd.display_name})` : ''}`
+          : (gd.gcloud_pending_email ? `감지된 계정: ${gd.gcloud_pending_email} (드라이브 권한 승인 대기)` : '연결된 Google 계정 없음');
+      }
+      if (hint && gd.connected) {
+        hint.innerHTML = `✅ Google Drive REST API v3와 직접 연결되었습니다! 아래에서 저장할 클라우드 폴더를 선택하거나 새 폴더를 만드세요.`;
+      }
+      if (btnDisc) btnDisc.style.display = (gd.connected && gd.auth_mode === 'oauth_client') ? 'inline-flex' : 'none';
+      if (chkAuto) chkAuto.checked = Boolean(gd.configured_enabled || gd.enabled);
+      if (tName) tName.textContent = gd.folder_name || '내 드라이브 (루트)';
+      if (tId) tId.textContent = `(${gd.folder_id || 'root'})`;
+      if (tLink && gd.folder_url) tLink.href = gd.folder_url;
+
+      if (gd.connected) {
+        await loadGdriveSubfolders(gdriveCurrentBrowseId || 'root');
+      }
+    } catch (_) {}
+  }
+
+  function openGdriveDirectModal() {
+    ensureGdriveDirectModal();
+    const modal = document.getElementById('gdriveDirectModalBackdrop');
+    modal?.classList.add('open');
+    refreshGdriveModalState(true);
+  }
+
+  // ========================================================================
+  // [신규] 🏢 팀 구성 · 팀별 작업 폴더 지정 · 연결된 작업 폴더 전체 대시보드
+  // ========================================================================
+  let latestTeamsSummary = null;
+  let initialQueryTeamApplied = false;
+
+  function escHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function syncSettingsBarFromTeam(teamId, customFeedback = null) {
+    if (!latestTeamsSummary || !Array.isArray(latestTeamsSummary.teams)) return;
+    const team = latestTeamsSummary.teams.find(t => t.id === teamId) || latestTeamsSummary.teams[0];
+    if (!team) return;
+
+    const metaTxt = document.getElementById('triadTeamMetaText');
+    if (metaTxt) {
+      const r = team.roles || {};
+      metaTxt.innerHTML = `오피스 <b>${escHtml(team.floor)}</b> · 팀원 <b>${(team.member_ids || []).length}명</b> · HEAD=<b>${escHtml(CLI_SHORT[r.head] || r.head)}</b> / BUILDER=<b>${escHtml(CLI_SHORT[r.builder] || r.builder)}</b> / REVIEWER=<b>${escHtml(CLI_SHORT[r.reviewer] || r.reviewer)}</b>`;
+    }
+
+    const ws = team.workspace_status || {};
+    const badgeEl = document.getElementById('outputDirModeBadge');
+    const activeTxtEl = document.getElementById('outputDirActiveText');
+    const inputEl = document.getElementById('outputDirInput');
+    const chkMirrorEl = document.getElementById('chkMirrorLocalDeliverables');
+    const fbEl = document.getElementById('outputDirFeedbackText');
+
+    if (badgeEl) {
+      badgeEl.style.background = ws.is_google_drive_local ? '#e0f2fe' : '#dcfce7';
+      badgeEl.style.color = ws.is_google_drive_local ? '#0369a1' : '#15803d';
+      badgeEl.textContent = `${ws.is_google_drive_local ? '☁️' : '🏢'} [${team.name}] 전용 작업 폴더`;
+    }
+    if (activeTxtEl) {
+      activeTxtEl.textContent = ws.effective_dir || 'deliverables/';
+    }
+    if (inputEl && document.activeElement !== inputEl && !inputEl.dataset.dirty) {
+      inputEl.value = ws.configured_dir || '';
+    }
+    if (chkMirrorEl) {
+      chkMirrorEl.checked = Boolean(ws.mirror_to_local);
+    }
+
+    const gd = ws.gdrive_direct || {};
+    const gdBadge = document.getElementById('gdriveDirectBadge');
+    const gdSum = document.getElementById('gdriveDirectSummaryText');
+    const gdWebBtn = document.getElementById('gdriveDirectOpenWebBtn');
+    if (gdBadge) {
+      if (gd.connected && gd.configured_enabled) {
+        gdBadge.style.background = '#dcfce7';
+        gdBadge.style.color = '#15803d';
+        gdBadge.textContent = `☁️ [${team.name}] 클라우드 자동 업로드 ON`;
+      } else if (gd.connected) {
+        gdBadge.style.background = '#e0f2fe';
+        gdBadge.style.color = '#0369a1';
+        gdBadge.textContent = `☁️ Google Drive 연결됨 (팀 자동업로드 OFF)`;
+      }
+    }
+    if (gdSum && gd.connected && gd.configured_enabled) {
+      gdSum.innerHTML = `팀 전용 클라우드 폴더: <b>📁 ${escHtml(gd.folder_name)}</b> — 이 팀의 미션 완료 시 자동 업로드됩니다.`;
+    }
+    if (gdWebBtn && gd.folder_url && gd.connected) {
+      gdWebBtn.style.display = 'inline-flex';
+      gdWebBtn.href = gd.folder_url;
+    }
+
+    if (fbEl && customFeedback) {
+      fbEl.style.color = '#0f6848';
+      fbEl.textContent = customFeedback;
+    } else if (fbEl) {
+      fbEl.style.color = '#475569';
+      fbEl.textContent = `💡 현재 선택된 [${team.name}] 팀의 작업 폴더(${ws.effective_dir || 'deliverables/'})에 결과물이 저장됩니다.${ws.has_non_ascii_or_space ? ' (한글/공백 포함: Flutter/RN 앱 빌드시 영문 경로 권장)' : ''}`;
+    }
+  }
+
+  function renderTeamsAndWorkspacesDashboard(ts) {
+    if (!ts || !Array.isArray(ts.teams)) return;
+    latestTeamsSummary = ts;
+    window.NEXUS_TEAMS_SUMMARY = ts;
+
+    const teams = ts.teams;
+    const connected = Array.isArray(ts.connected_workspaces) ? ts.connected_workspaces : [];
+    const unboundGdrives = Array.isArray(ts.available_mounted_gdrives) ? ts.available_mounted_gdrives : [];
+    const gdGlobal = ts.gdrive_direct_status || {};
+
+    const cTeamsBadge = document.getElementById('dashTeamsCountBadge');
+    const cWsBadge = document.getElementById('dashWorkspacesCountBadge');
+    if (cTeamsBadge) cTeamsBadge.textContent = `등록 팀 ${teams.length}개`;
+    if (cWsBadge) cWsBadge.textContent = `연결된 작업 폴더 ${connected.length}개`;
+
+    // 1) Render Team Cards Grid on index.html
+    const gridEl = document.getElementById('dashboardTeamsGrid');
+    if (gridEl) {
+      gridEl.innerHTML = teams.map(t => {
+        const ws = t.workspace_status || {};
+        const gd = ws.gdrive_direct || {};
+        const r = t.roles || {};
+        const members = Array.isArray(t.member_details) ? t.member_details : [];
+        const color = t.color || '#0f6848';
+
+        const memberChipsHtml = members.slice(0, 6).map(m =>
+          `<span class="team-member-chip" title="${escHtml(m.role)} · ${escHtml(m.cli)}"><b style="color:${color}">#${escHtml(m.id)}</b> ${escHtml(m.name)}</span>`
+        ).join('') + (members.length > 6 ? `<span class="team-member-chip">+${members.length - 6}명</span>` : '');
+
+        const nonAsciiWarn = ws.has_non_ascii_or_space
+          ? `<span style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:1px 6px;border-radius:5px;font-size:9px;font-weight:700" title="Flutter/RN 등 네이티브 앱 빌드 시 영문 전용 폴더 권장">한글/공백 포함</span>`
+          : '';
+
+        const gdLineHtml = gd.configured_enabled
+          ? `<div class="team-folder-row" style="border-top:1px dashed #cbd5e1;padding-top:5px;margin-top:2px">
+               <span style="color:#0369a1;font-weight:700">☁️ 클라우드 폴더: <b>${escHtml(gd.folder_name)}</b> ${gd.connected ? '<span style="color:#15803d">(자동 업로드 ON)</span>' : '<span style="color:#d97706">(로그인 대기)</span>'}</span>
+               <a href="${escHtml(gd.folder_url || 'https://drive.google.com/drive/my-drive')}" target="_blank" style="color:#0284c7;font-weight:800;font-size:10px;text-decoration:underline">웹 열기 ↗</a>
+             </div>`
+          : `<div class="team-folder-row" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:2px;color:#64748b;font-size:10px">
+               <span>☁️ Google Drive 클라우드 폴더 미지정</span>
+               <button type="button" class="btn-quick-team-gdrive" data-tid="${escHtml(t.id)}" style="border:0;background:transparent;color:#0284c7;font-weight:800;font-size:10px;cursor:pointer;padding:0;text-decoration:underline">${gdGlobal.connected ? '+ 클라우드 전용폴더 자동생성' : '구글 계정 연결하기'}</button>
+             </div>`;
+
+        return `
+          <div class="team-ws-card ${t.is_active ? 'is-active-team' : ''}" style="border-left-color:${escHtml(color)}">
+            <div class="team-ws-head">
+              <div>
+                <div class="team-ws-title-row">
+                  <span class="team-floor-pill" style="border-color:${escHtml(color)}44;color:${escHtml(color)}">🏢 ${escHtml(t.floor)}</span>
+                  <span class="team-ws-name">${escHtml(t.name)}</span>
+                  ${t.is_active
+                    ? '<span class="team-active-pill">★ 현재 기본 작업팀</span>'
+                    : `<button type="button" class="btn small btn-set-active-team" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀으로 전환</button>`}
+                </div>
+                ${t.description ? `<div class="team-ws-desc">${escHtml(t.description)}</div>` : ''}
+              </div>
+              <span style="font-size:10px;font-weight:800;color:#475569;background:#f1f5f9;padding:3px 8px;border-radius:6px">미션 ${Number(t.mission_count || 0)}건</span>
+            </div>
+
+            <div class="team-members-strip">
+              <div class="team-member-chips">${memberChipsHtml}</div>
+              <div class="team-role-mini">HEAD: <b>${escHtml(CLI_SHORT[r.head] || r.head)}</b> · BUILDER: <b>${escHtml(CLI_SHORT[r.builder] || r.builder)}</b> · REVIEWER: <b>${escHtml(CLI_SHORT[r.reviewer] || r.reviewer)}</b></div>
+            </div>
+
+            <div class="team-folder-box">
+              <div class="team-folder-row">
+                <span style="font-weight:800;color:${ws.is_google_drive_local ? '#0369a1' : '#0f172a'}">${ws.is_google_drive_local ? '☁️ 마운트 드라이브 폴더' : (ws.is_default ? '📁 기본 작업 폴더' : '📂 팀 전용 작업 폴더')}</span>
+                <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                  ${nonAsciiWarn}
+                  <span style="background:${ws.is_accessible ? '#dcfce7' : '#fee2e2'};color:${ws.is_accessible ? '#15803d' : '#b91c1c'};padding:1px 6px;border-radius:5px;font-size:9px;font-weight:800">${ws.is_accessible ? '✓ 연결됨' : '접근불가'}</span>
+                  <span style="font-size:9.5px;color:#475569;font-weight:700">프로젝트 ${ws.project_count || 0} · 리포트 ${ws.report_count || 0} · 파일 ${ws.file_count || 0}</span>
+                </div>
+              </div>
+              <div class="team-folder-path">${escHtml(ws.effective_dir || 'deliverables/')}</div>
+              ${gdLineHtml}
+            </div>
+
+            <div class="team-ws-actions">
+              <button type="button" class="btn small btn-team-open-exp" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">🗂️ 폴더 열기</button>
+              <button type="button" class="btn small btn-team-browse-dir" data-tid="${escHtml(t.id)}" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">📂 작업 폴더 변경</button>
+              <button type="button" class="btn small btn-team-edit" data-tid="${escHtml(t.id)}" style="height:28px;padding:0 10px;font-size:10px">✏️ 팀 &amp; 폴더 상세편집</button>
+              <a href="settings.html?team=${encodeURIComponent(t.id)}#triadGoalForm" class="btn small primary" style="height:28px;padding:0 11px;font-size:10px;margin-left:auto;background:${escHtml(color)};border-color:${escHtml(color)}">🚀 이 팀으로 미션 실행 ↗</a>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      gridEl.querySelectorAll('.btn-set-active-team').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            const res = await apiFetch('/ops/teams', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'set_active', team_id: btn.dataset.tid })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          } catch (_) {
+            btn.disabled = false;
+          }
+        });
+      });
+
+      gridEl.querySelectorAll('.btn-team-open-exp').forEach(btn => {
+        btn.addEventListener('click', () => {
+          apiFetch('/ops/output-dir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'open_explorer', target_dir: btn.dataset.dir })
+          }).catch(() => {});
+        });
+      });
+
+      gridEl.querySelectorAll('.btn-team-browse-dir').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const orig = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = '창 열림...';
+          try {
+            const res = await apiFetch('/ops/output-dir', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'browse', team_id: btn.dataset.tid, initial_dir: btn.dataset.dir })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          } catch (_) {} finally {
+            btn.disabled = false;
+            btn.textContent = orig;
+          }
+        });
+      });
+
+      gridEl.querySelectorAll('.btn-team-edit').forEach(btn => {
+        btn.addEventListener('click', () => openTeamBuilderModal(btn.dataset.tid));
+      });
+
+      gridEl.querySelectorAll('.btn-quick-team-gdrive').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!gdGlobal.connected) {
+            openGdriveDirectModal();
+            return;
+          }
+          const orig = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = '생성 중...';
+          try {
+            const res = await apiFetch('/ops/teams', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'create_gdrive_team_folder', team_id: btn.dataset.tid })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          } catch (_) {
+            btn.disabled = false;
+            btn.textContent = orig;
+          }
+        });
+      });
+    }
+
+    // 2) Render Unified Connected Workspaces List (#connectedWorkspacesList on index.html)
+    const wsListEl = document.getElementById('connectedWorkspacesList');
+    const wsSumLbl = document.getElementById('connectedWsSummaryLabel');
+    if (wsSumLbl) {
+      const gdAcc = gdGlobal.connected ? ` · ☁️ Google Drive 계정 연결됨(${gdGlobal.account_email || 'OAuth'})` : '';
+      wsSumLbl.textContent = `총 ${connected.length}개 활성 작업 폴더 연결됨${unboundGdrives.length ? ` · 감지된 로컬 드라이브 ${unboundGdrives.length}개` : ''}${gdAcc}`;
+    }
+    if (wsListEl) {
+      const rowsHtml = connected.map(w => {
+        const isCloud = w.kind === 'gdrive_cloud';
+        const teamBadges = (w.teams || []).length > 0
+          ? w.teams.map(tb => `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:6px;background:${escHtml(tb.color || '#0f6848')}14;color:${escHtml(tb.color || '#0f6848')};border:1px solid ${escHtml(tb.color || '#0f6848')}40;font-size:10px;font-weight:800">${escHtml(tb.floor)} · ${escHtml(tb.name)}${tb.is_active ? ' ★' : ''}</span>`).join(' ')
+          : `<span style="padding:2px 7px;border-radius:6px;background:#f1f5f9;color:#64748b;font-size:10px;font-weight:700">전역 공통 폴더</span>`;
+
+        const actionBtn = isCloud
+          ? `<a href="${escHtml(w.web_url || 'https://drive.google.com/drive/my-drive')}" target="_blank" class="btn small" style="height:26px;padding:0 10px;font-size:10px;background:#e0f2fe;color:#0369a1;border-color:#7dd3fc">☁️ 웹 드라이브 열기 ↗</a>`
+          : `<button type="button" class="btn small btn-conn-ws-open" data-dir="${escHtml(w.path)}" style="height:26px;padding:0 10px;font-size:10px">🗂️ 탐색기 열기</button>`;
+
+        return `
+          <div class="connected-ws-row">
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:240px;flex:1">
+              <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                <span style="background:${isCloud || w.kind === 'gdrive_mounted' ? '#e0f2fe' : '#f1f5f9'};color:${isCloud || w.kind === 'gdrive_mounted' ? '#0369a1' : '#1e293b'};padding:2px 8px;border-radius:6px;font-size:10px;font-weight:800">${escHtml(w.kind_label)}</span>
+                <strong style="font-family:var(--font-mono);font-size:11px;color:#0f172a;word-break:break-all">${escHtml(w.path)}</strong>
+                <span style="background:${w.is_accessible ? '#dcfce7' : '#fee2e2'};color:${w.is_accessible ? '#15803d' : '#b91c1c'};padding:1.5px 6px;border-radius:5px;font-size:9.5px;font-weight:800">${w.is_accessible ? '✓ 정상 연결' : '승인/확인 필요'}</span>
+                ${w.has_non_ascii_or_space ? `<span style="background:#fff7ed;color:#c2410c;padding:1.5px 6px;border-radius:5px;font-size:9px;font-weight:700">한글/공백 포함</span>` : ''}
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;color:#64748b">연결된 팀:</span>
+                ${teamBadges}
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="font-size:10.5px;color:#334155;font-weight:700;background:#f8fafc;padding:4px 9px;border-radius:7px;border:1px solid #e2e8f0">프로젝트 <b>${w.project_count || 0}</b>개 · 리포트 <b>${w.report_count || 0}</b>개 · 파일 <b>${w.file_count || 0}</b>개</span>
+              ${actionBtn}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const unboundHtml = unboundGdrives.map(gd => `
+        <div class="connected-ws-row" style="background:#f0f9ff;border-style:dashed;border-color:#7dd3fc">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="background:#bae6fd;color:#0369a1;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:800">☁️ 감지된 Google Drive 볼륨</span>
+            <strong style="font-family:var(--font-mono);font-size:11px;color:#0c4a6e">${escHtml(gd.root)}</strong>
+            <span style="font-size:10px;color:#0369a1">새 팀의 전용 작업 폴더로 바로 연결할 수 있습니다.</span>
+          </div>
+          <button type="button" class="btn small btn-bind-mounted-gd" data-suggested="${escHtml(gd.suggested || gd.root)}" style="height:26px;padding:0 10px;font-size:10px;background:#0284c7;color:#fff;border-color:#0284c7">➕ 이 경로로 새 팀 만들기</button>
+        </div>
+      `).join('');
+
+      wsListEl.innerHTML = rowsHtml + unboundHtml;
+      wsListEl.querySelectorAll('.btn-conn-ws-open').forEach(b => {
+        b.addEventListener('click', () => {
+          apiFetch('/ops/output-dir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
+          }).catch(() => {});
+        });
+      });
+      wsListEl.querySelectorAll('.btn-bind-mounted-gd').forEach(b => {
+        b.addEventListener('click', () => openTeamBuilderModal(null, b.dataset.suggested || ''));
+      });
+    }
+
+    // 3) Populate #triadTeamSelect on settings.html
+    const teamSel = document.getElementById('triadTeamSelect');
+    if (teamSel) {
+      let desiredId = teamSel.value || ts.active_team_id;
+      if (!initialQueryTeamApplied) {
+        initialQueryTeamApplied = true;
+        try {
+          const qp = new URLSearchParams(window.location.search);
+          const qTeam = qp.get('team');
+          if (qTeam && teams.some(t => t.id === qTeam)) {
+            desiredId = qTeam;
+            const pSel = document.getElementById('triadProfileSelect');
+            if (pSel && pSel.value === 'ask') pSel.value = 'standard';
+          }
+        } catch (_) {}
+      }
+      if (!teams.some(t => t.id === desiredId)) desiredId = ts.active_team_id || teams[0]?.id || '';
+
+      teamSel.innerHTML = teams.map(t =>
+        `<option value="${escHtml(t.id)}" ${t.id === desiredId ? 'selected' : ''}>[${escHtml(t.floor)}] ${escHtml(t.name)} (${(t.member_ids || []).length}명 · ${escHtml(t.workspace_status?.is_default ? 'deliverables/' : (t.workspace?.output_dir || t.workspace_status?.effective_dir || 'deliverables/'))})</option>`
+      ).join('');
+      syncSettingsBarFromTeam(desiredId);
+    }
+  }
+
+  function ensureTeamBuilderModal() {
+    if (document.getElementById('teamBuilderModalBackdrop')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'teamBuilderModalBackdrop';
+    wrap.className = 'cli-modal-backdrop';
+    wrap.innerHTML = `
+      <div class="cli-modal" role="dialog" aria-modal="true" aria-labelledby="tbModalTitle" style="max-width:840px">
+        <div class="cli-modal-head">
+          <div>
+            <div class="eyebrow" style="color:#0f6848">TEAM BUILDER &amp; DEDICATED WORKSPACE</div>
+            <h2 id="tbModalTitle">🏢 팀 구성 &amp; 팀별 전용 작업 폴더 설정</h2>
+            <p>팀 이름·오피스 담당 층·소속 AI 직원·팀 전용 역할 CLI 및 로컬/Google Drive 클라우드 작업 폴더를 한 번에 구성합니다.</p>
+          </div>
+          <button type="button" class="cli-modal-close" id="btnCloseTeamModal" aria-label="닫기">✕</button>
+        </div>
+        <div class="cli-modal-body" style="gap:13px">
+          <input type="hidden" id="tbTeamIdInput" value="">
+
+          <!-- 1. 기본 정보 & 담당 층 -->
+          <div style="display:grid;grid-template-columns:minmax(0,1.4fr) 125px 110px;gap:10px;align-items:end">
+            <label class="studio-field">
+              <span>팀 이름 (필수)</span>
+              <input type="text" id="tbNameInput" class="triad-goal-input" style="height:35px;background:#fff" placeholder="예: 모바일 앱 개발팀, 데이터 자동화팀">
+            </label>
+            <label class="studio-field">
+              <span>가상 오피스 담당 층</span>
+              <select id="tbFloorSelect" class="triad-cli-select" style="height:35px;background:#fff">
+                <option value="1F">1F 본부·전략</option>
+                <option value="2F">2F 프런트·기획</option>
+                <option value="3F">3F 개발·R&amp;D</option>
+                <option value="4F">4F 디자인·검증</option>
+                <option value="5F">5F 마케팅·자동화</option>
+                <option value="6F">6F 데이터·인프라</option>
+                <option value="7F">7F 보안·감사</option>
+                <option value="8F">8F 서비스 운영</option>
+                <option value="9F">9F 심층 연구</option>
+                <option value="10F">10F 글로벌 신규</option>
+              </select>
+            </label>
+            <label class="studio-field">
+              <span>팀 테마 색상</span>
+              <select id="tbColorSelect" class="triad-cli-select" style="height:35px;background:#fff">
+                <option value="#0f6848">🟢 에메랄드</option>
+                <option value="#0284c7">🔵 스카이블루</option>
+                <option value="#7c3aed">🟣 바이올렛</option>
+                <option value="#ea580c">🟠 앰버오렌지</option>
+                <option value="#be123c">🔴 로즈레드</option>
+                <option value="#1e293b">⚫ 슬레이트</option>
+              </select>
+            </label>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="text" id="tbDescInput" class="triad-goal-input" style="height:33px;flex:1;min-width:240px;background:#fff;font-size:11.5px" placeholder="팀 역할이나 담당 프로젝트 설명 (선택)">
+            <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#334155;cursor:pointer">
+              <input type="checkbox" id="tbSyncFloorChk" checked style="accent-color:#0f6848">
+              <span>저장 시 소속 직원의 오피스 배치 층도 함께 이동</span>
+            </label>
+          </div>
+
+          <!-- 2. 소속 AI 직원 선택 -->
+          <div style="padding:11px 13px;border-radius:11px;background:#f8fafc;border:1px solid #cbd5e1;display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <strong style="font-size:11.5px;color:#0f172a">👥 소속 AI 직원(캐릭터) 선택 <span id="tbSelectedMemberCount" style="color:#0f6848">(0명 선택됨)</span></strong>
+              <span style="font-size:10px;color:#64748b">클릭하여 이 팀에 합류할 AI 직원을 편성하세요.</span>
+            </div>
+            <div class="team-member-pick-grid" id="tbMembersGrid"></div>
+          </div>
+
+          <!-- 3. 팀 전용 Triad 역할 CLI 배정 -->
+          <div style="padding:11px 13px;border-radius:11px;background:#ffffff;border:1px solid #e2e8f0;display:flex;flex-direction:column;gap:8px">
+            <strong style="font-size:11.5px;color:#0f172a">⚙️ 팀 전용 파이프라인 역할 CLI 배정</strong>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+              <label class="studio-field"><span>👑 HEAD (계획·판정)</span><select id="tbRoleHead" class="triad-cli-select" style="height:31px"></select></label>
+              <label class="studio-field"><span>🛠 BUILDER (구현 1)</span><select id="tbRoleBuilder" class="triad-cli-select" style="height:31px"></select></label>
+              <label class="studio-field"><span>✨ SUB-BUILDER (구현 2)</span><select id="tbRoleSubBuilder" class="triad-cli-select" style="height:31px"></select></label>
+              <label class="studio-field"><span>🔍 REVIEWER (독립 검수)</span><select id="tbRoleReviewer" class="triad-cli-select" style="height:31px"></select></label>
+              <label class="studio-field"><span>⚡ RESEARCHER (추론)</span><select id="tbRoleResearcher" class="triad-cli-select" style="height:31px"></select></label>
+            </div>
+          </div>
+
+          <!-- 4. 팀 전용 작업 폴더 지정 (로컬 + Google Drive 직접 연결) -->
+          <div style="padding:12px 14px;border-radius:11px;background:#f0fdf4;border:1px solid #86efac;display:flex;flex-direction:column;gap:9px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <strong style="font-size:12px;color:#0f6848">📂 팀 전용 작업 폴더 지정 (로컬 디스크 &amp; Google Drive)</strong>
+              <label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#166534;cursor:pointer">
+                <input type="checkbox" id="tbMirrorChk" style="accent-color:#0f6848">
+                <span>기본 <code>deliverables/</code>에도 백업 사본 보관</span>
+              </label>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="tbLocalDirInput" class="triad-goal-input" style="height:34px;flex:1;min-width:240px;background:#fff;font-size:11.5px" placeholder="비워두면 deliverables/ 기본 폴더 · 예: D:\\Projects\\TeamApp 또는 deliverables/team_app">
+              <button type="button" class="btn small" id="btnTbBrowseLocal" style="height:34px;background:#fff">📂 내 PC 찾아보기</button>
+              <button type="button" class="btn small" id="btnTbBrowseMountedGd" style="height:34px;background:#e0f2fe;color:#0369a1;border-color:#7dd3fc">📂 로컬 드라이브(F:) 선택</button>
+            </div>
+
+            <div style="padding:9px 11px;border-radius:9px;background:#f0f9ff;border:1px solid #bae6fd;display:flex;flex-direction:column;gap:7px">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#0369a1;cursor:pointer">
+                  <input type="checkbox" id="tbGdEnabledChk" style="accent-color:#0284c7">
+                  <span>☁️ Google Drive 클라우드 폴더에 이 팀 산출물 자동 업로드</span>
+                </label>
+                <button type="button" class="btn small" id="btnTbOpenGdAuth" style="height:25px;padding:0 9px;font-size:10px;background:#fff;color:#0284c7;border-color:#7dd3fc">🔑 구글 계정 연결 / 클라우드 탐색기</button>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <input type="text" id="tbGdFolderInput" class="triad-goal-input" style="height:32px;flex:1;min-width:220px;background:#fff;font-size:11px" placeholder="클라우드 폴더 URL(https://drive.google.com/drive/folders/...) 또는 폴더 ID (기본: root)">
+                <span id="tbGdFolderNameBadge" style="font-size:10.5px;font-weight:700;color:#0c4a6e">현재: 내 드라이브 (루트)</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="tbModalFeedback" style="font-size:11.5px;font-weight:700;color:#0f6848;min-height:16px"></div>
+        </div>
+        <div class="cli-modal-foot">
+          <div>
+            <button type="button" class="btn small" id="btnTbDeleteTeam" style="display:none;background:#fef2f2;color:#dc2626;border-color:#fecaca">🗑 이 팀 삭제</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#334155;cursor:pointer">
+              <input type="checkbox" id="tbSetActiveChk" checked style="accent-color:#0f6848">
+              <span>저장 후 기본 작업 팀으로 지정</span>
+            </label>
+            <button type="button" class="btn small" id="btnCancelTeamModal">취소</button>
+            <button type="button" class="btn small primary" id="btnSaveTeamModal" style="background:#0f6848;border-color:#0f6848;padding:7px 16px">💾 팀 구성 &amp; 작업 폴더 저장</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    const close = () => wrap.classList.remove('open');
+    document.getElementById('btnCloseTeamModal')?.addEventListener('click', close);
+    document.getElementById('btnCancelTeamModal')?.addEventListener('click', close);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+
+    document.getElementById('btnTbOpenGdAuth')?.addEventListener('click', () => {
+      openGdriveDirectModal();
+    });
+
+    document.getElementById('btnTbBrowseLocal')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '창 열림...';
+      try {
+        const curDir = document.getElementById('tbLocalDirInput')?.value || '';
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'browse', pick_only: true, initial_dir: curDir })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok && !d.cancelled && d.selected_dir) {
+          const inp = document.getElementById('tbLocalDirInput');
+          if (inp) inp.value = d.selected_dir;
+        }
+      } catch (_) {} finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+
+    document.getElementById('btnTbBrowseMountedGd')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '드라이브 열림...';
+      try {
+        const gdRoot = (latestOutputDirStatus?.detected_google_drives?.[0]?.root) || '';
+        const res = await apiFetch('/ops/output-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'browse', pick_only: true, initial_dir: gdRoot })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok && !d.cancelled && d.selected_dir) {
+          const inp = document.getElementById('tbLocalDirInput');
+          if (inp) inp.value = d.selected_dir;
+        }
+      } catch (_) {} finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+
+    document.getElementById('btnTbDeleteTeam')?.addEventListener('click', async (ev) => {
+      const tid = document.getElementById('tbTeamIdInput')?.value || '';
+      if (!tid) return;
+      if (!confirm('이 팀 구성을 삭제하시겠습니까? (생성된 실제 로컬/클라우드 파일은 삭제되지 않습니다.)')) return;
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/ops/teams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', team_id: tid })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok && d.teams_summary) {
+          renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          close();
+        } else {
+          const fb = document.getElementById('tbModalFeedback');
+          if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '삭제 실패'}`; }
+        }
+      } catch (_) {} finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnSaveTeamModal')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const fb = document.getElementById('tbModalFeedback');
+      const tid = document.getElementById('tbTeamIdInput')?.value || '';
+      const nameVal = (document.getElementById('tbNameInput')?.value || '').trim();
+      if (!nameVal) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 팀 이름을 입력해 주세요.'; }
+        return;
+      }
+      const selectedMembers = Array.from(document.querySelectorAll('#tbMembersGrid .team-member-pick-card.selected'))
+        .map(el => el.dataset.aid)
+        .filter(Boolean);
+      if (selectedMembers.length === 0) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 최소 1명 이상의 소속 AI 직원을 선택해 주세요.'; }
+        return;
+      }
+
+      const floorVal = document.getElementById('tbFloorSelect')?.value || '1F';
+      const syncFloor = Boolean(document.getElementById('tbSyncFloorChk')?.checked);
+      const gdInputVal = (document.getElementById('tbGdFolderInput')?.value || '').trim();
+
+      const payload = {
+        action: 'save',
+        team: {
+          id: tid || undefined,
+          name: nameVal,
+          description: (document.getElementById('tbDescInput')?.value || '').trim(),
+          floor: floorVal,
+          color: document.getElementById('tbColorSelect')?.value || '#0f6848',
+          member_ids: selectedMembers,
+          roles: {
+            head: document.getElementById('tbRoleHead')?.value || 'claude',
+            builder: document.getElementById('tbRoleBuilder')?.value || 'antigravity',
+            sub_builder: document.getElementById('tbRoleSubBuilder')?.value || 'gemini',
+            reviewer: document.getElementById('tbRoleReviewer')?.value || 'openai',
+            researcher: document.getElementById('tbRoleResearcher')?.value || 'grok'
+          },
+          workspace: {
+            output_dir: (document.getElementById('tbLocalDirInput')?.value || '').trim(),
+            mirror_to_local: Boolean(document.getElementById('tbMirrorChk')?.checked),
+            gdrive_direct_enabled: Boolean(document.getElementById('tbGdEnabledChk')?.checked),
+            ...(gdInputVal ? { gdrive_folder_input: gdInputVal } : {})
+          },
+          sync_floor_to_members: syncFloor,
+          set_active: Boolean(document.getElementById('tbSetActiveChk')?.checked)
+        }
+      };
+
+      const origTxt = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '저장 중...';
+      try {
+        const res = await apiFetch('/ops/teams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '팀 저장 실패'}`; }
+          return;
+        }
+        // Sync member floor placements in localStorage if requested so office.html reflects immediately
+        if (syncFloor && d.saved_team) {
+          try {
+            selectedMembers.forEach(aid => {
+              const mAgent = ALL_AGENT_PRESETS.find(a => a.id === aid);
+              if (mAgent) mAgent.floor = floorVal;
+              if (savedCharAiConfigs[aid]) savedCharAiConfigs[aid].floor = floorVal;
+            });
+            localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
+          } catch (_) {}
+        }
+        if (d.teams_summary) {
+          renderTeamsAndWorkspacesDashboard(d.teams_summary);
+          if (d.saved_team) {
+            const sel = document.getElementById('triadTeamSelect');
+            if (sel) sel.value = d.saved_team.id;
+            syncSettingsBarFromTeam(d.saved_team.id, `✓ [${d.saved_team.name}] 팀 및 작업 폴더 설정이 저장되었습니다.`);
+          }
+        }
+        close();
+      } catch (_) {
+        if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 서버 통신 오류가 발생했습니다.'; }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = origTxt;
+      }
+    });
+  }
+
+  function openTeamBuilderModal(editTeamId = null, prefillDir = '') {
+    ensureTeamBuilderModal();
+    const modal = document.getElementById('teamBuilderModalBackdrop');
+    const fb = document.getElementById('tbModalFeedback');
+    if (fb) fb.textContent = '';
+
+    const teams = latestTeamsSummary?.teams || [];
+    const existing = editTeamId ? teams.find(t => t.id === editTeamId) : null;
+
+    document.getElementById('tbModalTitle').textContent = existing
+      ? `🏢 [${existing.name}] 팀 구성 & 전용 작업 폴더 편집`
+      : '🏢 새 팀 구성 & 전용 작업 폴더 지정';
+    document.getElementById('tbTeamIdInput').value = existing ? existing.id : '';
+    document.getElementById('tbNameInput').value = existing ? existing.name : '';
+    document.getElementById('tbDescInput').value = existing ? (existing.description || '') : '';
+    document.getElementById('tbFloorSelect').value = existing ? (existing.floor || '1F') : '3F';
+    document.getElementById('tbColorSelect').value = existing ? (existing.color || '#0f6848') : '#0284c7';
+    document.getElementById('tbLocalDirInput').value = existing
+      ? (existing.workspace?.output_dir || '')
+      : (prefillDir || '');
+    document.getElementById('tbMirrorChk').checked = Boolean(existing?.workspace?.mirror_to_local);
+    document.getElementById('tbGdEnabledChk').checked = Boolean(existing?.workspace?.gdrive_direct_enabled);
+    document.getElementById('tbGdFolderInput').value = existing?.workspace?.gdrive_folder_id && existing.workspace.gdrive_folder_id !== 'root'
+      ? (existing.workspace.gdrive_folder_url || existing.workspace.gdrive_folder_id)
+      : '';
+    const gdNameBadge = document.getElementById('tbGdFolderNameBadge');
+    if (gdNameBadge) {
+      gdNameBadge.textContent = `현재: ${existing?.workspace?.gdrive_folder_name || '내 드라이브 (루트)'}`;
+    }
+
+    const delBtn = document.getElementById('btnTbDeleteTeam');
+    if (delBtn) delBtn.style.display = (existing && teams.length > 1) ? 'inline-flex' : 'none';
+
+    // Populate Role CLI selects
+    const provEntries = lastDiagnostics?.providers
+      ? Object.entries(lastDiagnostics.providers).map(([k, p]) => [k, p.label || CLI_LABELS[k] || k])
+      : Object.entries(CLI_LABELS);
+    const roleDefaults = existing?.roles || currentRoles || { head: 'claude', builder: 'antigravity', sub_builder: 'gemini', reviewer: 'openai', researcher: 'grok' };
+    [
+      ['tbRoleHead', 'head'],
+      ['tbRoleBuilder', 'builder'],
+      ['tbRoleSubBuilder', 'sub_builder'],
+      ['tbRoleReviewer', 'reviewer'],
+      ['tbRoleResearcher', 'researcher']
+    ].forEach(([selId, rKey]) => {
+      const sel = document.getElementById(selId);
+      if (!sel) return;
+      const curVal = roleDefaults[rKey] || 'antigravity';
+      sel.innerHTML = provEntries.map(([k, lbl]) => `<option value="${escHtml(k)}" ${k === curVal ? 'selected' : ''}>${escHtml(lbl)}</option>`).join('');
+    });
+
+    // Populate Member Picker Cards
+    const selectedSet = new Set(existing?.member_ids || ['01', '03', '04']);
+    const poolCount = Math.max(activeAgentCount, 10);
+    const agentPool = ALL_AGENT_PRESETS.slice(0, poolCount);
+    const membersGrid = document.getElementById('tbMembersGrid');
+    const updateMemberCount = () => {
+      const cnt = document.querySelectorAll('#tbMembersGrid .team-member-pick-card.selected').length;
+      const lbl = document.getElementById('tbSelectedMemberCount');
+      if (lbl) lbl.textContent = `(${cnt}명 선택됨)`;
+    };
+    if (membersGrid) {
+      membersGrid.innerHTML = agentPool.map(ag => {
+        const cfg = savedCharAiConfigs[ag.id] || {};
+        const mergedAg = { ...ag, ...cfg };
+        const isSel = selectedSet.has(ag.id);
+        return `
+          <div class="team-member-pick-card ${isSel ? 'selected' : ''}" data-aid="${escHtml(ag.id)}">
+            <div style="width:34px;height:38px;flex-shrink:0">${CharacterEngine.render(mergedAg)}</div>
+            <div style="min-width:0;flex:1">
+              <div style="font-size:10.5px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">#${escHtml(ag.id)} ${escHtml(mergedAg.name)}</div>
+              <div style="font-size:9px;color:#64748b">${escHtml(mergedAg.triadRole || 'BUILDER')} · ${escHtml(mergedAg.floor || '1F')}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+      membersGrid.querySelectorAll('.team-member-pick-card').forEach(card => {
+        card.addEventListener('click', () => {
+          card.classList.toggle('selected');
+          updateMemberCount();
+        });
+      });
+      updateMemberCount();
+    }
+
+    modal?.classList.add('open');
+  }
+
+  function bindTeamsAndWorkspacesControls() {
+    document.getElementById('btnDashCreateTeam')?.addEventListener('click', () => openTeamBuilderModal(null));
+    document.getElementById('btnSettingsCreateTeam')?.addEventListener('click', () => openTeamBuilderModal(null));
+    document.getElementById('btnOpenTeamModalFromAgents')?.addEventListener('click', () => openTeamBuilderModal(null));
+    document.getElementById('btnEditSelectedTeam')?.addEventListener('click', () => {
+      const tid = document.getElementById('triadTeamSelect')?.value || latestTeamsSummary?.active_team_id || null;
+      openTeamBuilderModal(tid);
+    });
+    document.getElementById('triadTeamSelect')?.addEventListener('change', async (ev) => {
+      const tid = ev.target.value;
+      if (!tid) return;
+      syncSettingsBarFromTeam(tid);
+      try {
+        const res = await apiFetch('/ops/teams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set_active', team_id: tid })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
+      } catch (_) {}
+    });
+    document.getElementById('btnRefreshTeamsDashboard')?.addEventListener('click', () => {
+      apiFetch('/ops/teams?refresh=1', { cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts); })
+        .catch(() => {});
+    });
+
+    // Initial load of teams & connected workspaces
+    apiFetch('/ops/teams', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts); })
+      .catch(() => {});
+  }
 
   async function pollOrchestrator() {
     if (!backendAvailable) return;
@@ -2762,6 +4361,8 @@
       const data = await res.json();
       if (data.roles) applyRolesToDOM(data.roles);
       if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics);
+      if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
+      if (data.teams_summary) renderTeamsAndWorkspacesDashboard(data.teams_summary);
       const usageObj = data.usage?.today || data.usage?.mission || null;
       updatePipelinePhaseDOM(data.phase || 'IDLE', data.events || [], usageObj);
 
@@ -2834,35 +4435,81 @@
           const genFiles = Array.isArray(latestMission.generated_files) ? latestMission.generated_files : [];
           const repCnt = Number(latestMission.repair_count || 0);
           const profTag = (latestMission.profile || 'standard').toUpperCase();
+          const absProjDir = latestMission.project_dir_abs || latestMission.output_root || '';
+          const isGdMission = Boolean(latestMission.is_google_drive);
+          const gdCloudUrl = latestMission.gdrive_project_url || latestMission.gdrive_report_url || '';
+          const gdCloudBtnHtml = gdCloudUrl
+            ? `<a href="${gdCloudUrl}" target="_blank" class="btn small" style="height:24px;padding:0 9px;font-size:10px;background:#0284c7;color:#fff;border-color:#0284c7">☁️ 웹 Google Drive에서 폴더 열기 ↗</a>`
+            : '';
+          const locPillHtml = absProjDir
+            ? `<div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10.5px;color:${isGdMission ? '#0369a1' : '#334155'}"><span style="background:${isGdMission ? '#e0f2fe' : '#f1f5f9'};padding:2px 8px;border-radius:6px;font-weight:700">${isGdMission ? '☁️ Google Drive 저장됨' : '📁 저장 위치'}: ${absProjDir.replace(/</g, '&lt;')}</span><button type="button" class="btn small btn-open-mission-dir" data-dir="${absProjDir.replace(/"/g, '&quot;')}" style="height:24px;padding:0 8px;font-size:10px">🗂️ 탐색기로 열기</button>${gdCloudBtnHtml}</div>`
+            : gdCloudBtnHtml;
           if (replyRole) replyRole.textContent = `[✅ ${profTag} 미션 완료 · ${latestMission.mission_id}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''}]`;
           if (replyText) {
             const preview = (latestMission.deliverable_preview || '').slice(0, 380);
             const filesLinksHtml = genFiles.length
               ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${genFiles.map(f => `<a href="${f}" target="_blank" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:700">📁 ${f} ↗</a>`).join('')}</div>`
               : '';
-            replyText.innerHTML = `<div style="white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;font-family:var(--font-mono,monospace);font-size:11px">${preview.replace(/</g, '&lt;')}</div>${filesLinksHtml}<div style="margin-top:6px"><a href="${latestMission.deliverable_file}" target="_blank" style="color:#0f6848;font-weight:800;text-decoration:underline">📄 전체 산출물 리포트 열기 (${latestMission.deliverable_file}) ↗</a></div>`;
+            replyText.innerHTML = `<div style="white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;font-family:var(--font-mono,monospace);font-size:11px">${preview.replace(/</g, '&lt;')}</div>${locPillHtml}${filesLinksHtml}<div style="margin-top:6px"><a href="${latestMission.deliverable_file}" target="_blank" style="color:#0f6848;font-weight:800;text-decoration:underline">📄 전체 산출물 리포트 열기 (${latestMission.deliverable_file}) ↗</a></div>`;
+            replyText.querySelectorAll('.btn-open-mission-dir').forEach(b => {
+              b.addEventListener('click', () => {
+                apiFetch('/ops/output-dir', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
+                }).catch(() => {});
+              });
+            });
           }
           if (replyMeta) replyMeta.textContent = `${profTag} PASS (${genFiles.length}파일)`;
-
-          const delivBox = document.getElementById('deliverablesListBox');
-          if (delivBox) {
-            const cardEl = document.createElement('div');
-            cardEl.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px';
-            cardEl.innerHTML = `
-              <a href="${latestMission.deliverable_file}" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800">
-                <span>📄 ${latestMission.deliverable_file} — ${latestMission.goal} (${profTag}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''})</span>
-                <span style="white-space:nowrap">리포트 열기 ↗</span>
-              </a>
-              ${genFiles.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${genFiles.map(f => `<a href="${f}" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 ${f}</a>`).join('')}</div>` : ''}
-            `;
-            delivBox.prepend(cardEl);
-          }
         }
+      }
+
+      // 대시보드(index.html)의 '생성된 프로젝트 폴더 & 미션 산출물 리포트'(#deliverablesListBox) 실시간 동기화
+      const delivBox = document.getElementById('deliverablesListBox');
+      if (delivBox && Array.isArray(data.missions)) {
+        const doneMissions = data.missions.filter(m => m && m.status === 'DONE' && m.deliverable_file);
+        [...doneMissions].reverse().forEach(mItem => {
+          if (delivBox.querySelector(`[data-mission-id="${mItem.mission_id}"]`)) return;
+          const genFiles = Array.isArray(mItem.generated_files) ? mItem.generated_files : [];
+          const repCnt = Number(mItem.repair_count || 0);
+          const profTag = (mItem.profile || 'standard').toUpperCase();
+          const absProjDir = mItem.project_dir_abs || mItem.output_root || '';
+          const isGdMission = Boolean(mItem.is_google_drive);
+          const gdCloudUrl = mItem.gdrive_project_url || mItem.gdrive_report_url || '';
+
+          const cardEl = document.createElement('div');
+          cardEl.setAttribute('data-mission-id', mItem.mission_id);
+          cardEl.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px';
+          const teamBadgeHtml = mItem.team_name
+            ? `<span style="background:${escHtml(mItem.team_color || '#0f6848')}18;color:${escHtml(mItem.team_color || '#0f6848')};border:1px solid ${escHtml(mItem.team_color || '#0f6848')}44;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800;margin-right:4px">🏢 ${escHtml(mItem.team_floor || '1F')} ${escHtml(mItem.team_name)}</span>`
+            : '';
+          cardEl.innerHTML = `
+            <a href="${mItem.deliverable_file}" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800;gap:8px">
+              <span>${teamBadgeHtml}${isGdMission ? '☁️' : '📄'} ${mItem.deliverable_file} — ${(mItem.goal || '').replace(/</g, '&lt;')} (${profTag}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''})</span>
+              <span style="white-space:nowrap">리포트 열기 ↗</span>
+            </a>
+            ${(absProjDir || gdCloudUrl) ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;color:#475569;font-family:var(--font-mono,monospace)">${absProjDir ? `<span>저장 경로: ${absProjDir.replace(/</g, '&lt;')}</span><button type="button" class="btn small btn-open-deliv-dir" data-dir="${absProjDir.replace(/"/g, '&quot;')}" style="height:22px;padding:0 7px;font-size:9.5px">🗂️ 열기</button>` : ''}${gdCloudUrl ? `<a href="${gdCloudUrl}" target="_blank" class="btn small" style="height:22px;padding:0 8px;font-size:9.5px;background:#0284c7;color:#fff;border-color:#0284c7">☁️ Google Drive ↗</a>` : ''}</div>` : ''}
+            ${genFiles.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${genFiles.map(f => `<a href="${f}" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 ${f}</a>`).join('')}</div>` : ''}
+          `;
+          cardEl.querySelectorAll('.btn-open-deliv-dir').forEach(b => {
+            b.addEventListener('click', () => {
+              apiFetch('/ops/output-dir', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'open_explorer', target_dir: b.dataset.dir })
+              }).catch(() => {});
+            });
+          });
+          delivBox.prepend(cardEl);
+        });
       }
     } catch (_) {}
   }
 
   ensureCliSettingsModal();
+  bindProjectOutputDirControls();
+  bindTeamsAndWorkspacesControls();
   applyRolesToDOM(currentRoles);
   pollOrchestrator();
   setInterval(pollOrchestrator, 3000);
@@ -2871,4 +4518,5 @@
   window.CharacterEngine = CharacterEngine;
   window.modularAgents = modularAgents;
   window.openCliSettingsModal = openCliSettingsModal;
+  window.openTeamBuilderModal = openTeamBuilderModal;
 })();

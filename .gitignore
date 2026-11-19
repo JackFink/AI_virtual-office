@@ -31,6 +31,10 @@ __pycache__/
 *.pyc
 data/login_helper_*.cmd
 config/cli/login_scripts/*.cmd
+config/cli/gdrive_token.json
+config/cli/gdrive_oauth_client.json
+config/cli/workspace_settings.json
+deliverables/nexus_gdrive_connection_test.md
 
 # Trash (Unused / Legacy Archive Folder)
 trash/

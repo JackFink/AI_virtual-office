@@ -29,11 +29,39 @@ from backend.config_paths import (
     ROLE_SETTINGS_PATH,
     CLI_PATHS_FILE,
     CLI_SLOTS_FILE,
+    WORKSPACE_SETTINGS_FILE,
     CHARACTER_CONFIGS_FILE,
     PARTS_DIR,
+    DELIVERABLES_DIR,
     ensure_config_directories,
 )
 from backend.agents import AGENT_PERSONAS
+from backend.gdrive_client import (
+    build_oauth_authorize_url,
+    create_subfolder as gdrive_create_subfolder,
+    disconnect_gdrive,
+    exchange_oauth_code,
+    extract_folder_id_from_input,
+    get_folder_metadata as gdrive_get_folder_metadata,
+    get_gdrive_connection_status,
+    launch_gcloud_drive_login,
+    list_subfolders as gdrive_list_subfolders,
+    save_oauth_client_json,
+    upload_file_to_folder as gdrive_upload_file,
+    upload_mission_bundle,
+)
+from backend.team_manager import (
+    build_teams_and_workspaces_payload,
+    create_and_bind_gdrive_team_folder,
+    create_or_update_team,
+    delete_team,
+    get_all_team_workspace_paths,
+    get_team_by_id,
+    load_teams_config,
+    resolve_team_local_path,
+    set_active_team,
+    update_team_workspace_only,
+)
 
 ensure_config_directories()
 
@@ -373,6 +401,362 @@ def save_custom_cli_paths(paths: Dict[str, str]) -> Dict[str, str]:
     tmp.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, CLI_PATHS_FILE)
     return cleaned
+
+
+def detect_google_drive_paths() -> List[Dict[str, str]]:
+    """Auto-detects mounted Google Drive for Desktop volumes/folders (Windows DriveFS, macOS CloudStorage, ~/Google Drive)."""
+    detected: List[Dict[str, str]] = []
+    seen_roots = set()
+
+    if os.name == "nt":
+        try:
+            import ctypes
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            for i in range(26):
+                if not (bitmask & (1 << i)):
+                    continue
+                drive_root = f"{chr(65 + i)}:\\"
+                vol_buf = ctypes.create_unicode_buffer(261)
+                fs_buf = ctypes.create_unicode_buffer(261)
+                ok = ctypes.windll.kernel32.GetVolumeInformationW(
+                    drive_root, vol_buf, 261, None, None, None, fs_buf, 261
+                )
+                vol_name = (vol_buf.value or "").strip() if ok else ""
+                p_drive = Path(drive_root)
+                is_gdrive_vol = "google" in vol_name.lower() or (p_drive / ".shortcut-targets-by-id").exists()
+                for sub_name in ("내 드라이브", "My Drive", "공유 드라이브", "Shared drives"):
+                    cand = p_drive / sub_name
+                    try:
+                        if cand.exists() and cand.is_dir():
+                            norm = str(cand)
+                            if norm.lower() not in seen_roots:
+                                seen_roots.add(norm.lower())
+                                detected.append(
+                                    {
+                                        "drive": drive_root,
+                                        "volume": vol_name or "Google Drive",
+                                        "root": norm,
+                                        "suggested": str(cand / "AI_Virtual_Office_Projects"),
+                                        "label": f"☁️ Google Drive ({norm})",
+                                    }
+                                )
+                    except OSError:
+                        pass
+                if is_gdrive_vol and not any(d["drive"] == drive_root for d in detected):
+                    if drive_root.lower() not in seen_roots:
+                        seen_roots.add(drive_root.lower())
+                        detected.append(
+                            {
+                                "drive": drive_root,
+                                "volume": vol_name or "Google Drive",
+                                "root": drive_root,
+                                "suggested": str(p_drive / "AI_Virtual_Office_Projects"),
+                                "label": f"☁️ Google Drive ({drive_root})",
+                            }
+                        )
+        except Exception:
+            pass
+
+    home = Path.home()
+    extra_candidates: List[Path] = [
+        home / "Google Drive" / "내 드라이브",
+        home / "Google Drive" / "My Drive",
+        home / "Google Drive",
+        home / "GoogleDrive",
+    ]
+    cloud_storage = home / "Library" / "CloudStorage"
+    if cloud_storage.exists():
+        try:
+            for item in cloud_storage.glob("GoogleDrive-*"):
+                for sub in ("내 드라이브", "My Drive", ""):
+                    cand = (item / sub) if sub else item
+                    if cand.exists():
+                        extra_candidates.append(cand)
+        except OSError:
+            pass
+
+    for cand in extra_candidates:
+        try:
+            if cand.exists() and cand.is_dir():
+                norm = str(cand)
+                if norm.lower() not in seen_roots:
+                    seen_roots.add(norm.lower())
+                    detected.append(
+                        {
+                            "drive": norm,
+                            "volume": "Google Drive",
+                            "root": norm,
+                            "suggested": str(cand / "AI_Virtual_Office_Projects"),
+                            "label": f"☁️ Google Drive ({norm})",
+                        }
+                    )
+        except OSError:
+            pass
+
+    return detected
+
+
+def _is_google_drive_path(target_path: Path, detected_gdrives: Optional[List[Dict[str, str]]] = None) -> bool:
+    gdrives = detected_gdrives if detected_gdrives is not None else detect_google_drive_paths()
+    s_low = str(target_path).lower().replace("/", "\\")
+    for gd in gdrives:
+        gd_root = gd.get("root", "").lower().replace("/", "\\").rstrip("\\")
+        gd_drive = gd.get("drive", "").lower().replace("/", "\\").rstrip("\\")
+        if (gd_root and s_low.startswith(gd_root)) or (gd_drive and len(gd_drive) >= 2 and s_low.startswith(gd_drive)):
+            return True
+    return any(tok in s_low for tok in ("google drive", "googledrive", "내 드라이브", "my drive", ".shortcut-targets-by-id"))
+
+
+def load_workspace_settings() -> Dict[str, Any]:
+    default_cfg: Dict[str, Any] = {
+        "output_dir": "",
+        "mirror_to_local": False,
+        "recent_dirs": [],
+        "gdrive_direct_enabled": False,
+        "gdrive_folder_id": "root",
+        "gdrive_folder_name": "내 드라이브 (루트)",
+        "gdrive_folder_url": "https://drive.google.com/drive/my-drive",
+    }
+    if WORKSPACE_SETTINGS_FILE.exists():
+        try:
+            raw = json.loads(WORKSPACE_SETTINGS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                out_dir = str(raw.get("output_dir") or "").strip()
+                mirror = bool(raw.get("mirror_to_local", False))
+                recents = [str(x).strip() for x in (raw.get("recent_dirs") or []) if str(x).strip()]
+                return {
+                    "output_dir": out_dir,
+                    "mirror_to_local": mirror,
+                    "recent_dirs": recents[:10],
+                    "gdrive_direct_enabled": bool(raw.get("gdrive_direct_enabled", False)),
+                    "gdrive_folder_id": str(raw.get("gdrive_folder_id") or "root").strip(),
+                    "gdrive_folder_name": str(raw.get("gdrive_folder_name") or "내 드라이브 (루트)").strip(),
+                    "gdrive_folder_url": str(raw.get("gdrive_folder_url") or "https://drive.google.com/drive/my-drive").strip(),
+                }
+        except Exception:
+            pass
+    return default_cfg
+
+
+def _resolve_custom_output_input(raw_path_str: str, gdrives: List[Dict[str, str]]) -> Path:
+    """Validates a local path, Google Drive path, or resolves a Google Drive folder URL if mapped via .shortcut-targets-by-id."""
+    import re
+    cleaned = (raw_path_str or "").strip().strip('"').strip("'")
+    if not cleaned or cleaned.replace("\\", "/").rstrip("/") == "deliverables":
+        return DELIVERABLES_DIR.resolve()
+
+    if cleaned.lower().startswith(("http://", "https://")) and "drive.google.com" in cleaned.lower():
+        m = re.search(r"/folders/([a-zA-Z0-9_-]+)", cleaned)
+        folder_id = m.group(1) if m else ""
+        if folder_id:
+            for gd in gdrives:
+                drv = Path(gd.get("drive", ""))
+                by_id = drv / ".shortcut-targets-by-id" / folder_id
+                try:
+                    if by_id.exists() and by_id.is_dir():
+                        return by_id.resolve()
+                except OSError:
+                    pass
+        raise ValueError(
+            "구글 드라이브 웹 폴더 URL은 우측 [☁️ Google Drive 직접 연결 & 클라우드 폴더 선택] 창에서 바로 지정하거나, "
+            "먼저 [🔑 Google Drive 직접 로그인]을 완료한 뒤 입력해 주세요."
+        )
+
+    cand = Path(cleaned).expanduser()
+    if not cand.is_absolute():
+        cand = (ROOT / cand).resolve()
+    return cand
+
+
+def save_workspace_settings(
+    output_dir_raw: Optional[str] = None,
+    mirror_to_local: Optional[bool] = None,
+    gdrive_direct_enabled: Optional[bool] = None,
+    gdrive_folder_id: Optional[str] = None,
+    gdrive_folder_name: Optional[str] = None,
+    gdrive_folder_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    cfg = load_workspace_settings()
+    gdrives = detect_google_drive_paths()
+
+    if output_dir_raw is not None:
+        raw_clean = str(output_dir_raw).strip()
+        if not raw_clean or raw_clean.replace("\\", "/").rstrip("/") == "deliverables":
+            cfg["output_dir"] = ""
+        elif raw_clean.lower().startswith(("http://", "https://")) and "drive.google.com" in raw_clean.lower():
+            # If Direct Google Drive API is connected, bind the cloud folder URL directly!
+            gd_conn = get_gdrive_connection_status()
+            if gd_conn.get("connected"):
+                meta = gdrive_get_folder_metadata(raw_clean)
+                cfg["gdrive_direct_enabled"] = True
+                cfg["gdrive_folder_id"] = meta["id"]
+                cfg["gdrive_folder_name"] = meta["name"]
+                cfg["gdrive_folder_url"] = meta["webViewLink"]
+            else:
+                target_p = _resolve_custom_output_input(raw_clean, gdrives)
+                cfg["output_dir"] = str(target_p)
+        else:
+            target_p = _resolve_custom_output_input(raw_clean, gdrives)
+            try:
+                target_p.mkdir(parents=True, exist_ok=True)
+                probe_file = target_p / f".nexus_write_test_{os.getpid()}.tmp"
+                probe_file.write_text("ok", encoding="utf-8")
+                probe_file.unlink(missing_ok=True)
+            except Exception as exc:
+                raise ValueError(f"지정한 폴더에 접근하거나 파일을 생성할 수 없습니다 ({target_p}): {exc}") from exc
+
+            if target_p.resolve() == DELIVERABLES_DIR.resolve():
+                cfg["output_dir"] = ""
+            else:
+                norm_str = str(target_p)
+                cfg["output_dir"] = norm_str
+                recents = [d for d in cfg.get("recent_dirs", []) if d.lower() != norm_str.lower()]
+                recents.insert(0, norm_str)
+                cfg["recent_dirs"] = recents[:10]
+
+    if mirror_to_local is not None:
+        cfg["mirror_to_local"] = bool(mirror_to_local)
+    if gdrive_direct_enabled is not None:
+        cfg["gdrive_direct_enabled"] = bool(gdrive_direct_enabled)
+    if gdrive_folder_id is not None:
+        cfg["gdrive_folder_id"] = str(gdrive_folder_id).strip() or "root"
+    if gdrive_folder_name is not None:
+        cfg["gdrive_folder_name"] = str(gdrive_folder_name).strip() or "내 드라이브 (루트)"
+    if gdrive_folder_url is not None:
+        cfg["gdrive_folder_url"] = str(gdrive_folder_url).strip() or "https://drive.google.com/drive/my-drive"
+
+    CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = WORKSPACE_SETTINGS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, WORKSPACE_SETTINGS_FILE)
+    return get_output_dir_status()
+
+
+def get_output_dir_status(force_gdrive_refresh: bool = False) -> Dict[str, Any]:
+    cfg = load_workspace_settings()
+    gdrives = detect_google_drive_paths()
+    gd_conn = get_gdrive_connection_status(force_refresh=force_gdrive_refresh)
+    raw_dir = cfg.get("output_dir", "")
+    default_str = str(DELIVERABLES_DIR.resolve())
+
+    is_default = not bool(raw_dir)
+    configured_path = Path(raw_dir) if raw_dir else DELIVERABLES_DIR.resolve()
+    accessible = True
+    fallback_notice = None
+
+    if not is_default:
+        try:
+            configured_path.mkdir(parents=True, exist_ok=True)
+            effective_path = configured_path
+        except Exception as exc:
+            accessible = False
+            effective_path = DELIVERABLES_DIR.resolve()
+            effective_path.mkdir(parents=True, exist_ok=True)
+            fallback_notice = f"지정된 폴더({configured_path})에 현재 접근할 수 없어 기본 폴더({default_str})로 임시 대체 중입니다: {exc}"
+    else:
+        DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
+        effective_path = DELIVERABLES_DIR.resolve()
+
+    eff_str = str(effective_path)
+    is_gdrive = _is_google_drive_path(effective_path, gdrives)
+    has_non_ascii_or_space = any(ord(ch) > 127 or ch == " " for ch in eff_str)
+
+    return {
+        "output_dir": eff_str,
+        "configured_dir": str(configured_path),
+        "default_dir": default_str,
+        "is_default": is_default,
+        "is_accessible": accessible,
+        "is_google_drive": is_gdrive,
+        "mirror_to_local": bool(cfg.get("mirror_to_local", False)),
+        "recent_dirs": cfg.get("recent_dirs", []),
+        "detected_google_drives": gdrives,
+        "has_non_ascii_or_space": has_non_ascii_or_space,
+        "fallback_notice": fallback_notice,
+        "gdrive_direct": {
+            **gd_conn,
+            "enabled": bool(cfg.get("gdrive_direct_enabled", False) and gd_conn.get("connected")),
+            "configured_enabled": bool(cfg.get("gdrive_direct_enabled", False)),
+            "folder_id": cfg.get("gdrive_folder_id", "root"),
+            "folder_name": cfg.get("gdrive_folder_name", "내 드라이브 (루트)"),
+            "folder_url": cfg.get("gdrive_folder_url", "https://drive.google.com/drive/my-drive"),
+        },
+    }
+
+
+def browse_output_folder_dialog(
+    initial_dir: Optional[str] = None,
+    pick_only: bool = False,
+    team_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Opens native OS folder picker dialog (Windows FolderBrowserDialog with TopMost owner) so user can pick local or Google Drive folder."""
+    status_now = get_output_dir_status()
+    start_dir = (initial_dir or "").strip() or status_now["output_dir"]
+    if os.name != "nt":
+        return {"ok": False, "error": "현재 OS 환경에서는 네이티브 폴더 선택창 대신 경로 직접 입력을 사용해 주세요."}
+
+    ps_exe = shutil.which("powershell") or "powershell.exe"
+    safe_init = start_dir.replace("'", "''")
+    ps_script = (
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "$owner = New-Object System.Windows.Forms.Form; "
+        "$owner.TopMost = $true; "
+        "$owner.StartPosition = 'CenterScreen'; "
+        "$dlg = New-Object System.Windows.Forms.FolderBrowserDialog; "
+        "$dlg.Description = '프로젝트 저장 폴더 선택 (로컬 디스크 또는 Google Drive 내 드라이브)'; "
+        "$dlg.ShowNewFolderButton = $true; "
+        f"if (Test-Path -LiteralPath '{safe_init}') {{ $dlg.SelectedPath = '{safe_init}' }}; "
+        "$res = $dlg.ShowDialog($owner); "
+        "if ($res -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dlg.SelectedPath }; "
+        "$owner.Dispose()"
+    )
+    try:
+        res = subprocess.run(
+            [ps_exe, "-NoProfile", "-Sta", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120.0,
+        )
+        chosen = (res.stdout or "").strip()
+        if not chosen:
+            return {"ok": True, "cancelled": True}
+        if pick_only:
+            return {"ok": True, "cancelled": False, "selected_dir": chosen}
+        if team_id:
+            updated_team, _ = update_team_workspace_only(team_id, {"output_dir": chosen}, detect_google_drive_paths())
+            return {
+                "ok": True,
+                "cancelled": False,
+                "selected_dir": chosen,
+                "saved_team": updated_team,
+                "teams_summary": get_teams_payload(),
+                "status": get_output_dir_status(),
+            }
+        updated = save_workspace_settings(output_dir_raw=chosen)
+        return {"ok": True, "cancelled": False, "selected_dir": chosen, "status": updated, "teams_summary": get_teams_payload()}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "폴더 선택 창 대기 시간이 초과되었습니다(120초)."}
+    except Exception as exc:
+        return {"ok": False, "error": f"폴더 선택 창 실행 오류: {exc}"}
+
+
+def open_output_folder_in_explorer(target_dir_str: Optional[str] = None) -> Dict[str, Any]:
+    status_now = get_output_dir_status()
+    target_p = Path(target_dir_str).expanduser() if (target_dir_str and target_dir_str.strip()) else Path(status_now["output_dir"])
+    try:
+        target_p.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            subprocess.Popen(["explorer.exe", str(target_p)], shell=False)
+        elif shutil.which("open"):
+            subprocess.Popen(["open", str(target_p)], shell=False)
+        elif shutil.which("xdg-open"):
+            subprocess.Popen(["xdg-open", str(target_p)], shell=False)
+        return {"ok": True, "opened_dir": str(target_p)}
+    except Exception as exc:
+        return {"ok": False, "error": f"폴더 열기 실패: {exc}"}
 
 
 def resolve_cli(name: str) -> Optional[str]:
@@ -1524,6 +1908,22 @@ def save_character_configs(configs: Dict[str, Any]) -> Dict[str, Any]:
     return current
 
 
+def get_teams_payload(force_gdrive_refresh: bool = False) -> Dict[str, Any]:
+    gdrives = detect_google_drive_paths()
+    gd_conn = get_gdrive_connection_status(force_refresh=force_gdrive_refresh)
+    glob_out = get_output_dir_status(force_gdrive_refresh=False)
+    char_cfgs = load_character_configs()
+    with _STATE_LOCK:
+        missions_snap = list(STATE.get("missions") or [])
+    return build_teams_and_workspaces_payload(
+        missions=missions_snap,
+        detected_gdrives=gdrives,
+        gdrive_conn=gd_conn,
+        global_out_status=glob_out,
+        character_configs=char_cfgs,
+    )
+
+
 # ---------------------------------------------------------------------------
 # In-memory & persisted Triad Orchestrator State
 # ---------------------------------------------------------------------------
@@ -2060,6 +2460,7 @@ def _run_mission_pipeline(
     goal: str,
     profile: str = "standard",
     resume_state: Optional[Dict[str, Any]] = None,
+    team_id: Optional[str] = None,
 ):
     """
     Executes the Triad pipeline with:
@@ -2067,20 +2468,53 @@ def _run_mission_pipeline(
        - quick: 2 stages (PLANNING -> BUILDING + fast file generation), max_repairs=1
        - standard: 5 stages (PLANNING -> BUILDING -> VERIFYING -> REVIEWING -> DECIDING), max_repairs=2
        - deep: Multi-module breakdown (HEAD splits into Module 1 & Module 2; BUILDER [Account 1] & SUB-BUILDER [Account 2] build in parallel/sequence) + 5 stages, max_repairs=3
-    2) Real workspace project file generation in deliverables/<mission_id>_project/
+    2) Real workspace project file generation in team-specific or global output folder
     3) Automatic Repair Loop (returns to 02 BUILDING when 03 VERIFYING or 04 REVIEWING finds defects)
     4) Quota Auto-Failover & All-Exhausted Auto-Pause (QUOTA_PAUSED) with Stage Resume
+    5) Per-Team roles & Per-Team Local + Google Drive Direct workspace routing
     """
-    roles = load_roles()
-    head_p = roles.get("head", "claude")
-    builder_p = roles.get("builder", "antigravity")
-    sub_builder_p = roles.get("sub_builder", "gemini" if "gemini" in PROVIDER_META else builder_p)
-    reviewer_p = roles.get("reviewer", "openai")
-    researcher_p = roles.get("researcher", "grok")
+    eff_team_id = (resume_state or {}).get("team_id") or team_id
+    team_obj = get_team_by_id(eff_team_id)
+    eff_team_id = team_obj["id"]
+    team_name = team_obj["name"]
+    team_floor = team_obj.get("floor", "1F")
+    team_color = team_obj.get("color", "#0f6848")
+    team_roles = team_obj.get("roles") or {}
+    team_ws = team_obj.get("workspace") or {}
+
+    global_roles = load_roles()
+    def _pick_role_cli(r_key: str, default_k: str) -> str:
+        cand = str(team_roles.get(r_key) or global_roles.get(r_key) or default_k).strip()
+        return cand if cand in PROVIDER_META else (global_roles.get(r_key) if global_roles.get(r_key) in PROVIDER_META else default_k)
+
+    head_p = _pick_role_cli("head", "claude")
+    builder_p = _pick_role_cli("builder", "antigravity")
+    sub_builder_p = _pick_role_cli("sub_builder", "gemini" if "gemini" in PROVIDER_META else builder_p)
+    reviewer_p = _pick_role_cli("reviewer", "openai")
+    researcher_p = _pick_role_cli("researcher", "grok")
 
     profile_clean = (profile or "standard").lower().strip()
     max_repairs = 1 if profile_clean == "quick" else (3 if profile_clean == "deep" else 2)
-    project_dir = ROOT / "deliverables" / f"{mission_id}_project"
+    out_status = get_output_dir_status()
+    gdrives = out_status.get("detected_google_drives") or []
+    saved_out_root = (resume_state or {}).get("output_root")
+    if saved_out_root:
+        base_output_dir = Path(saved_out_root)
+    elif str(team_ws.get("output_dir") or "").strip():
+        try:
+            base_output_dir, _ = resolve_team_local_path(str(team_ws.get("output_dir")), gdrives)
+        except Exception:
+            base_output_dir = Path(out_status["output_dir"])
+    else:
+        base_output_dir = Path(out_status["output_dir"])
+    try:
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        base_output_dir = DELIVERABLES_DIR.resolve()
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+    is_gdrive_target = _is_google_drive_path(base_output_dir, gdrives)
+    mirror_local = bool(team_ws.get("mirror_to_local", False) or out_status.get("mirror_to_local", False))
+    project_dir = base_output_dir / f"{mission_id}_project"
     generated_files: List[str] = list((resume_state or {}).get("generated_files") or [])
     stage_outputs: Dict[str, str] = dict((resume_state or {}).get("stage_outputs") or {})
     repair_history: List[str] = list((resume_state or {}).get("repair_history") or [])
@@ -2488,6 +2922,9 @@ def _run_mission_pipeline(
                 "mission_id": mission_id,
                 "goal": goal,
                 "profile": profile_clean,
+                "team_id": eff_team_id,
+                "team_name": team_name,
+                "output_root": str(base_output_dir),
                 "interrupted_stage": q_err.phase_name,
                 "interrupted_role": q_err.role_name,
                 "stage_outputs": dict(stage_outputs),
@@ -2536,18 +2973,24 @@ def _run_mission_pipeline(
 
     # Write README.md inside project_dir as well
     try:
+        project_dir.mkdir(parents=True, exist_ok=True)
         project_readme = project_dir / "README.md"
         project_readme.write_text(
-            f"# {goal}\n\n- **Mission ID**: `{mission_id}`\n- **Profile**: `{profile_clean.upper()}`\n- **Generated Files**: {', '.join(generated_files)}\n",
+            f"# {goal}\n\n"
+            f"- **Mission ID**: `{mission_id}`\n"
+            f"- **Profile**: `{profile_clean.upper()}`\n"
+            f"- **Saved Directory**: `{project_dir}` ({'Google Drive 동기화 폴더' if is_gdrive_target else '로컬 폴더'})\n"
+            f"- **Generated Files**: {', '.join(generated_files)}\n",
             encoding="utf-8",
         )
     except Exception:
         pass
 
-    # Write final deliverable report to deliverables/<mission_id>.md
+    # Write final deliverable report to <base_output_dir>/<mission_id>.md
     deliv_rel_path = f"deliverables/{mission_id}.md"
-    deliv_full_path = ROOT / "deliverables" / f"{mission_id}.md"
-    files_bullet_list = "\n".join(f"  - [{f}](/{f})" for f in generated_files) or "  - (없음)"
+    deliv_full_path = base_output_dir / f"{mission_id}.md"
+    storage_tag = f"☁️ Google Drive 폴더 (`{base_output_dir}`)" if is_gdrive_target else f"💻 로컬 폴더 (`{base_output_dir}`)"
+    files_bullet_list = "\n".join(f"  - [{f}](/{f}) (`{project_dir / Path(f).name}`)" for f in generated_files) or "  - (없음)"
     repair_section = (
         "\n## 🔄 자동 수정 루프 (Auto-Repair Loop) 이력\n" + "\n".join(f"- {r}" for r in repair_history) + "\n"
         if repair_history
@@ -2556,7 +2999,10 @@ def _run_mission_pipeline(
     deliv_markdown = (
         f"# 📦 Triad 미션 산출물 & 프로젝트 빌더 리포트 ({mission_id})\n\n"
         f"- **미션 목표 (Goal)**: {goal}\n"
+        f"- **수행 팀 (Team)**: `{team_name}` (`{team_floor}`)\n"
         f"- **실행 모드 (Profile)**: `{profile_clean.upper()}` (자동 수정 횟수: {repair_attempt} / {max_repairs}회)\n"
+        f"- **저장 위치 (Output Folder)**: {storage_tag}\n"
+        f"- **생성된 프로젝트 실제 경로**: `{project_dir}`\n"
         f"- **완료 시각**: {utc_now_iso()}\n"
         f"- **역할 배정**: HEAD={PROVIDER_META[head_p]['label']} / BUILDER={PROVIDER_META[builder_p]['label']} / SUB-BUILDER={PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']} / REVIEWER={PROVIDER_META[reviewer_p]['label']}\n"
         f"- **생성된 실제 프로젝트 파일 ({len(generated_files)}개)**:\n{files_bullet_list}\n\n"
@@ -2574,6 +3020,57 @@ def _run_mission_pipeline(
     except Exception:
         pass
 
+    # Optional mirror copy to local deliverables/ when saving to external or Google Drive folder
+    if mirror_local:
+        try:
+            if base_output_dir.resolve() != DELIVERABLES_DIR.resolve():
+                DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
+                if project_dir.exists():
+                    shutil.copytree(project_dir, DELIVERABLES_DIR / project_dir.name, dirs_exist_ok=True)
+                if deliv_full_path.exists():
+                    shutil.copy2(deliv_full_path, DELIVERABLES_DIR / deliv_full_path.name)
+        except Exception:
+            pass
+
+    # Direct Google Drive Cloud Upload (REST API v3) — Team-specific setting takes priority over global
+    gdrive_upload_info: Optional[Dict[str, Any]] = None
+    fresh_out_status = get_output_dir_status()
+    gd_direct = fresh_out_status.get("gdrive_direct") or {}
+    gd_is_connected = bool(gd_direct.get("connected"))
+    team_gd_enabled = bool(team_ws.get("gdrive_direct_enabled", False))
+    use_team_gd = gd_is_connected and team_gd_enabled
+    use_global_gd = gd_is_connected and bool(gd_direct.get("enabled")) and not team_gd_enabled
+    if (use_team_gd or use_global_gd) and not STATE.get("stop_requested", False):
+        try:
+            target_fid = (team_ws.get("gdrive_folder_id") if use_team_gd else gd_direct.get("folder_id")) or "root"
+            target_fname = (team_ws.get("gdrive_folder_name") if use_team_gd else gd_direct.get("folder_name")) or "내 드라이브"
+            gdrive_upload_info = upload_mission_bundle(project_dir, deliv_full_path, target_folder_id=target_fid)
+            with _STATE_LOCK:
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mission_id}-gdrive",
+                        "to_state": "GDRIVE_UPLOAD",
+                        "state_ko": f"☁️ [{team_name}] Google Drive 직접 업로드 완료 ({target_fname} → {project_dir.name}, {gdrive_upload_info['uploaded_count']}개 파일)",
+                        "project": STATE["project_name"],
+                        "role": "DIRECTOR",
+                    },
+                )
+        except Exception as gd_exc:
+            with _STATE_LOCK:
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mission_id}-gdrive-err",
+                        "to_state": "GDRIVE_ERROR",
+                        "state_ko": f"⚠️ Google Drive 직접 업로드 중 오류 발생 (로컬 파일은 정상 보존됨): {str(gd_exc)[:140]}",
+                        "project": STATE["project_name"],
+                        "role": "DIRECTOR",
+                    },
+                )
+
     with _STATE_LOCK:
         stopped = STATE.get("stop_requested", False)
         STATE["phase"] = "IDLE"
@@ -2582,13 +3079,25 @@ def _run_mission_pipeline(
             if m["mission_id"] == mission_id:
                 m["live"] = False
                 m["status"] = "STOPPED" if stopped else "DONE"
+                m["team_id"] = eff_team_id
+                m["team_name"] = team_name
+                m["team_floor"] = team_floor
+                m["team_color"] = team_color
                 m["deliverable_file"] = deliv_rel_path
+                m["deliverable_abs"] = str(deliv_full_path)
                 m["project_dir"] = f"deliverables/{mission_id}_project"
+                m["project_dir_abs"] = str(project_dir)
+                m["output_root"] = str(base_output_dir)
+                m["is_google_drive"] = is_gdrive_target or bool(gdrive_upload_info)
+                if gdrive_upload_info:
+                    m["gdrive_project_url"] = gdrive_upload_info.get("project_folder_url")
+                    m["gdrive_report_url"] = gdrive_upload_info.get("report_url")
+                    m["gdrive_uploaded_count"] = gdrive_upload_info.get("uploaded_count", 0)
                 m["generated_files"] = generated_files
                 m["repair_count"] = repair_attempt
                 m["deliverable_preview"] = stage_outputs.get("BUILDING", "")
                 m["review_preview"] = stage_outputs.get("REVIEWING", "")
-                m["applied"] = {"status": "applied", "files": generated_files}
+                m["applied"] = {"status": "applied", "files": generated_files, "output_dir": str(project_dir)}
                 m["updated_at"] = utc_now_iso()
         next_chat_id = max((c["id"] for c in STATE["chat_messages"]), default=0) + 1
         if stopped:
@@ -2601,14 +3110,15 @@ def _run_mission_pipeline(
                 }
             )
         else:
+            loc_badge = "☁️ Google Drive" if is_gdrive_target else "📁 지정 폴더"
             STATE["chat_messages"].append(
                 {
                     "id": next_chat_id,
                     "role": "HEAD",
                     "content": (
                         f"미션({mission_id} · {profile_clean.upper()}) 완료: '{goal}' 작업으로 "
-                        f"실제 프로젝트 파일 {len(generated_files)}개(`deliverables/{mission_id}_project/`)와 "
-                        f"통합 리포트(`{deliv_rel_path}`)가 생성되었습니다."
+                        f"[{loc_badge}: `{project_dir}`]에 실제 프로젝트 파일 {len(generated_files)}개와 "
+                        f"통합 리포트(`{deliv_full_path.name}`)가 저장되었습니다."
                     ),
                     "at": utc_now_iso(),
                 }
@@ -2672,6 +3182,8 @@ def build_activity_payload() -> Dict[str, Any]:
         return ext
     roles = load_roles()
     diag = probe_cli_diagnostics(deep=False)
+    out_dir_st = get_output_dir_status()
+    teams_sum = get_teams_payload(force_gdrive_refresh=False)
     with _STATE_LOCK:
         usage_snap = json.loads(json.dumps(STATE["usage"]))
         return {
@@ -2692,6 +3204,8 @@ def build_activity_payload() -> Dict[str, Any]:
             "events": STATE["events"][:15],
             "paused_mission": STATE.get("paused_mission"),
             "quota_exhausted_slots": dict(STATE.get("quota_exhausted_slots") or {}),
+            "output_dir_status": out_dir_st,
+            "teams_summary": teams_sum,
         }
 
 
@@ -2844,6 +3358,73 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
             return self._send_json(probe_cli_diagnostics(deep=deep))
         if path == "/ops/cli-slots":
             return self._send_json({"slots": load_cli_slots(), "catalog": CLI_CATALOG, "diagnostics": probe_cli_diagnostics(deep=False)})
+        if path == "/ops/teams":
+            qs = parse_qs(parsed.query)
+            force = qs.get("refresh", ["0"])[0] in ("1", "true", "yes")
+            return self._send_json(get_teams_payload(force_gdrive_refresh=force))
+        if path == "/ops/output-dir":
+            qs = parse_qs(parsed.query)
+            force = qs.get("refresh", ["0"])[0] in ("1", "true", "yes")
+            return self._send_json(get_output_dir_status(force_gdrive_refresh=force))
+        if path == "/ops/gdrive/status":
+            qs = parse_qs(parsed.query)
+            force = qs.get("refresh", ["0"])[0] in ("1", "true", "yes")
+            return self._send_json(get_output_dir_status(force_gdrive_refresh=force))
+        if path == "/ops/gdrive/folders":
+            qs = parse_qs(parsed.query)
+            parent_id = qs.get("parent_id", ["root"])[0] or "root"
+            try:
+                return self._send_json({"ok": True, **gdrive_list_subfolders(parent_id)})
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+        if path == "/ops/gdrive/oauth/start":
+            host_hdr = self.headers.get("Host") or "127.0.0.1:8080"
+            redirect_uri = f"http://{host_hdr}/ops/gdrive/oauth/callback"
+            try:
+                auth_url = build_oauth_authorize_url(redirect_uri)
+                self.send_response(302)
+                self.send_header("Location", auth_url)
+                self.end_headers()
+                return
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+        if path == "/ops/gdrive/oauth/callback":
+            import html as _html
+            qs = parse_qs(parsed.query)
+            err = qs.get("error", [""])[0]
+            code = qs.get("code", [""])[0]
+            state = qs.get("state", [""])[0]
+            host_hdr = self.headers.get("Host") or "127.0.0.1:8080"
+            redirect_uri = f"http://{host_hdr}/ops/gdrive/oauth/callback"
+            if err or not code:
+                msg = f"Google Drive 인증이 취소되었거나 실패했습니다: {err or '코드 없음'}"
+                ok_flag = False
+            else:
+                try:
+                    tok_info = exchange_oauth_code(code, state, redirect_uri)
+                    save_workspace_settings(gdrive_direct_enabled=True)
+                    msg = f"Google Drive 직접 연결이 완료되었습니다! ({tok_info.get('email') or '연결됨'})"
+                    ok_flag = True
+                except Exception as exc:
+                    msg = f"Google Drive 토큰 발급 오류: {exc}"
+                    ok_flag = False
+            doc = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>Google Drive 연결</title></head>
+<body style="font-family:'DM Sans','Noto Sans KR',sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<div style="background:#fff;border:1px solid #cbd5e1;border-radius:14px;padding:28px 32px;max-width:460px;text-align:center;box-shadow:0 8px 24px rgba(15,23,42,0.08)">
+  <h2 style="margin:0 0 10px;color:{'#0f6848' if ok_flag else '#dc2626'}">{'☁️ 연결 완료' if ok_flag else '⚠️ 연결 실패'}</h2>
+  <p style="font-size:13.5px;color:#334155;line-height:1.6">{_html.escape(msg)}</p>
+  <a href="/settings.html#projectOutputDirBar" style="display:inline-block;margin-top:12px;padding:8px 16px;background:#0284c7;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;font-size:12.5px">설정 화면으로 돌아가기</a>
+</div>
+<script>
+  try {{ if (window.opener) {{ window.opener.postMessage({{ type: 'NEXUS_GDRIVE_CONNECTED', ok: {'true' if ok_flag else 'false'} }}, '*'); setTimeout(() => window.close(), 1200); }} }} catch (_) {{}}
+</script></body></html>"""
+            body = doc.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/chat/messages":
             qs = parse_qs(parsed.query)
             try:
@@ -2854,46 +3435,82 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 msgs = [m for m in STATE["chat_messages"] if m["id"] > after_id]
             return self._send_json({"messages": msgs})
 
-        if path.startswith("/deliverables/") and any(path.endswith(ext) for ext in (".md", ".py", ".js", ".json", ".css", ".txt")):
-            rel = path.lstrip("/")
-            md_file = (ROOT / rel).resolve()
-            if md_file.is_file() and str(md_file).startswith(str((ROOT / "deliverables").resolve())):
-                qs = parse_qs(parsed.query)
-                md_text = md_file.read_text(encoding="utf-8", errors="replace")
-                if qs.get("raw", ["0"])[0] == "1":
-                    body = md_text.encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/plain; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                import html as _html
-                escaped = _html.escape(md_text)
-                html_doc = f"""<!doctype html>
+        if path.startswith("/deliverables/") and any(path.endswith(ext) for ext in (".md", ".py", ".js", ".json", ".css", ".html", ".txt")):
+            from urllib.parse import unquote
+            sub_rel = unquote(path[len("/deliverables/"):]).lstrip("/\\")
+            if sub_rel and ".." not in sub_rel:
+                out_stat = get_output_dir_status()
+                candidate_roots: List[Path] = [Path(out_stat["output_dir"])]
+                for t_root in get_all_team_workspace_paths(out_stat.get("detected_google_drives") or []):
+                    candidate_roots.append(t_root)
+                with _STATE_LOCK:
+                    for m_item in STATE["missions"]:
+                        if m_item.get("output_root"):
+                            candidate_roots.append(Path(m_item["output_root"]))
+                for r_dir in out_stat.get("recent_dirs", []):
+                    candidate_roots.append(Path(r_dir))
+                candidate_roots.append(DELIVERABLES_DIR)
+
+                md_file: Optional[Path] = None
+                matched_root: Optional[Path] = None
+                for c_root in candidate_roots:
+                    try:
+                        c_root_res = c_root.resolve()
+                        cand_f = (c_root_res / sub_rel).resolve()
+                        if str(cand_f).lower().startswith(str(c_root_res).lower()) and cand_f.is_file():
+                            md_file = cand_f
+                            matched_root = c_root_res
+                            break
+                    except Exception:
+                        continue
+
+                if md_file and matched_root:
+                    qs = parse_qs(parsed.query)
+                    md_text = md_file.read_text(encoding="utf-8", errors="replace")
+                    if qs.get("raw", ["0"])[0] == "1":
+                        body = md_text.encode("utf-8")
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/plain; charset=utf-8")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
+                    import html as _html
+                    import json as _json
+                    escaped = _html.escape(md_text)
+                    is_gd = _is_google_drive_path(md_file, out_stat.get("detected_google_drives"))
+                    loc_label = "☁️ Google Drive 산출물" if is_gd else "✓ Triad 프로젝트 산출물"
+                    parent_dir_js = _json.dumps(str(md_file.parent))
+                    html_doc = f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>{_html.escape(md_file.name)} · Triad 프로젝트 산출물</title>
 <style>
   body {{ font-family: 'DM Sans', 'Noto Sans KR', sans-serif; background:#f4f7fb; color:#1e293b; margin:0; padding:32px 16px; }}
-  .wrap {{ max-width:900px; margin:0 auto; background:#fff; border:1px solid #dbe3ee; border-radius:16px; padding:28px 32px; box-shadow:0 10px 28px rgba(15,23,42,0.06); }}
-  .top {{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:14px; margin-bottom:18px; gap:12px; flex-wrap:wrap; }}
-  .badge {{ background:#e6f9f1; color:#0f6848; padding:5px 10px; border-radius:999px; font-size:12px; font-weight:800; }}
-  .btn {{ text-decoration:none; background:#1e293b; color:#fff; padding:7px 13px; border-radius:8px; font-size:12px; font-weight:700; }}
+  .wrap {{ max-width:940px; margin:0 auto; background:#fff; border:1px solid #dbe3ee; border-radius:16px; padding:28px 32px; box-shadow:0 10px 28px rgba(15,23,42,0.06); }}
+  .top {{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:14px; margin-bottom:14px; gap:12px; flex-wrap:wrap; }}
+  .badge {{ background:{'#e0f2fe' if is_gd else '#e6f9f1'}; color:{'#0369a1' if is_gd else '#0f6848'}; padding:5px 10px; border-radius:999px; font-size:12px; font-weight:800; }}
+  .path-bar {{ font-size:12px; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 12px; margin-bottom:16px; word-break:break-all; }}
+  .btn {{ text-decoration:none; background:#1e293b; color:#fff; padding:7px 13px; border-radius:8px; font-size:12px; font-weight:700; border:0; cursor:pointer; }}
   pre {{ white-space:pre-wrap; word-break:break-word; background:#0f172a; color:#f8fafc; padding:20px; border-radius:12px; font-size:13.5px; line-height:1.65; font-family:'Nanum Gothic Coding', Consolas, monospace; }}
 </style></head>
 <body><div class="wrap">
   <div class="top">
-    <div><span class="badge">✓ Triad 프로젝트 산출물</span> <strong style="margin-left:8px">{_html.escape(rel)}</strong></div>
-    <div style="display:flex;gap:8px"><a class="btn" href="{_html.escape(path)}?raw=1">원본 파일 보기</a><a class="btn" style="background:#0f6848" href="/settings.html">← AI 설정 &amp; 질문으로 돌아가기</a></div>
+    <div><span class="badge">{loc_label}</span> <strong style="margin-left:8px">{_html.escape(md_file.name)}</strong></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn" style="background:#0284c7" onclick='fetch("/ops/output-dir",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{action:"open_explorer",target_dir:{parent_dir_js}}})}})'>🗂️ 실제 저장 폴더 열기</button>
+      <a class="btn" href="{_html.escape(path)}?raw=1">원본 텍스트 보기</a>
+      <a class="btn" style="background:#0f6848" href="/settings.html">← AI 설정 &amp; 질문으로 돌아가기</a>
+    </div>
   </div>
+  <div class="path-bar">📁 실제 저장 파일 위치: <strong>{_html.escape(str(md_file))}</strong></div>
   <pre>{escaped}</pre>
 </div></body></html>"""
-                body = html_doc.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
+                    body = html_doc.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
 
         return super().do_GET()
 
@@ -3166,17 +3783,301 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 200,
             )
 
+        if path == "/ops/gdrive/connect":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                action = str(payload.get("action") or "gcloud_login").lower().strip()
+
+                if action == "gcloud_login":
+                    res = launch_gcloud_drive_login()
+                    save_workspace_settings(gdrive_direct_enabled=True)
+                    return self._send_json(
+                        {**res, "output_dir_status": get_output_dir_status()},
+                        200 if res.get("ok") else 400,
+                    )
+
+                if action == "save_oauth_client":
+                    raw_json = str(payload.get("client_secret_json") or "").strip()
+                    saved_info = save_oauth_client_json(raw_json)
+                    return self._send_json(
+                        {
+                            **saved_info,
+                            "oauth_start_url": "/ops/gdrive/oauth/start",
+                            "output_dir_status": get_output_dir_status(),
+                            "message": "OAuth 클라이언트 설정이 저장되었습니다. 브라우저 인증 창을 엽니다.",
+                        }
+                    )
+
+                if action == "disconnect":
+                    disconnect_gdrive()
+                    st_after = save_workspace_settings(gdrive_direct_enabled=False)
+                    return self._send_json({"ok": True, "output_dir_status": st_after, "message": "Google Drive 직접 연결이 해제되었습니다."})
+
+                if action == "toggle_sync":
+                    enabled_val = bool(payload.get("enabled", True))
+                    st_after = save_workspace_settings(gdrive_direct_enabled=enabled_val)
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "output_dir_status": st_after,
+                            "message": "Google Drive 클라우드 자동 업로드가 활성화되었습니다." if enabled_val else "Google Drive 클라우드 자동 업로드가 일시 중지되었습니다.",
+                        }
+                    )
+
+                if action == "set_folder":
+                    folder_input = str(payload.get("folder_id") or payload.get("folder_url") or "root").strip()
+                    meta = gdrive_get_folder_metadata(folder_input)
+                    st_after = save_workspace_settings(
+                        gdrive_direct_enabled=True,
+                        gdrive_folder_id=meta["id"],
+                        gdrive_folder_name=meta["name"],
+                        gdrive_folder_url=meta["webViewLink"],
+                    )
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"gdrive-folder-{int(time.time())}",
+                                "to_state": "GDRIVE_FOLDER",
+                                "state_ko": f"☁️ Google Drive 클라우드 저장 폴더 지정: {meta['name']} ({meta['id']})",
+                                "project": STATE["project_name"],
+                                "role": "DIRECTOR",
+                            },
+                        )
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "folder": meta,
+                            "output_dir_status": st_after,
+                            "message": f"Google Drive 클라우드 폴더 [{meta['name']}]가 프로젝트 저장 위치로 지정되었습니다.",
+                        }
+                    )
+
+                if action == "create_folder":
+                    parent_id = str(payload.get("parent_id") or "root").strip() or "root"
+                    folder_name = str(payload.get("name") or "").strip()
+                    created = gdrive_create_subfolder(folder_name, parent_id=parent_id)
+                    return self._send_json({"ok": True, "folder": created, "message": f"Google Drive에 새 폴더 [{created['name']}]가 준비되었습니다."})
+
+                if action == "test_upload":
+                    st_cur = get_output_dir_status(force_gdrive_refresh=True)
+                    gd_cur = st_cur.get("gdrive_direct") or {}
+                    if not gd_cur.get("connected"):
+                        return self._send_json({"ok": False, "error": "먼저 [🔑 Google Drive 직접 로그인]을 완료해 주세요."}, 400)
+                    target_fid = gd_cur.get("folder_id") or "root"
+                    DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
+                    test_file = DELIVERABLES_DIR / "nexus_gdrive_connection_test.md"
+                    test_file.write_text(
+                        f"# ☁️ NEXUS AI Virtual Office × Google Drive 직접 연결 확인\n\n"
+                        f"- **연결 계정**: `{gd_cur.get('account_email') or 'Google Account'}`\n"
+                        f"- **대상 폴더**: `{gd_cur.get('folder_name')}` (`{target_fid}`)\n"
+                        f"- **업로드 시각**: `{utc_now_iso()}`\n",
+                        encoding="utf-8",
+                    )
+                    up_res = gdrive_upload_file(test_file, parent_id=target_fid, remote_name="nexus_gdrive_connection_test.md")
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "uploaded": up_res,
+                            "folder_url": gd_cur.get("folder_url"),
+                            "message": f"Google Drive [{gd_cur.get('folder_name')}]에 테스트 파일 업로드가 완료되었습니다!",
+                        }
+                    )
+
+                return self._send_json({"ok": False, "error": f"지원하지 않는 action입니다: {action}"}, 400)
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        if path == "/ops/output-dir":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                action = str(payload.get("action") or "set").lower().strip()
+                if action == "browse":
+                    init_dir = str(payload.get("initial_dir") or "").strip() or None
+                    pick_only = bool(payload.get("pick_only", False))
+                    b_tid = str(payload.get("team_id") or "").strip() or None
+                    res = browse_output_folder_dialog(initial_dir=init_dir, pick_only=pick_only, team_id=b_tid)
+                    return self._send_json(res, 200 if res.get("ok") else 400)
+                if action == "open_explorer":
+                    t_dir = str(payload.get("target_dir") or "").strip() or None
+                    res = open_output_folder_in_explorer(target_dir_str=t_dir)
+                    return self._send_json(res, 200 if res.get("ok") else 400)
+                if action == "reset":
+                    status_obj = save_workspace_settings(output_dir_raw="")
+                    return self._send_json(
+                        {
+                            "status": "ok",
+                            "output_dir_status": status_obj,
+                            "message": f"프로젝트 저장 폴더가 기본 경로({status_obj['output_dir']})로 복원되었습니다.",
+                        }
+                    )
+                out_raw = payload.get("output_dir")
+                mirror_val = payload.get("mirror_to_local") if "mirror_to_local" in payload else None
+                status_obj = save_workspace_settings(
+                    output_dir_raw=str(out_raw) if out_raw is not None else None,
+                    mirror_to_local=bool(mirror_val) if mirror_val is not None else None,
+                )
+                with _STATE_LOCK:
+                    loc_tag = "☁️ Google Drive" if status_obj["is_google_drive"] else "📁 로컬 폴더"
+                    STATE["events"].insert(
+                        0,
+                        {
+                            "at": utc_now_iso(),
+                            "run_id": f"outdir-{int(time.time())}",
+                            "to_state": "OUTPUT_DIR",
+                            "state_ko": f"프로젝트 저장 폴더 지정 ({loc_tag}): {status_obj['output_dir']}",
+                            "project": STATE["project_name"],
+                            "role": "DIRECTOR",
+                        },
+                    )
+                return self._send_json(
+                    {
+                        "status": "ok",
+                        "output_dir_status": status_obj,
+                        "message": f"프로젝트 저장 폴더가 [{status_obj['output_dir']}]로 저장되었습니다.",
+                    }
+                )
+            except ValueError as exc:
+                return self._send_json({"status": "error", "error": str(exc)}, 400)
+            except Exception as exc:
+                return self._send_json({"status": "error", "error": f"저장 폴더 설정 실패: {exc}"}, 500)
+
+        if path == "/ops/teams":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                action = str(payload.get("action") or "save").lower().strip()
+                gdrives = detect_google_drive_paths()
+
+                if action == "save":
+                    saved_team, _ = create_or_update_team(payload.get("team") or payload, gdrives)
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"team-{int(time.time())}",
+                                "to_state": "TEAM_SAVE",
+                                "state_ko": f"🏢 팀 구성 저장 완료: [{saved_team['name']}] ({saved_team['floor']} · 팀원 {len(saved_team['member_ids'])}명)",
+                                "project": STATE["project_name"],
+                                "role": "DIRECTOR",
+                            },
+                        )
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "saved_team": saved_team,
+                            "teams_summary": get_teams_payload(),
+                            "character_configs": load_character_configs(),
+                            "message": f"팀 [{saved_team['name']}] 구성 및 전용 작업 폴더가 저장되었습니다.",
+                        }
+                    )
+
+                if action == "set_workspace":
+                    tid = str(payload.get("team_id") or "").strip()
+                    ws_data = payload.get("workspace") if isinstance(payload.get("workspace"), dict) else payload
+                    updated_team, _ = update_team_workspace_only(tid, ws_data, gdrives)
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"team-ws-{int(time.time())}",
+                                "to_state": "TEAM_WORKSPACE",
+                                "state_ko": f"📂 [{updated_team['name']}] 작업 폴더 지정 업데이트 완료",
+                                "project": STATE["project_name"],
+                                "role": "DIRECTOR",
+                            },
+                        )
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "saved_team": updated_team,
+                            "teams_summary": get_teams_payload(),
+                            "message": f"[{updated_team['name']}] 팀의 작업 폴더 설정이 업데이트되었습니다.",
+                        }
+                    )
+
+                if action == "create_gdrive_team_folder":
+                    tid = str(payload.get("team_id") or "").strip()
+                    parent_id = str(payload.get("parent_id") or "root").strip() or "root"
+                    custom_name = str(payload.get("folder_name") or "").strip() or None
+                    created_folder, _ = create_and_bind_gdrive_team_folder(tid, parent_folder_id=parent_id, custom_folder_name=custom_name)
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "folder": created_folder,
+                            "teams_summary": get_teams_payload(),
+                            "message": f"Google Drive 클라우드에 [{created_folder['name']}] 전용 폴더를 생성하고 팀에 연결했습니다!",
+                        }
+                    )
+
+                if action == "set_active":
+                    tid = str(payload.get("team_id") or "").strip()
+                    set_active_team(tid)
+                    active_obj = get_team_by_id(tid)
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "active_team": active_obj,
+                            "teams_summary": get_teams_payload(),
+                            "message": f"현재 기본 작업 팀이 [{active_obj['name']}]으로 전환되었습니다.",
+                        }
+                    )
+
+                if action == "delete":
+                    tid = str(payload.get("team_id") or "").strip()
+                    delete_team(tid)
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            "teams_summary": get_teams_payload(),
+                            "message": "선택한 팀이 삭제되었습니다.",
+                        }
+                    )
+
+                return self._send_json({"ok": False, "error": f"지원하지 않는 action입니다: {action}"}, 400)
+            except (ValueError, PermissionError) as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": f"팀 설정 처리 실패: {exc}"}, 500)
+
         if path == "/chat":
             try:
                 ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
+                req_output_dir = None
+                req_team_id = None
                 if ctype == "application/json":
                     data = json.loads(raw.decode("utf-8") or "{}")
                     goal = str(data.get("message") or data.get("goal") or "").strip()
                     profile = str(data.get("profile") or "standard")
+                    req_team_id = str(data.get("team_id") or "").strip() or None
+                    if "output_dir" in data and data.get("output_dir") is not None:
+                        req_output_dir = str(data.get("output_dir")).strip()
                 else:
                     qs = parse_qs(raw.decode("utf-8", errors="replace"))
                     goal = (qs.get("message", [""])[0] or qs.get("goal", [""])[0]).strip()
                     profile = qs.get("profile", ["standard"])[0]
+                    req_team_id = (qs.get("team_id", [""])[0]).strip() or None
+
+                if req_team_id:
+                    try:
+                        set_active_team(req_team_id)
+                    except Exception:
+                        pass
+                target_team = get_team_by_id(req_team_id)
+
+                if req_output_dir is not None:
+                    if req_team_id:
+                        update_team_workspace_only(target_team["id"], {"output_dir": req_output_dir}, detect_google_drive_paths())
+                    else:
+                        save_workspace_settings(output_dir_raw=req_output_dir)
 
                 if not goal:
                     return self._send_json({"status": "error", "error": "작업 목표(Goal)를 입력해 주세요."}, 400)
@@ -3194,12 +4095,16 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     STATE["stop_requested"] = False
                     next_id = max((c["id"] for c in STATE["chat_messages"]), default=0) + 1
                     STATE["chat_messages"].append(
-                        {"id": next_id, "role": "USER", "content": goal, "at": utc_now_iso()}
+                        {"id": next_id, "role": "USER", "content": f"[{target_team['name']}] {goal}", "at": utc_now_iso()}
                     )
                     mission_id = f"mission-{int(time.time()) % 100000}"
                     new_mission = {
                         "mission_id": mission_id,
                         "goal": goal,
+                        "team_id": target_team["id"],
+                        "team_name": target_team["name"],
+                        "team_floor": target_team.get("floor", "1F"),
+                        "team_color": target_team.get("color", "#0f6848"),
                         "project": STATE["project_name"],
                         "status": "RUNNING",
                         "live": True,
@@ -3218,11 +4123,20 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
 
                 t = threading.Thread(
                     target=_run_mission_pipeline,
-                    args=(mission_id, goal, profile),
+                    args=(mission_id, goal, profile, None, target_team["id"]),
                     daemon=True,
                 )
                 t.start()
-                return self._send_json({"status": "started", "mission_id": mission_id, "goal": goal}, 202)
+                return self._send_json(
+                    {
+                        "status": "started",
+                        "mission_id": mission_id,
+                        "goal": goal,
+                        "team_id": target_team["id"],
+                        "team_name": target_team["name"],
+                    },
+                    202,
+                )
             except Exception as exc:
                 return self._send_json({"status": "error", "error": str(exc)}, 500)
 

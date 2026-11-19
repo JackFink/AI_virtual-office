@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEXUS · AI Office Dashboard (AI DEV DIRECTOR)</title><link rel="stylesheet" href="styles.css?v=triad37">
+<title>NEXUS · AI Office Dashboard (AI DEV DIRECTOR)</title><link rel="stylesheet" href="styles.css?v=triad38">
 </head>
 <body data-page="dashboard">
 <div class="app">
@@ -37,16 +37,99 @@
     <div class="stat-card"><div class="stat-head"><span>Scope Guard 통과율</span><span class="stat-ico ico-purple">⌁</span></div><div class="stat-value">100<span style="font-size:15px">%</span></div><div class="stat-foot"><span class="positive">원본 무수정</span><span>격리 Git Worktree</span></div></div>
   </section>
 
-  <section class="overview-grid">
-    <div class="panel"><div class="panel-head"><div><div class="panel-title">나의 AI 오피스 (NEXUS GM Office SVG)</div><div class="panel-sub">벡터 SVG로 변환된 GM 오피스 전층 타워에서 20명 AI 직원을 드래그 배치하세요.</div></div><a href="office.html" class="text-link">공간 열기 ↗</a></div>
-      <a href="office.html" class="office-preview" aria-label="GM 오피스 열기" style="background:url('assets/maple-gm-office.svg') center/cover no-repeat"><span class="preview-tag"><i class="system-dot"></i> NEXUS GM HQ · ALL FLOORS SVG TOWER</span><span class="preview-bottom"><span id="previewActiveText">● 5대 CLI 연동 중</span><span>·</span><span>드래그 앤 드롭 & 말풍선 질문</span><span>↗</span></span></a>
+  <!-- 🏢 팀 구성 & 팀별 작업 폴더 지정 & 연결된 작업 폴더 전체 대시보드 -->
+  <section class="panel teams-ws-dashboard" id="teamsWorkspaceDashboardSection" aria-label="팀 구성 및 연결된 작업 폴더 전체 대시보드">
+    <div class="panel-head settings-panel-head">
+      <div>
+        <div class="eyebrow">TEAM COMPOSITION &amp; CONNECTED WORKSPACE DIRECTORIES</div>
+        <div class="panel-title" style="font-size:15px;margin-top:2px">🏢 팀 구성 &amp; 연결된 작업 폴더 전체 대시보드</div>
+        <div class="panel-sub">팀을 자유롭게 구성(소속 AI 직원 · 역할 · 오피스 층 연동)하고, 각 팀별 전용 로컬 폴더 및 Google Drive 클라우드 폴더와 연결된 모든 작업 폴더를 한눈에 관리합니다.</div>
+      </div>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+        <span id="dashTeamsCountBadge" style="background:#e6f9f1;color:#0f6848;padding:4px 10px;border-radius:999px;font-size:10.5px;font-weight:800">팀 2개</span>
+        <span id="dashWorkspacesCountBadge" style="background:#e0f2fe;color:#0369a1;padding:4px 10px;border-radius:999px;font-size:10.5px;font-weight:800">연결 폴더 2개</span>
+        <button type="button" class="btn small" id="btnDashOpenGdriveModal" style="background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">🔑 Google Drive 직접 연결</button>
+        <button type="button" class="btn small primary" id="btnDashCreateTeam" style="background:#0f6848;border-color:#0f6848">➕ 새 팀 구성 &amp; 폴더 지정</button>
+        <a class="btn small" href="settings.html#triadGoalForm">🚀 미션 실행 ↗</a>
+      </div>
     </div>
-    <div class="panel activity-panel"><div class="panel-head"><div><div class="panel-title">실시간 파이프라인 활동</div><div class="panel-sub">HEAD · BUILDER · REVIEWER · DIRECTOR 최근 이벤트</div></div><a href="logs.html" class="text-link">전체 로그 ↗</a></div><div class="activity-list" id="dashboardActivity">
-      <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">HEAD 최종 PASS 판정 · 원본 안전 반영</div><div class="event-desc">HEAD (Claude Code CLI) · mission-1042</div></div><div class="event-time">방금 전</div></div>
-      <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">REVIEWER 독립 코드 검수 통과 (P0:0, P1:0)</div><div class="event-desc">REVIEWER (OpenAI Codex CLI) · read-only 샌드박스</div></div><div class="event-time">1분 전</div></div>
-      <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">BUILDER 전체 파일 JSON 제안 및 Worktree 반영</div><div class="event-desc">BUILDER (Google Antigravity CLI) · Scope Guard 통과</div></div><div class="event-time">2분 전</div></div>
-      <div class="activity-item"><div class="event-icon ico-purple">⌁</div><div class="event-main"><div class="event-title">HEAD 목표 분석 및 ORDER 작업 명세 발행</div><div class="event-desc">HEAD (Claude Code CLI) · 허용 경로 6개, diff 상한 1500줄</div></div><div class="event-time">4분 전</div></div>
-    </div></div>
+
+    <div class="teams-ws-body">
+      <!-- [1] 팀별 구성 & 팀 전용 작업 폴더 카드 그리드 -->
+      <div class="teams-ws-grid" id="dashboardTeamsGrid">
+        <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px;grid-column:1/-1">팀 및 작업 폴더 현황을 불러오는 중입니다...</div>
+      </div>
+
+      <!-- [2] 현재 연결되어 있는 작업 폴더 전체 목록 (로컬 · 마운트 드라이브 · Google Drive 클라우드 통합) -->
+      <div class="connected-ws-box">
+        <div class="connected-ws-head">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="background:#1e3a8a;color:#fff;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:800">📂 연결된 작업 폴더 전체 목록</span>
+            <span id="connectedWsSummaryLabel" style="font-size:11px;color:#334155;font-weight:700">팀별 지정 폴더 · 기본 폴더 · Google Drive 연결 경로 통합 현황</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn small" id="btnRefreshTeamsDashboard" style="height:26px;padding:0 9px;font-size:10px">🔄 전체 새로고침</button>
+            <a class="btn small" href="settings.html#projectOutputDirBar" style="height:26px;padding:0 9px;font-size:10px">⚙ 전역 저장 설정 ↗</a>
+          </div>
+        </div>
+        <div class="connected-ws-list" id="connectedWorkspacesList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 실시간 파이프라인 실행 로그 & 생성된 프로젝트 폴더 / 미션 산출물 리포트 -->
+  <section class="bottom-grid" id="dashboardPipelineAndDeliverables" style="margin-bottom:18px" aria-label="실시간 파이프라인 실행 로그 및 산출물 리포트">
+    <div class="panel activity-panel">
+      <div class="panel-head settings-panel-head">
+        <div>
+          <div class="panel-title">실시간 파이프라인 실행 로그</div>
+          <div class="panel-sub">HEAD · BUILDER · REVIEWER · RESEARCHER · DIRECTOR 최근 이벤트</div>
+        </div>
+        <a href="logs.html" class="text-link">전체 로그 ↗</a>
+      </div>
+      <div class="activity-list" id="dashboardActivity">
+        <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">HEAD 최종 PASS 판정 · 산출물 저장 완료</div><div class="event-desc">HEAD (Claude Code CLI) · deliverables/mission-20558.md</div></div><div class="event-time">방금 전</div></div>
+        <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">REVIEWER 독립 코드 검수 통과 (P0:0, P1:0)</div><div class="event-desc">REVIEWER (OpenAI Codex CLI) · read-only 샌드박스</div></div><div class="event-time">1분 전</div></div>
+        <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">BUILDER 파이썬 코드 생성 및 실행 검증 통과</div><div class="event-desc">BUILDER (Google Antigravity CLI) · Scope Guard 통과</div></div><div class="event-time">2분 전</div></div>
+        <div class="activity-item"><div class="event-icon ico-purple">⌁</div><div class="event-main"><div class="event-title">HEAD 목표 분석 및 ORDER 작업 명세 발행</div><div class="event-desc">HEAD (Claude Code CLI) · 허용 경로 6개, diff 상한 1500줄</div></div><div class="event-time">4분 전</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head settings-panel-head">
+        <div>
+          <div class="panel-title">생성된 프로젝트 폴더 &amp; 미션 산출물 리포트</div>
+          <div class="panel-sub">실제 생성된 소스 파일(`deliverables/*_project/`) 및 5단계 검증 `.md` 리포트입니다.</div>
+        </div>
+        <a href="logs.html" class="text-link">실행 기록 ↗</a>
+      </div>
+      <div class="settings-panel-body" id="deliverablesListBox" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px">
+          <a href="deliverables/mission-90909.md" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800">
+            <span>📄 deliverables/mission-90909.md — 파이썬 미니 가계부 프로젝트 (DEEP · 모듈 분할 PASS)</span>
+            <span style="white-space:nowrap">리포트 열기 ↗</span>
+          </a>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">
+            <a href="deliverables/mission-90909_project/core_module.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/core_module.py ↗</a>
+            <a href="deliverables/mission-90909_project/app_runner.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/app_runner.py ↗</a>
+          </div>
+        </div>
+        <a href="deliverables/mission-20558.md" target="_blank" class="settings-deliverable-card">
+          <span>📄 deliverables/mission-20558.md — 파이썬 로또 번호 5세트 자동 추천기 함수 (5/5 PASS)</span>
+          <span style="white-space:nowrap;flex-shrink:0">리포트 열기 ↗</span>
+        </a>
+        <div class="right-note" style="margin:0">
+          <strong>💡 프로젝트 빌더 &amp; 자동 수정 루프(Auto-Repair) 안내</strong>
+          <p><b>Standard</b> 모드는 실제 소스 파일 생성과 검증 실패 시 최대 2회 자동 재수정을 수행하며, <b>Deep</b> 모드는 큰 목표를 2개 모듈로 분할해 <b>BUILDER(계정 1)</b>와 <b>SUB-BUILDER(계정 2)</b>가 분담 구현하고 최대 3회 자동 수정 루프를 실행합니다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 나의 AI 오피스 섹션 -->
+  <section class="panel" id="dashboardMyAiOfficeSection" style="margin-bottom:18px">
+    <div class="panel-head"><div><div class="panel-title">나의 AI 오피스 (NEXUS GM Office PNG)</div><div class="panel-sub">경량 PNG로 최적화된 GM 오피스 전층 타워에서 AI 직원을 드래그 배치하세요.</div></div><a href="office.html" class="text-link">공간 열기 ↗</a></div>
+    <a href="office.html" class="office-preview" aria-label="GM 오피스 열기" style="display:block;height:260px;background:url('assets/maple-gm-office.png?v=triad39') center/cover no-repeat"><span class="preview-tag"><i class="system-dot"></i> NEXUS GM HQ · ALL FLOORS TOWER</span><span class="preview-bottom"><span id="previewActiveText">● CLI 연동 중</span><span>·</span><span>드래그 앤 드롭 &amp; 말풍선 질문</span><span>↗</span></span></a>
   </section>
   <section class="bottom-grid">
     <div class="panel"><div class="panel-head"><div><div class="panel-title">현재 배치된 Triad AI 직원</div><div class="panel-sub">역할별 담당 CLI와 진행 중인 파이프라인 작업입니다.</div></div><a href="agents.html" class="text-link">역할 & 직원 전체 보기 ↗</a></div><div class="table-wrap"><table class="mini-table"><thead><tr><th>역할 / AI 직원</th><th>담당 CLI 공급자</th><th>현재 파이프라인 작업</th><th>진행률</th><th>상태</th></tr></thead><tbody id="dashboardAgentTableBody">
@@ -61,5 +144,5 @@
 </div>
 </main>
 </div>
-<script src="app.js?v=triad39"></script>
+<script src="app.js?v=triad45"></script>
 </body></html>

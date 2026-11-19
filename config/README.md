@@ -12,6 +12,8 @@
 | `cli_slots.json` | [`cli_slots.sample.json`](./cli/cli_slots.sample.json) | 등록된 AI CLI 로그인 슬롯 목록. 동일한 AI를 추가로 등록하면 `profile_dir`(`~/.gemini-acc2` 등)이 자동 할당되어 기존 계정과 충돌 없이 격리됩니다. |
 | `role_settings.json` | [`role_settings.sample.json`](./cli/role_settings.sample.json) | `head`, `builder`, `sub_builder`, `reviewer`, `researcher` 5대 역할에 배정된 CLI 키 매핑 파일입니다. |
 | `cli_paths.json` | [`cli_paths.sample.json`](./cli/cli_paths.sample.json) | CLI 실행 파일(`claude`, `agy`, `gemini`, `codex`, `grok`)의 로컬 절대 경로 설정 파일입니다. |
+| `workspace_settings.json` | [`workspace_settings.sample.json`](./cli/workspace_settings.sample.json) | 미션 수행 결과물(프로젝트 폴더 및 `.md` 리포트)이 저장될 사용자 지정 경로(로컬 디스크 또는 Google Drive 마운트 폴더, 기본값은 `deliverables/`), 로컬 동시 백업(`mirror_to_local`), 최근 저장 폴더 이력(`recent_dirs`) 설정 파일입니다. |
+| `teams.json` | [`teams.sample.json`](./cli/teams.sample.json) | 사용자 정의 팀 목록(`teams`), 소속 AI 직원(`member_ids`), 가상 오피스 담당 층(`floor`), 팀 전용 역할 배정(`roles`), 팀별 로컬/Google Drive 클라우드 작업 폴더(`workspace`) 매핑 설정 파일입니다. |
 | `login_scripts/` | *(자동 생성)* | 웹 UI에서 `[🔑 원클릭 로그인 창 열기]`를 눌렀을 때 생성되는 계정별 격리 로그인 도우미(`.cmd`) 폴더입니다. |
 
 ### 🍁 `config/characters/` (캐릭터 시뮬레이터 코디 · 페르소나 · 스킬)

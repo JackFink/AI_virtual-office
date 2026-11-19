@@ -508,3 +508,35 @@
 .btn-remove-cli-slot{border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:3px 7px;font-size:9px;font-weight:800;cursor:pointer;white-space:nowrap;transition:all .14s}
 .btn-remove-cli-slot:hover{background:#fee2e2;border-color:#f87171;color:#991b1b}
 @media(max-width:1024px){.settings-triad-grid,.settings-question-selectors{grid-template-columns:1fr}.settings-triad-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* ==========================================================================
+   팀 구성 & 팀별 작업 폴더 지정 & 연결된 작업 폴더 전체 대시보드 (Teams & Connected Workspaces)
+   ========================================================================== */
+.teams-ws-dashboard{margin-bottom:18px;overflow:hidden}
+.teams-ws-body{padding:16px 21px 20px;display:flex;flex-direction:column;gap:15px}
+.teams-ws-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.team-ws-card{border:1px solid #e2e8f0;border-left:4px solid #0f6848;border-radius:13px;padding:13px 15px;background:#ffffff;display:flex;flex-direction:column;gap:9px;box-shadow:0 4px 14px rgba(15,23,42,0.035);transition:border-color .16s,box-shadow .16s}
+.team-ws-card.is-active-team{background:#f8fefb;box-shadow:0 6px 18px rgba(15,104,72,0.08)}
+.team-ws-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.team-ws-title-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.team-ws-name{font-size:13px;font-weight:800;color:#0f172a}
+.team-floor-pill{padding:2px 7px;border-radius:6px;font-size:9.5px;font-weight:800;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1}
+.team-active-pill{padding:2px 8px;border-radius:999px;font-size:9.5px;font-weight:800;background:#dcfce7;color:#15803d;border:1px solid #86efac}
+.team-ws-desc{font-size:10.5px;color:#64748b;line-height:1.45;margin-top:2px}
+.team-members-strip{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 9px;border-radius:8px;background:#f8fafc;border:1px solid #eef2f6}
+.team-member-chips{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.team-member-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:6px;background:#ffffff;border:1px solid #dbe3ee;font-size:9.5px;font-weight:700;color:#1e293b}
+.team-role-mini{font-size:9.5px;color:#475569;font-weight:600}
+.team-folder-box{display:flex;flex-direction:column;gap:5px;padding:8px 10px;border-radius:9px;background:#f8fafc;border:1px solid #cbd5e1}
+.team-folder-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:10.5px}
+.team-folder-path{font-family:var(--font-mono);font-size:10.5px;font-weight:700;color:#0f172a;word-break:break-all}
+.team-ws-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-top:2px}
+.connected-ws-box{border:1px solid #dbeafe;border-radius:12px;background:#f8fbff;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.connected-ws-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.connected-ws-list{display:flex;flex-direction:column;gap:6px}
+.connected-ws-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 11px;border-radius:9px;background:#ffffff;border:1px solid #e2e8f0;font-size:11px}
+.team-member-pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px;max-height:210px;overflow-y:auto;padding:2px}
+.team-member-pick-card{border:1px solid #cbd5e1;border-radius:9px;padding:7px 9px;background:#ffffff;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;transition:all .14s}
+.team-member-pick-card:hover{border-color:#64748b;background:#f8fafc}
+.team-member-pick-card.selected{border-color:#0f6848;background:#f0fdf4;box-shadow:0 0 0 2px rgba(15,104,72,0.14)}
+@media(max-width:1024px){.teams-ws-grid{grid-template-columns:1fr}}

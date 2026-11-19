@@ -1,0 +1,55 @@
+{
+  "active_team_id": "team-core",
+  "teams": [
+    {
+      "id": "team-core",
+      "name": "코어 플랫폼 개발팀",
+      "description": "웹·백엔드 아키텍처 설계, 핵심 구현 및 독립 코드 검수 전담 본부팀",
+      "color": "#0f6848",
+      "floor": "1F",
+      "member_ids": ["01", "02", "03", "04", "05"],
+      "roles": {
+        "head": "claude",
+        "builder": "antigravity",
+        "sub_builder": "gemini",
+        "reviewer": "openai",
+        "researcher": "grok"
+      },
+      "workspace": {
+        "output_dir": "",
+        "mirror_to_local": false,
+        "gdrive_direct_enabled": false,
+        "gdrive_folder_id": "root",
+        "gdrive_folder_name": "내 드라이브 (루트)",
+        "gdrive_folder_url": "https://drive.google.com/drive/my-drive"
+      },
+      "created_at": "2026-11-19T07:00:00Z",
+      "updated_at": "2026-11-19T07:00:00Z"
+    },
+    {
+      "id": "team-rnd",
+      "name": "신규 서비스 R&D팀",
+      "description": "프로토타입 실험·자동화 스크립트·신규 프로젝트 별도 폴더 분리 개발팀",
+      "color": "#0284c7",
+      "floor": "3F",
+      "member_ids": ["01", "03", "04"],
+      "roles": {
+        "head": "antigravity",
+        "builder": "antigravity",
+        "sub_builder": "gemini",
+        "reviewer": "openai",
+        "researcher": "grok"
+      },
+      "workspace": {
+        "output_dir": "deliverables/team_rnd",
+        "mirror_to_local": false,
+        "gdrive_direct_enabled": false,
+        "gdrive_folder_id": "root",
+        "gdrive_folder_name": "내 드라이브 (루트)",
+        "gdrive_folder_url": "https://drive.google.com/drive/my-drive"
+      },
+      "created_at": "2026-11-19T07:00:00Z",
+      "updated_at": "2026-11-19T07:00:00Z"
+    }
+  ]
+}
