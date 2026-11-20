@@ -3,7 +3,7 @@
     "id": "01",
     "name": "HEAD Director AI",
     "floor": "1F",
-    "dept": "HEAD · Google Antigravity (계정 1)",
+    "dept": "HEAD · 총괄 지휘 (Antigravity)",
     "triadRole": "HEAD",
     "cliProvider": "antigravity",
     "cliModel": "gemini-4-argon-high",
@@ -29,16 +29,16 @@
       "PASS/FAIL 최종 판정"
     ],
     "systemPrompt": "당신은 1F 소속 'HEAD Director AI' (HEAD 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
-    "updatedAt": "2026-11-19T10:36:46.254Z"
+    "updatedAt": "2026-11-20T03:41:21.684Z"
   },
   "02": {
     "id": "02",
     "name": "ORDER Planner AI",
     "floor": "1F",
-    "dept": "HEAD · Google Antigravity (계정 2)",
+    "dept": "HEAD · Google Antigravity (계정 1)",
     "triadRole": "HEAD",
-    "cliProvider": "gemini",
-    "cliModel": "gemini-3.5-flash",
+    "cliProvider": "antigravity",
+    "cliModel": "gemini-4-argon-high",
     "sandboxMode": "read-only",
     "timeoutSec": "300",
     "mapleEquipped": {
@@ -58,15 +58,16 @@
       "PASS/FAIL 최종 판정"
     ],
     "systemPrompt": "당신은 1F 소속 'ORDER Planner AI' (HEAD 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
-    "updatedAt": "2026-11-19T10:36:18.007Z"
+    "updatedAt": "2026-11-20T03:41:19.123Z"
   },
   "03": {
     "id": "03",
     "name": "Builder Dev AI",
     "floor": "1F",
-    "dept": "BUILDER · 구현 (Antigravity)",
+    "dept": "BUILDER · Google Antigravity (계정 1)",
     "triadRole": "BUILDER",
     "cliProvider": "antigravity",
+    "cliModel": "gemini-4-hydrogen-high",
     "sandboxMode": "proposal",
     "timeoutSec": "600",
     "mapleEquipped": {
@@ -85,9 +86,7 @@
       "격리 Worktree 제안"
     ],
     "systemPrompt": "당신은 1F 소속 'Builder Dev AI' (BUILDER 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
-    "updatedAt": "2026-11-16T12:25:18.574Z",
-    "teamId": "team-core",
-    "teamName": "코어 플랫폼 개발팀"
+    "updatedAt": "2026-11-20T03:41:17.216Z"
   },
   "06": {
     "id": "06",
@@ -122,9 +121,10 @@
     "id": "04",
     "name": "Reviewer Audit AI",
     "floor": "1F",
-    "dept": "REVIEWER · 독립 검수 (Codex)",
+    "dept": "REVIEWER · Google Antigravity (계정 1)",
     "triadRole": "REVIEWER",
-    "cliProvider": "openai",
+    "cliProvider": "antigravity",
+    "cliModel": "gemini-4-hydrogen-xhigh",
     "sandboxMode": "read-only",
     "timeoutSec": "300",
     "mapleEquipped": {
@@ -143,18 +143,16 @@
       "Scope Guard 검증"
     ],
     "systemPrompt": "당신은 1F 소속 'Reviewer Audit AI' (REVIEWER 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
-    "updatedAt": "2026-11-17T06:01:41.237Z",
-    "teamId": "team-core",
-    "teamName": "코어 플랫폼 개발팀"
+    "updatedAt": "2026-11-20T03:41:14.097Z"
   },
   "05": {
     "id": "05",
     "name": "Gemini Sub AI",
     "floor": "1F",
-    "dept": "SUB-BUILDER · Google Antigravity (계정 2)",
+    "dept": "BUILDER · 구현 (Antigravity)",
     "triadRole": "SUB-BUILDER",
-    "cliProvider": "gemini",
-    "cliModel": "gemini-3.5-flash-lite",
+    "cliProvider": "antigravity",
+    "cliModel": "gemini-3.8-flash-high",
     "sandboxMode": "read-only",
     "timeoutSec": "300",
     "mapleEquipped": {
@@ -174,6 +172,6 @@
       "코드 생성"
     ],
     "systemPrompt": "당신은 1F 소속 'Gemini Sub AI' (SUB-BUILDER 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.",
-    "updatedAt": "2026-11-19T10:35:58.276Z"
+    "updatedAt": "2026-11-20T03:41:11.021Z"
   }
 }

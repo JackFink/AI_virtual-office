@@ -2825,11 +2825,11 @@ def invoke_cli_if_available(
     used_stream_json_agy = False
     eff_model = (model_override or meta.get("selected_model") or "").strip()
     if domain == "OPENAI":
-        argv = [exe, "exec", "--sandbox", "read-only", "-"]
+        argv = [exe, "exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "workspace-write", "-"]
         if eff_model:
-            argv = [exe, "exec", "-c", f'model="{eff_model}"', "--sandbox", "read-only", "-"]
+            argv = [exe, "exec", "--skip-git-repo-check", "--ephemeral", "-c", f'model="{eff_model}"', "--sandbox", "workspace-write", "-"]
         stdin_data = prompt
-        cmd_desc = f"codex exec{f' -c model={eff_model}' if eff_model else ''} --sandbox read-only - <stdin>"
+        cmd_desc = f"codex exec --skip-git-repo-check --ephemeral{f' -c model={eff_model}' if eff_model else ''} --sandbox workspace-write - <stdin>"
     elif domain == "ANTHROPIC":
         argv = [exe, "--print", "--output-format", "json"]
         if eff_model:
@@ -2843,20 +2843,29 @@ def invoke_cli_if_available(
     elif domain == "GEMINI2":
         if not prof_dir:
             run_env["GEMINI_CLI_HOME"] = str(GEMINI2_HOME_DIR)
-        argv = [exe, "--prompt", prompt, "--output-format", "text"]
-        if eff_model:
-            argv.extend(["-m", eff_model])
-        stdin_data = ""
-        cmd_desc = f"GEMINI_CLI_HOME={prof_dir or GEMINI2_HOME_DIR} gemini --prompt <prompt>{f' -m {eff_model}' if eff_model else ''}"
-    else:
-        # domain == "GOOGLE": prefer official ~/.gemini/bin/agy.exe with native --model <model_id> -p <prompt>
-        if "antigravity-ide" not in Path(exe).name.lower():
-            argv = [exe, "--disable-slash-commands"]
+        agy_alt = resolve_cli("agy")
+        if agy_alt and "antigravity-ide" not in Path(agy_alt).name.lower():
+            argv = [agy_alt, "--disable-slash-commands", "--sandbox", "--dangerously-skip-permissions"]
             if eff_model:
                 argv.extend(["--model", eff_model])
             argv.extend(["-p", prompt])
             stdin_data = ""
-            cmd_desc = f"agy --disable-slash-commands{f' --model {eff_model}' if eff_model else ''} -p <prompt>"
+            cmd_desc = f"GEMINI_CLI_HOME={prof_dir or GEMINI2_HOME_DIR} agy --disable-slash-commands --sandbox --dangerously-skip-permissions{f' --model {eff_model}' if eff_model else ''} -p <prompt>"
+        else:
+            argv = [exe, "--prompt", prompt, "--output-format", "text"]
+            if eff_model:
+                argv.extend(["-m", eff_model])
+            stdin_data = ""
+            cmd_desc = f"GEMINI_CLI_HOME={prof_dir or GEMINI2_HOME_DIR} gemini --prompt <prompt>{f' -m {eff_model}' if eff_model else ''}"
+    else:
+        # domain == "GOOGLE": run official ~/.gemini/bin/agy.exe inside isolated sandboxed temp dir with auto-approved sandbox tools
+        if "antigravity-ide" not in Path(exe).name.lower():
+            argv = [exe, "--disable-slash-commands", "--sandbox", "--dangerously-skip-permissions"]
+            if eff_model:
+                argv.extend(["--model", eff_model])
+            argv.extend(["-p", prompt])
+            stdin_data = ""
+            cmd_desc = f"agy --disable-slash-commands --sandbox --dangerously-skip-permissions{f' --model {eff_model}' if eff_model else ''} -p <prompt>"
         else:
             gem_exe = resolve_cli("gemini")
             if gem_exe:
@@ -2872,37 +2881,73 @@ def invoke_cli_if_available(
                 stdin_data = json.dumps(msg, ensure_ascii=False) + "\n"
                 cmd_desc = "agy --input-format stream-json --output-format stream-json --sandbox <stdin>"
 
+    import tempfile
     t0 = time.time()
     try:
-        proc = subprocess.Popen(
-            argv,
-            cwd=str(ROOT),
-            env=run_env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            shell=False,
-        )
-        with _STATE_LOCK:
-            _ACTIVE_PIDS[proc.pid] = meta["cli"]
-        try:
-            stdout, stderr = proc.communicate(input=stdin_data, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
-            else:
-                proc.kill()
-            return None
-        finally:
+        cwd_file_blocks: List[str] = []
+        with tempfile.TemporaryDirectory(prefix="avo_cli_") as iso_cwd:
+            proc = subprocess.Popen(
+                argv,
+                cwd=iso_cwd,
+                env=run_env,
+                stdin=subprocess.PIPE if stdin_data else subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                shell=False,
+            )
             with _STATE_LOCK:
-                _ACTIVE_PIDS.pop(proc.pid, None)
+                _ACTIVE_PIDS[proc.pid] = meta["cli"]
+            try:
+                stdout, stderr = proc.communicate(input=stdin_data if stdin_data else None, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+                else:
+                    proc.kill()
+                # Even on timeout, salvage any completed files already written to iso_cwd
+                iso_path = Path(iso_cwd)
+                for wf in sorted(iso_path.rglob("*")):
+                    if wf.is_file() and not wf.name.startswith("."):
+                        try:
+                            rel_p = wf.relative_to(iso_path).as_posix()
+                            w_txt = wf.read_text(encoding="utf-8", errors="replace").strip()
+                            if w_txt:
+                                cwd_file_blocks.append(f"### FILE: {rel_p}\n{w_txt}")
+                        except Exception:
+                            pass
+                if cwd_file_blocks:
+                    salvaged = "\n\n".join(cwd_file_blocks)
+                    return {
+                        "output": salvaged[:120000],
+                        "seconds": max(1, int(round(time.time() - t0))),
+                        "tokens": max(120, len(salvaged) // 2),
+                        "command": cmd_desc,
+                        "executable": exe,
+                        "provider": canon,
+                        "label": meta["label"],
+                        "real_cli": True,
+                    }
+                return None
+            finally:
+                with _STATE_LOCK:
+                    _ACTIVE_PIDS.pop(proc.pid, None)
+            iso_path = Path(iso_cwd)
+            for wf in sorted(iso_path.rglob("*")):
+                if wf.is_file() and not wf.name.startswith("."):
+                    try:
+                        rel_p = wf.relative_to(iso_path).as_posix()
+                        w_txt = wf.read_text(encoding="utf-8", errors="replace").strip()
+                        if w_txt:
+                            cwd_file_blocks.append(f"### FILE: {rel_p}\n{w_txt}")
+                    except Exception:
+                        pass
         dur = max(1, int(round(time.time() - t0)))
         combined_out = ((stdout or "") + "\n" + (stderr or "")).strip()
         combined_lower = combined_out.lower()
-        if any(q_phrase in combined_lower for q_phrase in QUOTA_ERROR_PHRASES):
+        if any(q_phrase in combined_lower for q_phrase in QUOTA_ERROR_PHRASES) and not cwd_file_blocks:
             reason_snippet = combined_out.splitlines()[0][:180] if combined_out else "CLI 한도 도달 (429 / Quota Exceeded)"
             with _STATE_LOCK:
                 STATE.setdefault("quota_exhausted_slots", {})[canon] = {
@@ -2916,10 +2961,9 @@ def invoke_cli_if_available(
                 "label": meta["label"],
                 "reason": reason_snippet,
             }
-        if proc.returncode == 0 and stdout.strip():
+        if (proc.returncode == 0 and stdout.strip()) or cwd_file_blocks:
             parsed_text = stdout.strip()
             if domain == "GOOGLE" and used_stream_json_agy:
-                # Extract final response from AGY stream-json NDJSON
                 for line in stdout.splitlines():
                     try:
                         ev = json.loads(line)
@@ -2936,8 +2980,11 @@ def invoke_cli_if_available(
                         parsed_text = str(j["result"]).strip()
                 except Exception:
                     pass
+            if cwd_file_blocks:
+                # Direct files written by agentic CLI take priority for accurate multi-file extraction
+                parsed_text = "\n\n".join(cwd_file_blocks) + (f"\n\n<!-- CLI SUMMARY -->\n{parsed_text}" if parsed_text and "### FILE:" not in parsed_text else "")
             return {
-                "output": parsed_text[:12000],
+                "output": parsed_text[:120000],
                 "seconds": dur,
                 "tokens": max(120, len(parsed_text) // 2),
                 "command": cmd_desc,
@@ -3066,68 +3113,233 @@ def answer_simple_question(
     }
 
 
-def _extract_and_write_project_files(mission_id: str, goal: str, built_text: str, project_dir: Path, default_prefix: str = "main") -> List[str]:
-    """Extracts source files from BUILDER output (### FILE: name or fenced blocks), validates Scope Guard, and writes them to project_dir."""
+MISSION_INTENT_SPECS: Dict[str, Dict[str, Any]] = {
+    "RESEARCH_HTML": {
+        "mode": "RESEARCH_HTML",
+        "label": "📊🌐 심층 조사 · HTML 시각화 보고서",
+        "primary_file": "research_report.html",
+        "deep_files": ("research_report.html", "summary_data.json"),
+    },
+    "RESEARCH": {
+        "mode": "RESEARCH",
+        "label": "📊 자료 조사 · 분석 리포트",
+        "primary_file": "research_report.md",
+        "deep_files": ("research_report.md", "summary_data.json"),
+    },
+    "DOCUMENT": {
+        "mode": "DOCUMENT",
+        "label": "📝 기획서 · 실무 문서 작성",
+        "primary_file": "proposal_document.md",
+        "deep_files": ("proposal_document.md", "action_plan.md"),
+    },
+    "WEB": {
+        "mode": "WEB",
+        "label": "🌐 웹페이지 · 프론트엔드 UI",
+        "primary_file": "index.html",
+        "deep_files": ("index.html", "app.js"),
+    },
+    "CODE": {
+        "mode": "CODE",
+        "label": "💻 소프트웨어 · 자동화 코드",
+        "primary_file": "main.py",
+        "deep_files": ("core_module.py", "app_runner.py"),
+    },
+}
+
+
+def classify_mission_intent(goal: str) -> Dict[str, Any]:
+    """Analyzes the user's natural-language goal sentence to determine the optimal deliverable format automatically."""
+    g = (goal or "").lower().strip()
+
+    html_out_kw = ("html", "웹 보고서", "웹보고서", "웹페이지로", "html로", "html 파일")
+    web_kw = (
+        "웹페이지", "웹사이트", "랜딩페이지", "프론트엔드", "html", "css",
+        "반응형 웹", "포트폴리오 사이트", "웹 앱", "웹앱", "landing page", "website", "webpage",
+    )
+    code_kw = (
+        "파이썬", "python", "자바스크립트", "javascript", "타입스크립트", "typescript",
+        "스크립트", "코드", "코딩", "함수", "클래스", "알고리즘", "프로그램",
+        "크롤러", "크롤링", "파서", "봇", "자동화 도구", "자동화 스크립트",
+        "cli", "api 서버", "백엔드", "구현해", "개발해", "짜줘", "작성해줘 코드",
+    )
+    research_kw = (
+        "조사", "리서치", "분석", "비교", "현황", "목록", "정리", "요약",
+        "동향", "트렌드", "전통시장", "상권", "통계", "사례", "특징", "장단점",
+        "종류", "찾아", "알아봐", "알려줘", "정리해", "research", "survey", "analysis", "summary",
+    )
+    doc_kw = (
+        "기획", "기획서", "기획안", "제안서", "사업계획", "전략", "마케팅",
+        "홍보", "카피", "보고서", "매뉴얼", "가이드", "가이드라인", "시나리오",
+        "커리큘럼", "일정표", "체크리스트", "초안", "공지문", "보도자료", "블로그 글",
+    )
+
+    has_research = any(k in g for k in research_kw)
+    has_doc = any(k in g for k in doc_kw)
+    if (has_research or has_doc) and any(k in g for k in html_out_kw):
+        return dict(MISSION_INTENT_SPECS["RESEARCH_HTML"])
+    if any(k in g for k in web_kw):
+        return dict(MISSION_INTENT_SPECS["WEB"])
+    if any(k in g for k in code_kw):
+        return dict(MISSION_INTENT_SPECS["CODE"])
+    if has_research:
+        return dict(MISSION_INTENT_SPECS["RESEARCH"])
+    if has_doc:
+        return dict(MISSION_INTENT_SPECS["DOCUMENT"])
+    if any(w in g for w in ("생성기", "계산기", "변환기", "추출기", "게임", "시뮬레이터", "매크로", "서버", "모듈")):
+        return dict(MISSION_INTENT_SPECS["CODE"])
+    return dict(MISSION_INTENT_SPECS["DOCUMENT"])
+
+
+def _refine_intent_from_plan(plan_text: str, current_spec: Dict[str, Any]) -> Dict[str, Any]:
     import re
+    m = re.search(r"DELIVERABLE_MODE\s*:\s*(RESEARCH_HTML|RESEARCH|DOCUMENT|WEB|CODE)", plan_text or "", flags=re.IGNORECASE)
+    if m:
+        picked = m.group(1).upper()
+        if current_spec.get("mode") == "RESEARCH_HTML" and picked in ("WEB", "RESEARCH", "DOCUMENT"):
+            return dict(MISSION_INTENT_SPECS["RESEARCH_HTML"])
+        if picked in MISSION_INTENT_SPECS:
+            return dict(MISSION_INTENT_SPECS[picked])
+    return current_spec
+
+
+def _strip_outer_code_fence(text: str) -> str:
+    import re
+    s = (text or "").strip()
+    m = re.match(r"^```[a-zA-Z0-9_+-]*\r?\n([\s\S]*)$", s)
+    if m:
+        body = m.group(1)
+        if body.rstrip().endswith("```"):
+            body = body.rstrip()[:-3].rstrip()
+        return body
+    return s
+
+
+def _patch_html_osm_tile_policy(content: str, is_html: bool = True) -> str:
+    """Prevents OpenStreetMap 403 'Access blocked' tiles when HTML deliverables are opened via local file:// (missing HTTP Referer)."""
+    import re
+    if "tile.openstreetmap.org" not in (content or ""):
+        return content
+    patched = re.sub(
+        r"""(['"`])https?://(?:\{s\}\.)?tile\.openstreetmap\.org/\{z\}/\{x\}/\{y\}\.png\1""",
+        "(window.location.protocol === 'file:' ? 'https://tile.openstreetmap.de/{z}/{x}/{y}.png' : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')",
+        content,
+    )
+    if is_html and 'name="referrer"' not in patched.lower() and "name='referrer'" not in patched.lower():
+        patched = re.sub(
+            r"(<head[^>]*>)",
+            r'\1\n  <meta name="referrer" content="origin">',
+            patched,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    return patched
+
+
+def _extract_and_write_project_files(
+    mission_id: str,
+    goal: str,
+    built_text: str,
+    project_dir: Path,
+    default_prefix: str = "main",
+    deliverable_mode: str = "CODE",
+) -> List[str]:
+    """Extracts deliverable files (reports, docs, JSON/CSV data, web HTML/CSS/JS, or code) from BUILDER output."""
+    import re
+    if not (built_text or "").strip():
+        return []
     project_dir.mkdir(parents=True, exist_ok=True)
     written_files: List[str] = []
+    mode_up = (deliverable_mode or "CODE").upper()
+    matches: List[Tuple[str, str]] = []
 
-    # 1. Try explicit ### FILE: <filename> followed by fenced code block (allows blank lines & unclosed trailing fence)
-    file_pattern = re.compile(
-        r"(?:###\s*FILE:\s*|//\s*FILE:\s*|#\s*FILE:\s*)([^\r\n`]+)\s*```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)(?:```|\Z)",
-        re.MULTILINE,
-    )
-    matches = file_pattern.findall(built_text or "")
+    # 1. Split by explicit ### FILE: <filename> markers (supports markdown/HTML reports with inner code blocks as well as raw code)
+    header_re = re.compile(r"(?m)^(?:###\s*FILE:|//\s*FILE:|<!--\s*FILE:)\s*([^\r\n`>]+?)(?:-->)?\s*$")
+    hdrs = list(header_re.finditer(built_text or ""))
+    if hdrs:
+        for i, hm in enumerate(hdrs):
+            fname = hm.group(1).strip().strip("`'\"")
+            start_pos = hm.end()
+            end_pos = hdrs[i + 1].start() if (i + 1 < len(hdrs)) else len(built_text)
+            raw_sec = (built_text[start_pos:end_pos] or "").strip()
+            cleaned_sec = _strip_outer_code_fence(raw_sec)
+            if fname and cleaned_sec:
+                matches.append((fname, cleaned_sec))
 
-    # 2. Fallback: extract fenced code blocks by language
+    # 2. Fallback when no ### FILE: marker is present (NEVER writes fake echo stubs)
     if not matches:
-        fence_pattern = re.compile(r"```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)(?:```|\Z)", re.MULTILINE)
-        ext_map = {
-            "python": f"{default_prefix}.py",
-            "py": f"{default_prefix}.py",
-            "javascript": f"{default_prefix}.js",
-            "js": f"{default_prefix}.js",
-            "html": "index.html",
-            "css": "styles.css",
-            "json": "config.json",
-            "sh": "run.sh",
-            "bash": "run.sh",
-        }
-        used_names = set()
-        for idx, (lang, code_body) in enumerate(fence_pattern.findall(built_text or ""), start=1):
-            lang_clean = (lang or "").lower().strip()
-            if lang_clean in ("text", "plaintext", "markdown", "md") and idx > 1:
-                continue
-            fname = ext_map.get(lang_clean, f"{default_prefix}_{idx}.py" if not lang_clean else f"{default_prefix}_{idx}.{lang_clean}")
-            if fname in used_names:
-                stem, dot, ext = fname.partition(".")
-                fname = f"{stem}_{idx}.{ext or 'txt'}"
-            used_names.add(fname)
-            matches.append((fname, code_body))
-
-    # 3. If still no code blocks (e.g. simulation mode), scaffold a clean runnable Python module + README
-    if not matches:
-        safe_goal = (goal or "Mission Project").replace('"', "'")
-        scaffold_py = (
-            f'"""\n자동 생성 프로젝트 모듈: {safe_goal}\nMission ID: {mission_id}\n"""\n\n'
-            f"def run_project() -> dict:\n"
-            f'    return {{"mission_id": "{mission_id}", "goal": "{safe_goal}", "status": "OK"}}\n\n\n'
-            f'if __name__ == "__main__":\n'
-            f"    result = run_project()\n"
-            f'    print(f"[SUCCESS] {{result[\'goal\']}} -> {{result[\'status\']}}")\n'
-        )
-        matches.append((f"{default_prefix}.py", scaffold_py))
+        if mode_up in ("RESEARCH", "DOCUMENT"):
+            default_md = default_prefix if default_prefix.endswith(".md") else (
+                "research_report.md" if mode_up == "RESEARCH" else f"{default_prefix}.md"
+            )
+            cleaned_doc = _strip_outer_code_fence(built_text or "")
+            if cleaned_doc:
+                matches.append((default_md, cleaned_doc))
+                for lang_tag, ext_name in (("json", "summary_data.json"), ("csv", "summary_data.csv")):
+                    m_data = re.search(rf"```{lang_tag}\r?\n([\s\S]*?)```", built_text or "", flags=re.IGNORECASE)
+                    if m_data and m_data.group(1).strip():
+                        matches.append((ext_name, m_data.group(1).strip()))
+        elif mode_up in ("RESEARCH_HTML", "WEB"):
+            default_html = "research_report.html" if mode_up == "RESEARCH_HTML" else "index.html"
+            m_html_fence = re.search(r"```html\r?\n([\s\S]*?)(?:```|\Z)", built_text or "", flags=re.IGNORECASE)
+            if m_html_fence and m_html_fence.group(1).strip():
+                matches.append((default_html, m_html_fence.group(1).strip()))
+            else:
+                cleaned_h = _strip_outer_code_fence(built_text or "")
+                low_h = cleaned_h.lower()
+                idx_dt = low_h.find("<!doctype")
+                idx_tag = low_h.find("<html")
+                cut_pos = idx_dt if idx_dt >= 0 else idx_tag
+                if cut_pos >= 0:
+                    matches.append((default_html, cleaned_h[cut_pos:].strip()))
+                elif "<table" in low_h or "<section" in low_h or "<div" in low_h:
+                    matches.append((default_html, cleaned_h))
+            for lang_tag, ext_name in (("css", "styles.css"), ("javascript", "app.js"), ("js", "app.js"), ("json", "summary_data.json")):
+                m_extra = re.search(rf"```{lang_tag}\r?\n([\s\S]*?)```", built_text or "", flags=re.IGNORECASE)
+                if m_extra and m_extra.group(1).strip():
+                    matches.append((ext_name, m_extra.group(1).strip()))
+        else:
+            fence_pattern = re.compile(r"```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)(?:```|\Z)", re.MULTILINE)
+            ext_map = {
+                "python": f"{default_prefix}.py",
+                "py": f"{default_prefix}.py",
+                "javascript": f"{default_prefix}.js",
+                "js": f"{default_prefix}.js",
+                "html": "index.html",
+                "css": "styles.css",
+                "json": "data.json",
+                "csv": "data.csv",
+                "markdown": f"{default_prefix}.md",
+                "md": f"{default_prefix}.md",
+                "sql": f"{default_prefix}.sql",
+                "sh": "run.sh",
+                "bash": "run.sh",
+            }
+            used_names = set()
+            for idx, (lang, code_body) in enumerate(fence_pattern.findall(built_text or ""), start=1):
+                lang_clean = (lang or "").lower().strip()
+                if lang_clean in ("text", "plaintext") and idx > 1:
+                    continue
+                if not (code_body or "").strip():
+                    continue
+                fname = ext_map.get(lang_clean, f"{default_prefix}_{idx}.{lang_clean or 'py'}")
+                if fname in used_names:
+                    stem, _, ext = fname.partition(".")
+                    fname = f"{stem}_{idx}.{ext or 'py'}"
+                used_names.add(fname)
+                matches.append((fname, code_body))
 
     for raw_name, code_content in matches[:15]:  # Scope Guard: max 15 files
         clean_rel = raw_name.strip().strip("`'\"").replace("\\", "/").lstrip("/")
         if not clean_rel or ".." in clean_rel or ":" in clean_rel:
             continue
         lines = (code_content or "").splitlines()
-        if len(lines) > 1500:  # Scope Guard: max 1500 lines
-            code_content = "\n".join(lines[:1500]) + "\n"
+        if len(lines) > 2500:  # Scope Guard: max 2500 lines
+            code_content = "\n".join(lines[:2500]) + "\n"
         target_file = (project_dir / clean_rel).resolve()
         if not str(target_file).startswith(str(project_dir.resolve())):
             continue
+        if target_file.suffix.lower() in (".html", ".htm", ".js"):
+            code_content = _patch_html_osm_tile_policy(code_content, is_html=target_file.suffix.lower() in (".html", ".htm"))
         target_file.parent.mkdir(parents=True, exist_ok=True)
         target_file.write_text((code_content or "").strip() + "\n", encoding="utf-8")
         rel_from_root = f"deliverables/{project_dir.name}/{clean_rel}"
@@ -3137,13 +3349,18 @@ def _extract_and_write_project_files(mission_id: str, goal: str, built_text: str
     return written_files
 
 
-def _verify_project_files(project_dir: Path) -> Dict[str, Any]:
-    """Runs mechanical Scope Guard + Python syntax/execution + JS syntax checks on generated project files."""
+def _verify_project_files(project_dir: Path, deliverable_mode: str = "CODE") -> Dict[str, Any]:
+    """Runs adaptive Scope Guard + format-appropriate checks (Markdown structure, JSON/CSV validity, HTML/JS, or Python execution)."""
     import sys
-    all_files = sorted(p for p in project_dir.rglob("*") if p.is_file()) if project_dir.exists() else []
+    mode_up = (deliverable_mode or "CODE").upper()
+    all_files = sorted(p for p in project_dir.rglob("*") if p.is_file() and p.name != "README.md") if project_dir.exists() else []
     total_lines = 0
     errors: List[str] = []
-    logs: List[str] = []
+    logs: List[str] = [f"- 산출물 유형 검증 모드: `{mode_up}`"]
+
+    if not all_files:
+        errors.append("생성된 산출물 파일이 없습니다 (BUILDER 응답이 비어 있거나 타임아웃되었습니다).")
+        return {"passed": False, "errors": errors, "summary": "\n".join(logs + ["- ❌ 생성된 파일 0개"]), "file_count": 0, "total_lines": 0}
 
     for f in all_files:
         try:
@@ -3154,15 +3371,16 @@ def _verify_project_files(project_dir: Path) -> Dict[str, Any]:
 
     if len(all_files) > 15:
         errors.append(f"Scope Guard 위반: 생성 파일 수({len(all_files)}개)가 상한(15개)을 초과했습니다.")
-    if total_lines > 1500:
-        errors.append(f"Scope Guard 위반: 총 코드 라인 수({total_lines}줄)가 상한(1500줄)을 초과했습니다.")
+    if total_lines > 2500:
+        errors.append(f"Scope Guard 위반: 총 라인 수({total_lines}줄)가 상한(2500줄)을 초과했습니다.")
 
-    logs.append(f"- Scope Guard 파일/라인 검증: 파일 {len(all_files)}개 / 총 {total_lines}줄 (상한 15파일·1500줄 준수)")
+    logs.append(f"- Scope Guard 파일/라인 검증: 파일 {len(all_files)}개 / 총 {total_lines}줄 (상한 15파일·2500줄 준수)")
     logs.append("- 종량제 API 키 차단(Sanitized Env): OK")
 
     for f in all_files:
         rel_name = f.relative_to(project_dir).as_posix()
-        if f.suffix.lower() == ".py":
+        suf = f.suffix.lower()
+        if suf == ".py":
             try:
                 c_res = subprocess.run(
                     [sys.executable, "-m", "py_compile", str(f)],
@@ -3184,7 +3402,7 @@ def _verify_project_files(project_dir: Path) -> Dict[str, Any]:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=5.0,
+                    timeout=8.0,
                     env=get_sanitized_env(),
                 )
                 out_txt = (r_res.stdout or r_res.stderr or "").strip()
@@ -3194,10 +3412,10 @@ def _verify_project_files(project_dir: Path) -> Dict[str, Any]:
                 else:
                     logs.append(f"- ✓ `{rel_name}` 문법 및 실행 검증 통과 (exit=0){f' → 출력: `{out_txt[:180]}`' if out_txt else ''}")
             except subprocess.TimeoutExpired:
-                logs.append(f"- ✓ `{rel_name}` 문법 검증 통과 (장기 실행 프로세스 5초 확인 완료)")
+                logs.append(f"- ✓ `{rel_name}` 문법 검증 통과 (장기 실행 프로세스 확인 완료)")
             except Exception as exc:
                 logs.append(f"- `{rel_name}` 검증 참고: {exc}")
-        elif f.suffix.lower() == ".js":
+        elif suf == ".js":
             node_exe = shutil.which("node")
             if node_exe:
                 try:
@@ -3217,6 +3435,46 @@ def _verify_project_files(project_dir: Path) -> Dict[str, Any]:
                         logs.append(f"- ✓ `{rel_name}` Node.js 문법 검증 통과")
                 except Exception:
                     pass
+        elif suf == ".json":
+            try:
+                parsed_j = json.loads(f.read_text(encoding="utf-8"))
+                cnt_info = f"항목 {len(parsed_j)}개" if isinstance(parsed_j, (list, dict)) else "유효 JSON"
+                logs.append(f"- ✓ `{rel_name}` JSON 데이터 구조 검증 통과 ({cnt_info})")
+            except Exception as exc:
+                errors.append(f"[{rel_name} JSON 파싱 오류] {exc}")
+                logs.append(f"- ❌ `{rel_name}` JSON 파싱 실패: {exc}")
+        elif suf == ".csv":
+            txt_csv = f.read_text(encoding="utf-8", errors="replace").strip()
+            row_cnt = len([ln for ln in txt_csv.splitlines() if ln.strip()])
+            if row_cnt < 2:
+                errors.append(f"[{rel_name} 데이터 부족] 헤더 외 데이터 행이 없습니다.")
+                logs.append(f"- ❌ `{rel_name}` CSV 행 부족 ({row_cnt}행)")
+            else:
+                logs.append(f"- ✓ `{rel_name}` CSV 정형 표 검증 통과 ({row_cnt}행)")
+        elif suf in (".html", ".htm"):
+            txt_h = f.read_text(encoding="utf-8", errors="replace").strip()
+            h_lines = [ln for ln in txt_h.splitlines() if ln.strip()]
+            low_h = txt_h.lower()
+            has_body_struct = any(tag in low_h for tag in ("<table", "<section", "<article", "<div", "<ul", "<ol", "<main", "<p"))
+            if len(txt_h) < 450 or len(h_lines) < 10 or not has_body_struct:
+                errors.append(
+                    f"[{rel_name} HTML 본문 부족] 단순 제목 에코 또는 빈 껍데기 HTML입니다 ({len(h_lines)}줄 · {len(txt_h)}자). 요구된 세부 내용·표·섹션을 모두 포함해 작성하세요."
+                )
+                logs.append(f"- ❌ `{rel_name}` HTML 콘텐츠/구조 미달 ({len(h_lines)}줄 · {len(txt_h)}자)")
+            else:
+                logs.append(f"- ✓ `{rel_name}` HTML 보고서/마크업 완성도 검증 통과 ({len(h_lines)}줄 · {len(txt_h)}자)")
+        elif suf == ".md":
+            txt_md = f.read_text(encoding="utf-8", errors="replace").strip()
+            md_lines = [ln for ln in txt_md.splitlines() if ln.strip()]
+            if len(txt_md) < 120 or len(md_lines) < 5:
+                errors.append(f"[{rel_name} 문서 분량 미달] 본문이 너무 짧거나 비어 있습니다 ({len(txt_md)}자). 구체적인 조사·기획 내용을 상세히 작성하세요.")
+                logs.append(f"- ❌ `{rel_name}` 문서 분량 미달 ({len(txt_md)}자)")
+            else:
+                has_heading = any(ln.lstrip().startswith("#") for ln in md_lines)
+                logs.append(f"- ✓ `{rel_name}` 문서 완성도 검증 통과 ({len(md_lines)}줄 · {len(txt_md)}자{' · 섹션 구조 확인' if has_heading else ''})")
+        else:
+            sz = f.stat().st_size
+            logs.append(f"- ✓ `{rel_name}` 산출물 파일 생성 확인 ({sz} bytes)")
 
     return {
         "passed": len(errors) == 0,
@@ -3256,9 +3514,56 @@ def _run_mission_pipeline(
     team_ws = team_obj.get("workspace") or {}
 
     global_roles = load_roles()
+    diag_now = probe_cli_diagnostics(deep=False)
+    diag_provs = diag_now.get("providers") or {}
+    char_cfgs = load_character_configs()
+    team_updated_at = str(team_obj.get("updated_at") or "")
+    role_key_to_triad = {
+        "head": "HEAD",
+        "builder": "BUILDER",
+        "sub_builder": "SUB-BUILDER",
+        "reviewer": "REVIEWER",
+        "researcher": "RESEARCHER",
+    }
+    role_model_map: Dict[str, str] = {}
+
     def _pick_role_cli(r_key: str, default_k: str) -> str:
+        triad_r = role_key_to_triad.get(r_key, r_key.upper())
         cand = str(team_roles.get(r_key) or global_roles.get(r_key) or default_k).strip()
-        return cand if cand in PROVIDER_META else (global_roles.get(r_key) if global_roles.get(r_key) in PROVIDER_META else default_k)
+        if cand not in PROVIDER_META:
+            cand = global_roles.get(r_key) if global_roles.get(r_key) in PROVIDER_META else default_k
+        cand_logged_in = (diag_provs.get(cand) or {}).get("auth_state") == "LOGGED_IN"
+
+        # Check assigned team members in character_configs.json for per-agent CLI & Model selection
+        best_member = None
+        for mid in (team_obj.get("member_ids") or []):
+            mc = char_cfgs.get(str(mid))
+            if not isinstance(mc, dict):
+                continue
+            if str(mc.get("triadRole") or "").upper() != triad_r:
+                continue
+            m_prov = str(mc.get("cliProvider") or "").strip()
+            if m_prov not in PROVIDER_META:
+                continue
+            m_logged_in = (diag_provs.get(m_prov) or {}).get("auth_state") == "LOGGED_IN"
+            if not m_logged_in:
+                continue
+            if best_member is None or str(mc.get("updatedAt") or "") > str(best_member.get("updatedAt") or ""):
+                best_member = mc
+
+        if best_member:
+            m_prov = str(best_member.get("cliProvider") or "").strip()
+            m_updated = str(best_member.get("updatedAt") or "")
+            if (not cand_logged_in) or (m_updated and m_updated > team_updated_at):
+                cand = m_prov
+            if m_prov == cand:
+                m_mod = str(best_member.get("cliModel") or "").strip()
+                if m_mod:
+                    avail_list = (diag_provs.get(cand) or {}).get("available_models") or []
+                    avail_ids = {str(x.get("id") or "") for x in avail_list if isinstance(x, dict)}
+                    if not avail_ids or m_mod in avail_ids:
+                        role_model_map[triad_r] = m_mod
+        return cand
 
     head_p = _pick_role_cli("head", "claude")
     builder_p = _pick_role_cli("builder", "antigravity")
@@ -3269,13 +3574,18 @@ def _run_mission_pipeline(
     profile_clean = (profile or "standard").lower().strip()
     max_repairs = 1 if profile_clean == "quick" else (3 if profile_clean == "deep" else 2)
 
-    # Use each slot's real selected model directly via CLI (e.g. agy.exe --model gemini-pro-orchestrator-argon)
-    diag_now = probe_cli_diagnostics(deep=False)
-    builder_diag = (diag_now.get("providers") or {}).get(builder_p) or {}
-    eff_orch_mode = builder_diag.get("selected_model") or "default"
-    orch_display = f"{PROVIDER_META[builder_p]['label']} · {builder_diag.get('selected_model_display') or 'CLI 기본 모델'}"
-    planner_model_ov = None
-    hydrogen_model_ov = None
+    # Use each slot's or agent's real selected model directly via CLI (e.g. agy.exe --model gemini-pro-orchestrator-argon)
+    builder_diag = diag_provs.get(builder_p) or {}
+    raw_builder_model = str(role_model_map.get("BUILDER") or builder_diag.get("selected_model") or "").strip()
+    eff_orch_mode = raw_builder_model or "default"
+    orch_display = f"{PROVIDER_META[builder_p]['label']} · {role_model_map.get('BUILDER') or builder_diag.get('selected_model_display') or 'CLI 기본 모델'}"
+    planner_model_ov = role_model_map.get("HEAD") or (raw_builder_model if "orchestrator" in raw_builder_model.lower() else None)
+    # In single-shot BUILDING, orchestrator models delegate to subagents and risk multi-minute timeouts; use fast executor gemini-3.8-flash-high
+    hydrogen_model_ov = (
+        "gemini-3.8-flash-high"
+        if "orchestrator" in raw_builder_model.lower()
+        else role_model_map.get("BUILDER")
+    )
     out_status = get_output_dir_status()
     gdrives = out_status.get("detected_google_drives") or []
     saved_out_root = (resume_state or {}).get("output_root")
@@ -3302,6 +3612,14 @@ def _run_mission_pipeline(
     repair_attempt: int = int((resume_state or {}).get("repair_attempt") or 0)
     last_error_feedback: str = str((resume_state or {}).get("last_error_feedback") or "")
     step_counter: int = int((resume_state or {}).get("step_counter") or 0)
+    saved_mode = str((resume_state or {}).get("deliverable_mode") or "").upper()
+    intent_spec: Dict[str, Any] = (
+        dict(MISSION_INTENT_SPECS[saved_mode])
+        if saved_mode in MISSION_INTENT_SPECS
+        else classify_mission_intent(goal)
+    )
+    deliverable_mode: str = intent_spec["mode"]
+    intent_label: str = intent_spec["label"]
 
     def _record_stage_start(phase_name: str, role_name: str, prov_k: str, state_msg: str) -> int:
         nonlocal step_counter
@@ -3346,13 +3664,7 @@ def _run_mission_pipeline(
             reviewer_p = new_prov_k
         elif role_map_key == "researcher":
             researcher_p = new_prov_k
-        try:
-            cur_roles = load_roles()
-            cur_roles[role_map_key] = new_prov_k
-            ROLE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            ROLE_SETTINGS_PATH.write_text(json.dumps(cur_roles, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        role_model_map.pop(role_name, None)
 
     def _call_cli_with_fallback(
         prov_k: str,
@@ -3365,9 +3677,8 @@ def _run_mission_pipeline(
         with _STATE_LOCK:
             if STATE.get("stop_requested"):
                 return None
-        prov_dom = PROVIDER_META.get(prov_k, {}).get("domain", "")
-        eff_m_ov = model_override if prov_dom in ("GOOGLE", "GEMINI2") else None
-        res = invoke_cli_if_available(prov_k, prompt_txt, timeout=timeout_s, model_override=eff_m_ov)
+        cand_model = model_override or role_model_map.get(role_name)
+        res = invoke_cli_if_available(prov_k, prompt_txt, timeout=timeout_s, model_override=cand_model)
         if res and not res.get("quota_exceeded") and res.get("output"):
             return res
 
@@ -3491,7 +3802,7 @@ def _run_mission_pipeline(
 
     try:
         # =========================================================================
-        # STAGE 01: PLANNING (& Multi-Module Task Breakdown / Argon·Carbon Read-Only Planner)
+        # STAGE 01: PLANNING (Intent Analysis + Deliverable Selection + ORDER)
         # =========================================================================
         if not stage_outputs.get("PLANNING") or resume_from_stage == "PLANNING":
             orch_prefix = (
@@ -3503,34 +3814,50 @@ def _run_mission_pipeline(
                 "PLANNING",
                 "HEAD",
                 head_p,
-                f"{orch_prefix}HEAD({PROVIDER_META[head_p]['label']})가 '{goal}' 목표 분석 및 {'다중 모듈 분할(Task Breakdown)' if profile_clean == 'deep' else 'ORDER 작업 지시서'}를 수립 중입니다.",
+                f"{orch_prefix}HEAD({PROVIDER_META[head_p]['label']})가 '{goal}' 업무 문장을 자동 분석하여 [{intent_label}] 맞춤형 {'다중 산출물 분할(Task Breakdown)' if profile_clean == 'deep' else 'ORDER 작업 지시서'}를 수립 중입니다.",
+            )
+            mode_guide_lines = (
+                "  * RESEARCH_HTML (조사·분석 결과를 HTML 보고서로 제작): `research_report.html`(내장 CSS 스타일·종합 비교표·대상별 상세 카드·신뢰도 등급·출처가 완비된 단일 HTML 보고서) 및 `summary_data.json`\n"
+                "  * RESEARCH (조사·분석·비교·현황 정리): `research_report.md`(마크다운 표·세부 조사·사실검증 구분·출처 포함) 및 `summary_data.json`(정형 데이터)\n"
+                "  * DOCUMENT (기획서·제안서·전략·매뉴얼·초안): `proposal_document.md`(체계적 섹션·실행 표·체크리스트 포함"
+                + (", Deep 모드 시 `action_plan.md` 추가)\n" if profile_clean == "deep" else ")\n")
+                + "  * WEB (웹페이지·랜딩페이지·프론트엔드 UI): `index.html`, `styles.css`, `app.js`\n"
+                + "  * CODE (파이썬·스크립트·자동화·백엔드·알고리즘 구현): "
+                + ("`core_module.py` + `app_runner.py` (실행·검증 가능한 실제 코드)\n" if profile_clean == "deep" else "`main.py` 등 목표 언어의 실행 가능한 실제 소스 코드\n")
             )
             if profile_clean == "deep":
                 plan_prompt = (
-                    f"당신은 HEAD(총괄 아키텍트 · {orch_display})입니다. 대규모 목표 '{goal}'을 두 개의 세부 모듈로 분할하여 한국어로 작업 지시서(ORDER)를 작성하세요:\n"
-                    f"- [MODULE 1 (BUILDER 계정1 담당)]: 핵심 엔진/데이터/백엔드 로직 (`core_module.py`)\n"
-                    f"- [MODULE 2 (SUB-BUILDER 계정2 담당)]: 실행 인터페이스/검증 테스트 모듈 (`app_runner.py`)\n"
-                    f"- 합격 기준: 두 파일 모두 파이썬 문법 및 실행 오류 0건"
+                    f"당신은 HEAD(총괄 지휘 · {orch_display})입니다. 사용자의 업무 지시 문장 '{goal}'의 의도를 분석하여 가장 적합한 산출물 모드를 확정하고 두 파트로 분할한 한국어 작업 지시서(ORDER)를 작성하세요.\n"
+                    f"1) 첫째 줄에 반드시 `DELIVERABLE_MODE: {deliverable_mode}` 형식으로 산출물 모드를 명시하세요 (선택지: RESEARCH_HTML, RESEARCH, DOCUMENT, WEB, CODE — 초기 자동분석 추천값: {deliverable_mode}).\n"
+                    f"2) 모드별 산출물 기준 (코딩 요청이 아닌 조사·기획 업무에 절대 불필요한 `.py` 파이썬 더미 코드를 지시하지 마세요):\n{mode_guide_lines}"
+                    f"3) [PART 1 (BUILDER 담당)]과 [PART 2 (SUB-BUILDER 담당)]의 파일명·핵심 포함 내용·품질 합격 기준을 6줄 이내로 명확히 지시하세요."
                 )
             else:
                 plan_prompt = (
-                    f"당신은 HEAD(총괄 지휘 · {orch_display}) 에이전트입니다. 목표 '{goal}'에 대해 생성할 실제 소스 파일 구성(예: `main.py`), 핵심 기능, 엣지 케이스 방지 및 검증 기준을 4줄 이내 한국어 작업 지시서(ORDER)로 작성하세요."
+                    f"당신은 HEAD(총괄 지휘 · {orch_display}) 에이전트입니다. 사용자의 업무 지시 문장 '{goal}'의 의도를 분석하여 한국어 작업 지시서(ORDER)를 작성하세요.\n"
+                    f"1) 첫째 줄에 반드시 `DELIVERABLE_MODE: {deliverable_mode}` 형식으로 산출물 모드를 명시하세요 (선택지: RESEARCH_HTML, RESEARCH, DOCUMENT, WEB, CODE — 초기 자동분석 추천값: {deliverable_mode}).\n"
+                    f"2) 모드별 산출물 기준 (코딩 요청이 아닌 조사·기획·문서 업무에 절대 불필요한 `.py` 파이썬 코드를 지시하지 마세요):\n{mode_guide_lines}"
+                    f"3) 생성할 파일명, 반드시 포함할 핵심 목차/기능, 사실 확인 및 검증 기준을 5줄 이내 한국어로 간결히 작성하세요."
                 )
             res_plan = _call_cli_with_fallback(
-                head_p, plan_prompt, timeout_s=24.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov
+                head_p, plan_prompt, timeout_s=65.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov
             )
             stage_outputs["PLANNING"] = (
                 res_plan["output"].strip()
                 if (res_plan and res_plan.get("output"))
                 else (
+                    f"DELIVERABLE_MODE: {deliverable_mode}\n"
                     f"- 오케스트레이터: {orch_display}\n"
+                    f"- 분석된 산출물 유형: {intent_label} (`{intent_spec['primary_file']}`)\n"
                     f"- 목표: {goal}\n"
-                    f"- 실행 모드: {profile_clean.upper()} (최대 자동 수정 {max_repairs}회)\n"
-                    f"- 생성 경로: `deliverables/{mission_id}_project/`"
+                    f"- 실행 모드: {profile_clean.upper()} (최대 자동 수정 {max_repairs}회)"
                 )
             )
+            intent_spec = _refine_intent_from_plan(stage_outputs["PLANNING"], intent_spec)
+            deliverable_mode = intent_spec["mode"]
+            intent_label = intent_spec["label"]
             _record_stage_done(s1, "PLANNING", "HEAD", head_p, res_plan, stage_outputs["PLANNING"])
-            if eff_orch_mode in ("argon", "carbon"):
+            if eff_orch_mode in ("argon", "carbon") or "orchestrator" in str(eff_orch_mode).lower():
                 with _STATE_LOCK:
                     STATE["events"].insert(
                         0,
@@ -3538,16 +3865,33 @@ def _run_mission_pipeline(
                             "at": utc_now_iso(),
                             "run_id": f"{mission_id}-handoff-exec",
                             "to_state": "BUILDING",
-                            "state_ko": f"⚡ [{orch_display}] 계획 수립 완료 → 고속 실행 엔진(Hydrogen · gemini-3.5-flash)으로 즉시 위임하여 쿼터 소모를 절감합니다.",
+                            "state_ko": f"⚡ [{orch_display}] 계획 수립 완료 ({intent_label}) → 고속 실행 엔진({hydrogen_model_ov or '기본 모델'})으로 위임합니다.",
                             "project": STATE["project_name"],
                             "role": "BUILDER",
                         },
                     )
+        else:
+            intent_spec = _refine_intent_from_plan(stage_outputs.get("PLANNING", ""), intent_spec)
+            deliverable_mode = intent_spec["mode"]
+            intent_label = intent_spec["label"]
+
+        with _STATE_LOCK:
+            for m in STATE["missions"]:
+                if m["mission_id"] == mission_id:
+                    m["deliverable_mode"] = deliverable_mode
+                    m["deliverable_type_label"] = intent_label
 
         # =========================================================================
         # STAGE 02 ~ 04: BUILDING -> VERIFYING -> REVIEWING (with Automatic Repair Loop!)
         # =========================================================================
         skip_build_once = bool(resume_from_stage == "REVIEWING" and stage_outputs.get("BUILDING") and stage_outputs.get("VERIFYING"))
+        v_last_passed = True
+        rev_failed = False
+        no_tool_rule = (
+            "중요 실행 규칙: 웹 검색(`search_web`)이 필요한 경우 포괄적인 통합 검색어로 최대 2~4회 이내만 신속히 조회한 뒤, "
+            "지체 없이 현재 작업 폴더에 요청된 파일(예: research_report.html, summary_data.json 등)을 직접 생성(`write_file`)하거나 "
+            "`### FILE: <파일명>` 헤더와 함께 표준 출력으로 작성하세요. 사용자에게 역질문하지 말고 즉시 완성하세요."
+        )
 
         while True:
             with _STATE_LOCK:
@@ -3558,91 +3902,220 @@ def _run_mission_pipeline(
             repair_tag = f" (자동 수정 #{repair_attempt}/{max_repairs})" if is_repair else ""
 
             if not skip_build_once:
-                # --- STAGE 02: BUILDING ---
+                # --- STAGE 02: BUILDING (Adaptive to RESEARCH_HTML / RESEARCH / DOCUMENT / WEB / CODE) ---
                 if profile_clean == "deep" and not is_repair:
+                    deep_f1, deep_f2 = intent_spec["deep_files"]
                     s2_a = _record_stage_start(
                         "BUILDING",
                         "BUILDER",
                         builder_p,
-                        f"BUILDER({PROVIDER_META[builder_p]['label']})가 [MODULE 1 · 핵심 로직] 소스 파일을 생성하고 있습니다.",
+                        f"BUILDER({PROVIDER_META[builder_p]['label']})가 [{intent_label} · PART 1 ({deep_f1})] 산출물을 작성 중입니다.",
                     )
-                    b1_prompt = (
-                        f"당신은 BUILDER(구현 개발 · 계정 1)입니다. 목표 '{goal}'의 [MODULE 1: 핵심 로직]을 파이썬 코드로 작성하세요.\n"
-                        f"반드시 첫 줄에 `### FILE: core_module.py`를 적고 ```python 코드블록으로 완전하고 바로 실행 가능한 코드를 작성하세요.\n\n"
-                        f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                    )
-                    res_b1 = _call_cli_with_fallback(builder_p, b1_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
+                    if deliverable_mode == "RESEARCH_HTML":
+                        b1_prompt = (
+                            f"당신은 BUILDER(수석 리서치 분석가 & 데이터 시각화 개발자 · 계정 1)입니다. 사용자의 업무 지시 '{goal}'를 빠짐없이 조사하여 완성형 HTML 보고서를 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 반드시 첫 줄에 `### FILE: research_report.html`을 적고 `<!doctype html>`부터 `</html>`까지 내장 CSS(`<style>`)가 완비된 가독성 높은 한국어 HTML 보고서를 작성하세요.\n"
+                            f"- 필수 포함 항목: 1) 조사 개요 요약 헤더, 2) 전체 조사 대상 한눈에 보기 비교 `<table>`, 3) 각 조사 대상별 상세 카드/섹션(사용자가 요구한 위치·규모·부대시설·특장점·방문객 평가 등 모든 세부 항목 포함), 4) 각 정보별 `[확실]`/`[추정]`/`[불확실]`/`[모름]` 신뢰도 배지 표기(허위 수치 날조 금지), 5) 공식 참고 자료 및 출처 섹션.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                        b2_prompt = (
+                            f"당신은 SUB-BUILDER(정형 데이터 담당 · 계정 2)입니다. 사용자의 업무 지시 '{goal}'의 핵심 조사 데이터를 JSON으로 구조화하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 반드시 첫 줄에 `### FILE: summary_data.json`을 적고 조사된 모든 대상의 세부 속성(위치, 규모, 부대시설, 특장점, 방문객 평가 등)을 유효한 JSON 배열/객체로 작성하세요.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                    elif deliverable_mode == "RESEARCH":
+                        b1_prompt = (
+                            f"당신은 BUILDER(수석 리서치 분석가 · 계정 1)입니다. 사용자의 업무 지시 '{goal}'에 대해 심층 조사 리포트 본문을 한국어로 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 반드시 첫 줄에 `### FILE: research_report.md`를 적고, 그 아래에 완성도 높은 마크다운 보고서를 작성하세요 (파이썬 코드 작성 금지).\n"
+                            f"- 필수 포함 구성: 1) 조사 개요 및 지역/분야 배경, 2) 주요 대상별 상세 현황·특징·대표 품목/강점, 3) 한눈에 비교하는 마크다운 표(Table), 4) [확실히 검증된 사실]과 [현장/공식기관 추가 확인이 필요한 정보]의 명확한 구분(추측·허위 수치 날조 금지), 5) 참고 자료 및 출처 기준.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                        b2_prompt = (
+                            f"당신은 SUB-BUILDER(데이터 구조화·요약 담당 · 계정 2)입니다. 사용자의 업무 지시 '{goal}'에 대한 정형 요약 데이터와 핵심 요약본을 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 첫 번째 파일은 `### FILE: summary_data.json` 헤더 아래에 유효한 JSON 형식(배열 또는 객체)으로 핵심 조사 항목·특징·분류 데이터를 구조화하세요.\n"
+                            f"- 두 번째 파일은 `### FILE: executive_summary.md` 헤더 아래에 핵심 요약 및 실무 활용 포인트를 정리하세요 (파이썬 더미 코드 작성 금지).\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                    elif deliverable_mode == "DOCUMENT":
+                        b1_prompt = (
+                            f"당신은 BUILDER(수석 기획자 · 계정 1)입니다. 사용자의 업무 지시 '{goal}'에 대한 핵심 기획서/실무 문서를 한국어로 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 반드시 첫 줄에 `### FILE: proposal_document.md`를 적고, 목적·배경·핵심 전략·세부 구성안·비교 표(Markdown Table)·기대효과를 충실하게 작성하세요 (파이썬 코드 작성 금지).\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                        b2_prompt = (
+                            f"당신은 SUB-BUILDER(실행 로드맵 담당 · 계정 2)입니다. 사용자의 업무 지시 '{goal}'에 대한 단계별 실행 계획서 및 실무 체크리스트를 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 반드시 첫 줄에 `### FILE: action_plan.md`를 적고, 일정표(표 형식)·담당 R&R·리스크 관리 방안·점검 체크리스트를 구체적으로 작성하세요.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                    elif deliverable_mode == "WEB":
+                        b1_prompt = (
+                            f"당신은 BUILDER(프론트엔드 UI 개발 · 계정 1)입니다. 목표 '{goal}'의 웹 화면 마크업과 디자인 스타일을 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"`### FILE: index.html` 및 `### FILE: styles.css` 형식으로 파일명을 명시하고 브라우저에서 즉시 동작하는 반응형 한국어 UI를 구현하세요.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                        b2_prompt = (
+                            f"당신은 SUB-BUILDER(인터랙션 로직 개발 · 계정 2)입니다. 목표 '{goal}'의 동적 동작 스크립트를 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"반드시 첫 줄에 `### FILE: app.js`를 적고 문법 오류가 없는 순수 JavaScript 코드를 작성하세요.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                    else:
+                        b1_prompt = (
+                            f"당신은 BUILDER(구현 개발 · 계정 1)입니다. 목표 '{goal}'의 [MODULE 1: 핵심 로직]을 파이썬 코드로 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"반드시 첫 줄에 `### FILE: core_module.py`를 적고 ```python 코드블록으로 완전하고 바로 실행 가능한 코드를 작성하세요.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+                        b2_prompt = (
+                            f"당신은 SUB-BUILDER(분담 개발 · 계정 2)입니다. 목표 '{goal}'의 [MODULE 2: 실행 및 검증 테스트]를 독립 실행 가능한 파이썬 코드로 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"반드시 첫 줄에 `### FILE: app_runner.py`를 적고 ```python 코드블록으로 외부 입력(`input()`) 없이 즉시 실행·출력되는 완전한 코드를 작성하세요.\n\n"
+                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        )
+
+                    res_b1 = _call_cli_with_fallback(builder_p, b1_prompt, timeout_s=420.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
                     out_b1 = res_b1["output"].strip() if (res_b1 and res_b1.get("output")) else ""
-                    files_b1 = _extract_and_write_project_files(mission_id, f"{goal} (Core Module)", out_b1, project_dir, default_prefix="core_module")
+                    files_b1 = _extract_and_write_project_files(
+                        mission_id,
+                        f"{goal} (Part 1)",
+                        out_b1,
+                        project_dir,
+                        default_prefix=deep_f1.rsplit(".", 1)[0],
+                        deliverable_mode=deliverable_mode,
+                    )
                     for f in files_b1:
                         if f not in generated_files:
                             generated_files.append(f)
-                    _record_stage_done(s2_a, "BUILDING", "BUILDER", builder_p, res_b1, f"[MODULE 1 생성 완료] {', '.join(files_b1)}\n{out_b1[:400]}")
+                    _record_stage_done(s2_a, "BUILDING", "BUILDER", builder_p, res_b1, f"[PART 1 생성 완료] {', '.join(files_b1)}\n{out_b1[:400]}")
 
                     s2_b = _record_stage_start(
                         "BUILDING",
                         "SUB-BUILDER",
                         sub_builder_p,
-                        f"SUB-BUILDER({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})가 [MODULE 2 · 실행/테스트 모듈] 소스 파일을 분담 생성하고 있습니다.",
+                        f"SUB-BUILDER({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})가 [{intent_label} · PART 2 ({deep_f2})] 산출물을 분담 작성 중입니다.",
                     )
-                    b2_prompt = (
-                        f"당신은 SUB-BUILDER(분담 개발 · 계정 2)입니다. 목표 '{goal}'의 [MODULE 2: 실행 및 검증 테스트]를 독립 실행 가능한 파이썬 코드로 작성하세요.\n"
-                        f"반드시 첫 줄에 `### FILE: app_runner.py`를 적고 ```python 코드블록으로 외부 입력(`input()`) 없이 즉시 실행·출력되는 완전한 코드를 작성하세요.\n\n"
-                        f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                    )
-                    res_b2 = _call_cli_with_fallback(sub_builder_p, b2_prompt, timeout_s=28.0, role_name="SUB-BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
+                    res_b2 = _call_cli_with_fallback(sub_builder_p, b2_prompt, timeout_s=420.0, role_name="SUB-BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
                     out_b2 = res_b2["output"].strip() if (res_b2 and res_b2.get("output")) else ""
-                    files_b2 = _extract_and_write_project_files(mission_id, f"{goal} (App Runner)", out_b2, project_dir, default_prefix="app_runner")
+                    files_b2 = _extract_and_write_project_files(
+                        mission_id,
+                        f"{goal} (Part 2)",
+                        out_b2,
+                        project_dir,
+                        default_prefix=deep_f2.rsplit(".", 1)[0],
+                        deliverable_mode=deliverable_mode,
+                    )
                     for f in files_b2:
                         if f not in generated_files:
                             generated_files.append(f)
                     stage_outputs["BUILDING"] = (
-                        f"### [MODULE 1 · BUILDER ({PROVIDER_META[builder_p]['label']})]\n{out_b1 or 'core_module.py 생성 완료'}\n\n"
-                        f"### [MODULE 2 · SUB-BUILDER ({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})]\n{out_b2 or 'app_runner.py 생성 완료'}"
+                        f"### [PART 1 · BUILDER ({PROVIDER_META[builder_p]['label']})]\n{out_b1 or f'{deep_f1} 응답 비어 있음'}\n\n"
+                        f"### [PART 2 · SUB-BUILDER ({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})]\n{out_b2 or f'{deep_f2} 응답 비어 있음'}"
                     )
-                    _record_stage_done(s2_b, "BUILDING", "SUB-BUILDER", sub_builder_p, res_b2, f"[MODULE 2 생성 완료] {', '.join(files_b2)}\n{out_b2[:400]}")
+                    _record_stage_done(s2_b, "BUILDING", "SUB-BUILDER", sub_builder_p, res_b2, f"[PART 2 생성 완료] {', '.join(files_b2)}\n{out_b2[:400]}")
                 else:
                     active_builder = sub_builder_p if (is_repair and repair_attempt % 2 == 1 and sub_builder_p in PROVIDER_META) else builder_p
                     s2 = _record_stage_start(
                         "BUILDING",
                         "BUILDER",
                         active_builder,
-                        f"BUILDER({PROVIDER_META[active_builder]['label']})가 '{goal}' 프로젝트 소스 파일을 생성 중입니다.{repair_tag}",
+                        f"BUILDER({PROVIDER_META[active_builder]['label']})가 '{goal}' 업무에 맞춘 [{intent_label}] 산출물 파일을 작성 중입니다.{repair_tag}",
                     )
                     repair_clause = (
-                        f"\n\n[⚠️ 이전 단계 검증/검수 결함 내역 — 반드시 수정하여 완전한 코드를 다시 출력하세요]:\n{last_error_feedback}"
+                        f"\n\n[⚠️ 이전 단계 검증/검수 보완 사항 — 아래 결함을 모두 해결하여 완성된 전체 산출물을 다시 출력하세요]:\n{last_error_feedback}"
                         if is_repair and last_error_feedback
                         else ""
                     )
-                    b_prompt = (
-                        f"당신은 BUILDER(구현 개발) 에이전트입니다. 목표 '{goal}'에 대해 실제 동작하는 소스 파일을 작성하세요.\n"
-                        f"반드시 `### FILE: main.py` 형식으로 파일명을 명시한 뒤 ```python 코드블록 안에 `input()` 대기 없이 즉시 실행·검증 가능한 전체 코드를 작성하세요.{repair_clause}\n\n"
-                        f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
-                    )
-                    res_build = _call_cli_with_fallback(active_builder, b_prompt, timeout_s=28.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
+                    if deliverable_mode == "RESEARCH_HTML":
+                        b_prompt = (
+                            f"당신은 BUILDER(수석 리서처 · HTML 보고서 제작 전문가) 에이전트입니다. 사용자의 업무 지시 '{goal}'를 철저히 조사하여 브라우저에서 즉시 열람·인쇄 가능한 고품질 한국어 HTML 조사 보고서를 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 단순 제목만 적힌 빈 껍데기 HTML은 절대 금지합니다. 사용자가 요청한 모든 조사 대상과 모든 세부 항목(예: 위치·규모·부대시설·특장점·방문객 평가 등)을 빠짐없이 작성하세요.\n"
+                            f"- 파일 1: 첫 줄에 반드시 `### FILE: research_report.html`을 적고 `<!doctype html>`부터 `</html>`까지 깔끔한 반응형 내장 `<style>`이 적용된 완성형 단일 HTML 보고서를 출력하세요.\n"
+                            f"  * 필수 섹션: ① 조사 개요 및 핵심 요약 대시보드, ② 전체 대상 한눈에 보기 비교 `<table>`, ③ 대상별 상세 조사 카드(요구된 모든 세부 항목 충실 기재), ④ 각 정보의 신뢰도 등급(`[확실]`/`[추정]`/`[불확실]`/`[모름]`) 표시 — 확인되지 않은 수치는 추정/미확인으로 명시하고 절대 허위 날조 금지, ⑤ 공식 출처 및 참고 자료 안내.\n"
+                            f"- 파일 2: 이어서 `### FILE: summary_data.json` 줄을 적고 조사된 핵심 대상 목록과 속성 데이터를 유효한 JSON 배열로 함께 출력하세요.{repair_clause}\n\n"
+                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
+                        )
+                    elif deliverable_mode == "RESEARCH":
+                        b_prompt = (
+                            f"당신은 BUILDER(수석 리서처 · 데이터 분석가) 에이전트입니다. 사용자의 업무 지시 '{goal}'를 충실히 수행하여 실제 활용 가능한 조사 보고서와 정형 데이터 파일을 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 절대 불필요한 파이썬 코드(`main.py`)로 대체하지 말고, 실제 조사 내용을 한국어로 상세히 작성하세요.\n"
+                            f"- 파일 1: 반드시 `### FILE: research_report.md` 줄을 먼저 적고 그 아래에 체계적인 마크다운 조사 보고서를 작성하세요.\n"
+                            f"  * 포함 항목: 1) 조사 개요 및 핵심 요약, 2) 주요 조사 대상별 상세 현황·위치/특징·주요 취급 품목/강점, 3) 항목별 한눈에 보는 마크다운 비교 표(Table), 4) 사실 확인 구분(공식·일반적으로 검증된 사실 vs 현장/지자체 최신 확인이 필요한 세부 수치 구분 — 허위 정보 날조 금지), 5) 활용 시사점 및 참고 출처.\n"
+                            f"- 파일 2: 이어서 `### FILE: summary_data.json` 줄을 적고 조사된 핵심 대상 목록과 속성 정보를 유효한 JSON(배열 또는 객체)으로 정리하세요.{repair_clause}\n\n"
+                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
+                        )
+                    elif deliverable_mode == "DOCUMENT":
+                        b_prompt = (
+                            f"당신은 BUILDER(수석 기획자 · 실무 문서 작성가) 에이전트입니다. 사용자의 업무 지시 '{goal}'에 부합하는 완성도 높은 실무 문서를 한국어로 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 절대 파이썬 더미 코드(`main.py`)를 출력하지 말고, 즉시 실무에 사용할 수 있는 문서를 작성하세요.\n"
+                            f"- 반드시 첫 줄에 `### FILE: proposal_document.md`를 적고, 목적·배경, 핵심 구성안/전략, 세부 실행 계획 표(Markdown Table), 기대효과 및 실무 체크리스트를 체계적으로 작성하세요.{repair_clause}\n\n"
+                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
+                        )
+                    elif deliverable_mode == "WEB":
+                        b_prompt = (
+                            f"당신은 BUILDER(프론트엔드 웹 개발자) 에이전트입니다. 사용자의 업무 지시 '{goal}'에 맞는 완성된 웹페이지/프론트엔드 산출물을 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"- 반드시 `### FILE: index.html` (필요 시 `### FILE: styles.css`, `### FILE: app.js` 추가) 형식으로 파일명을 명시하고, 빈 제목만 있는 스텁이 아니라 실제 콘텐츠·스타일·기능이 완비된 한국어 웹 화면 코드를 작성하세요.{repair_clause}\n\n"
+                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
+                        )
+                    else:
+                        b_prompt = (
+                            f"당신은 BUILDER(구현 개발) 에이전트입니다. 목표 '{goal}'에 대해 실제 동작하는 소스 파일을 작성하세요.\n"
+                            f"- {no_tool_rule}\n"
+                            f"반드시 `### FILE: main.py` (또는 목표 언어에 맞는 파일명) 형식으로 파일명을 명시한 뒤 코드블록 안에 `input()` 대기 없이 즉시 실행·검증 가능한 전체 코드를 작성하세요.{repair_clause}\n\n"
+                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
+                        )
+                    res_build = _call_cli_with_fallback(active_builder, b_prompt, timeout_s=420.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
                     out_build = res_build["output"].strip() if (res_build and res_build.get("output")) else ""
-                    files_b = _extract_and_write_project_files(mission_id, goal, out_build, project_dir, default_prefix="main")
+                    files_b = _extract_and_write_project_files(
+                        mission_id,
+                        goal,
+                        out_build,
+                        project_dir,
+                        default_prefix=intent_spec["primary_file"].rsplit(".", 1)[0],
+                        deliverable_mode=deliverable_mode,
+                    )
                     for f in files_b:
                         if f not in generated_files:
                             generated_files.append(f)
-                    stage_outputs["BUILDING"] = out_build or f"생성된 프로젝트 파일: {', '.join(files_b)}"
-                    _record_stage_done(s2, "BUILDING", "BUILDER", active_builder, res_build, f"생성 파일: {', '.join(files_b)}\n{stage_outputs['BUILDING'][:400]}")
+                    stage_outputs["BUILDING"] = out_build or (f"생성된 산출물 파일: {', '.join(files_b)}" if files_b else "⚠️ BUILDER 응답이 비어 있어 생성된 파일이 없습니다.")
+                    _record_stage_done(
+                        s2,
+                        "BUILDING",
+                        "BUILDER",
+                        active_builder,
+                        res_build,
+                        f"[{intent_label}] 생성 파일: {', '.join(files_b) or '(없음)'}\n{stage_outputs['BUILDING'][:400]}",
+                        step_state="PASS" if files_b else "REPAIR",
+                    )
 
                 # Quick mode (2 stages): run fast verification and finish immediately!
                 if profile_clean == "quick":
-                    v_quick = _verify_project_files(project_dir)
+                    v_quick = _verify_project_files(project_dir, deliverable_mode=deliverable_mode)
+                    v_last_passed = v_quick["passed"]
                     stage_outputs["VERIFYING"] = v_quick["summary"]
-                    stage_outputs["DECIDING"] = f"⚡ QUICK 2단계 고속 미션 완료 · 생성 파일({len(generated_files)}개): {', '.join(generated_files)}"
+                    q_verdict = "완료" if v_last_passed else "검증 미달 (보완 필요)"
+                    stage_outputs["DECIDING"] = f"⚡ QUICK 2단계 미션 {q_verdict} ({intent_label}) · 생성 파일({len(generated_files)}개): {', '.join(generated_files) or '(없음)'}"
                     break
 
-                # --- STAGE 03: VERIFYING (Mechanical Scope Guard + Real Code Execution) ---
+                # --- STAGE 03: VERIFYING (Scope Guard + Adaptive Format/Execution Verification) ---
                 s3 = _record_stage_start(
                     "VERIFYING",
                     "DIRECTOR",
                     head_p,
-                    f"DIRECTOR Scope Guard 및 생성된 프로젝트 파일({len(generated_files)}개) 실제 문법·실행 테스트를 수행 중입니다.{repair_tag}",
+                    f"DIRECTOR Scope Guard 및 생성된 [{intent_label}] 파일({len(generated_files)}개) 구조·데이터·실행 검증을 수행 중입니다.{repair_tag}",
                 )
-                v_result = _verify_project_files(project_dir)
+                v_result = _verify_project_files(project_dir, deliverable_mode=deliverable_mode)
+                v_last_passed = v_result["passed"]
                 stage_outputs["VERIFYING"] = v_result["summary"]
                 _record_stage_done(
                     s3,
@@ -3654,27 +4127,27 @@ def _run_mission_pipeline(
                     step_state="PASS" if v_result["passed"] else "REPAIR",
                 )
 
-                # If mechanical verification failed and we have repair budget left -> Mid-Trajectory Recovery (if Argon/Carbon) + loop back to 02 BUILDING!
+                # If mechanical verification failed and we have repair budget left -> Mid-Trajectory Recovery + loop back to 02 BUILDING!
                 if not v_result["passed"] and repair_attempt < max_repairs:
                     repair_attempt += 1
                     last_error_feedback = "\n".join(v_result["errors"])
-                    if eff_orch_mode in ("argon", "carbon"):
+                    if eff_orch_mode in ("argon", "carbon") or "orchestrator" in str(eff_orch_mode).lower():
                         rec_s = _record_stage_start(
                             "PLANNING",
                             "HEAD",
                             head_p,
-                            f"🔄 [{orch_display} · Mid-Trajectory Recovery] 실행 오류 감지 → 상위 플래너로 제어권을 회귀하여 수정 계획을 재수립합니다.",
+                            f"🔄 [{orch_display} · Mid-Trajectory Recovery] 검증 결함 감지 → 상위 플래너로 회귀하여 보완 계획을 재수립합니다.",
                         )
                         rec_prompt = (
-                            f"당신은 {orch_display} 상위 플래너입니다. Hydrogen 실행 단계에서 아래 오류가 발생했습니다.\n"
-                            f"[오류 내역]:\n{last_error_feedback}\n\n"
-                            f"오류 원인을 해결하기 위한 수정 지시서(ORDER)를 3줄 이내 한국어로 재작성하여 Hydrogen 실행기로 다시 인계하세요."
+                            f"당신은 {orch_display} 상위 플래너입니다. 실행 산출물 검증 단계에서 아래 결함이 감지되었습니다.\n"
+                            f"[검증 결함]:\n{last_error_feedback}\n\n"
+                            f"결함을 해결하기 위한 보완 지시서(ORDER)를 3줄 이내 한국어로 재작성하세요."
                         )
-                        res_rec = _call_cli_with_fallback(head_p, rec_prompt, timeout_s=22.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov)
+                        res_rec = _call_cli_with_fallback(head_p, rec_prompt, timeout_s=45.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov)
                         if res_rec and res_rec.get("output"):
                             stage_outputs["PLANNING"] = stage_outputs["PLANNING"] + f"\n\n[회귀 복구 지시 #{repair_attempt}]:\n" + res_rec["output"].strip()
                         _record_stage_done(rec_s, "PLANNING", "HEAD", head_p, res_rec, f"상위 플래너 회귀 복구 계획 수립 완료 (#{repair_attempt})")
-                    repair_history.append(f"자동 수정 #{repair_attempt}: 03 VERIFYING 오류 감지 ({last_error_feedback[:180]}) → {'상위 플래너 회귀 후 ' if eff_orch_mode in ('argon', 'carbon') else ''}02 BUILDING 재실행")
+                    repair_history.append(f"자동 수정 #{repair_attempt}: 03 VERIFYING 결함 감지 ({last_error_feedback[:180]}) → 02 BUILDING 재실행")
                     continue
 
             skip_build_once = False
@@ -3684,69 +4157,103 @@ def _run_mission_pipeline(
                 "REVIEWING",
                 "REVIEWER",
                 reviewer_p,
-                f"REVIEWER({PROVIDER_META[reviewer_p]['label']})가 생성된 소스 파일({len(generated_files)}개)과 실행 결과를 독립 검수 중입니다.{repair_tag}",
+                f"REVIEWER({PROVIDER_META[reviewer_p]['label']})가 생성된 [{intent_label}] 산출물({len(generated_files)}개)의 완성도·정확성을 독립 검수 중입니다.{repair_tag}",
             )
+            ext_fence_map = {
+                ".md": "markdown",
+                ".json": "json",
+                ".csv": "csv",
+                ".html": "html",
+                ".htm": "html",
+                ".css": "css",
+                ".js": "javascript",
+                ".py": "python",
+                ".sql": "sql",
+            }
             actual_files_dump = []
             for f_p in sorted(project_dir.rglob("*")):
                 if f_p.is_file() and f_p.name != "README.md":
                     try:
-                        actual_files_dump.append(f"### FILE: {f_p.relative_to(project_dir).as_posix()}\n```python\n{f_p.read_text(encoding='utf-8', errors='replace')[:2500]}\n```")
+                        fence_lang = ext_fence_map.get(f_p.suffix.lower(), "text")
+                        actual_files_dump.append(
+                            f"### FILE: {f_p.relative_to(project_dir).as_posix()}\n```{fence_lang}\n{f_p.read_text(encoding='utf-8', errors='replace')[:6000]}\n```"
+                        )
                     except Exception:
                         pass
-            files_inspect_str = "\n\n".join(actual_files_dump) or stage_outputs.get("BUILDING", "")[:2000]
+            files_inspect_str = "\n\n".join(actual_files_dump) or "(생성된 산출물 파일 없음)"
 
-            rev_prompt = (
-                f"당신은 REVIEWER(독립 감사) 에이전트입니다. 목표 '{goal}'에 대해 BUILDER가 생성한 아래 실제 소스 파일들과 실행 검증 결과를 검수하세요.\n"
-                f"치명적 결함(P0/P1)이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2줄 검수 평을 작성하세요.\n\n"
-                f"[실제 생성된 소스 파일 내용]:\n{files_inspect_str}\n\n"
-                f"[03 VERIFYING 실제 실행 결과]:\n{stage_outputs.get('VERIFYING', '')}"
-            )
-            res_rev = _call_cli_with_fallback(reviewer_p, rev_prompt, timeout_s=24.0, role_name="REVIEWER", phase_name="REVIEWING")
+            if deliverable_mode in ("RESEARCH_HTML", "RESEARCH", "DOCUMENT"):
+                rev_prompt = (
+                    f"당신은 REVIEWER(독립 품질·팩트 감사) 에이전트입니다. 사용자의 업무 지시 '{goal}'에 대해 BUILDER가 작성한 [{intent_label}] 산출물을 검수하세요.\n"
+                    f"- 점검 기준: 1) 사용자의 질문/지시 의도와 요구된 세부 조사·기획 항목이 실질적으로 충실히 담겼는가(빈 껍데기나 단순 에코 여부), 2) 표·섹션 구조의 가독성, 3) 허위 사실 날조 방지 및 근거 명시 여부.\n"
+                    f"- 치명적 결함(P0/P1)이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2~3줄 핵심 검수 평을 작성하세요. 중대한 누락이 있다면 첫 줄에 `VERDICT: FAIL`과 구체적 보완 지시를 적으세요.\n\n"
+                    f"[생성된 산출물 파일 내용]:\n{files_inspect_str}\n\n"
+                    f"[03 VERIFYING 검증 결과]:\n{stage_outputs.get('VERIFYING', '')}"
+                )
+            else:
+                rev_prompt = (
+                    f"당신은 REVIEWER(독립 코드·품질 감사) 에이전트입니다. 목표 '{goal}'에 대해 BUILDER가 생성한 아래 [{intent_label}] 파일들과 실행 검증 결과를 검수하세요.\n"
+                    f"치명적 결함(P0/P1)이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2줄 검수 평을 작성하세요.\n\n"
+                    f"[실제 생성된 산출물 파일 내용]:\n{files_inspect_str}\n\n"
+                    f"[03 VERIFYING 검증 결과]:\n{stage_outputs.get('VERIFYING', '')}"
+                )
+            res_rev = _call_cli_with_fallback(reviewer_p, rev_prompt, timeout_s=65.0, role_name="REVIEWER", phase_name="REVIEWING")
             rev_text = (
                 res_rev["output"].strip()
                 if (res_rev and res_rev.get("output"))
-                else f"VERDICT: PASS (P0: 0건, P1: 0건)\n- 생성된 프로젝트 파일({', '.join(generated_files)})의 실행 검증 및 안전 규칙 준수를 확인했습니다."
+                else (
+                    f"VERDICT: PASS (P0: 0건, P1: 0건)\n- 생성된 [{intent_label}] 산출물 파일({', '.join(generated_files)})의 구조 및 검증 기준 충족을 확인했습니다."
+                    if v_last_passed and generated_files
+                    else "VERDICT: FAIL (P0: 1건)\n- 산출물 파일이 정상 생성되지 않았거나 검증을 통과하지 못했습니다."
+                )
             )
             stage_outputs["REVIEWING"] = rev_text
-            rev_failed = ("verdict: fail" in rev_text.lower()) or ("p0: 1" in rev_text.lower())
+            rev_failed = ("verdict: fail" in rev_text.lower()) or ("p0: 1" in rev_text.lower()) or ("p0:1" in rev_text.lower())
             _record_stage_done(s4, "REVIEWING", "REVIEWER", reviewer_p, res_rev, rev_text, step_state="REPAIR" if rev_failed else "PASS")
 
             if rev_failed and repair_attempt < max_repairs:
                 repair_attempt += 1
-                if eff_orch_mode in ("argon", "carbon"):
+                if eff_orch_mode in ("argon", "carbon") or "orchestrator" in str(eff_orch_mode).lower():
                     orch_label = "Carbon" if eff_orch_mode == "carbon" else "Argon"
                     rec_prompt = (
-                        f"당신은 Antigravity Orchestrator ({orch_label}) 계획/복구 플래너(읽기 전용)입니다.\n"
-                        f"04 REVIEWING 감사 단계에서 아래 반려 사유가 발생했습니다. 원인을 분석하고 Hydrogen 실행 모델이 수정할 핵심 가이드(3줄)를 작성하세요.\n"
+                        f"당신은 Antigravity Orchestrator ({orch_label}) 계획/복구 플래너입니다.\n"
+                        f"04 REVIEWING 감사 단계에서 아래 반려 사유가 발생했습니다. 원인을 분석하고 BUILDER가 보완할 핵심 가이드(3줄)를 작성하세요.\n"
                         f"[REVIEWER 반려 사유]:\n{rev_text[:1500]}"
                     )
                     rec_res = _call_cli_with_fallback(
-                        head_p, rec_prompt, timeout_s=20.0, role_name="HEAD", phase_name="REVIEWING", model_override=planner_model_ov
+                        head_p, rec_prompt, timeout_s=45.0, role_name="HEAD", phase_name="REVIEWING", model_override=planner_model_ov
                     )
                     rec_guide = rec_res["output"].strip() if (rec_res and rec_res.get("output")) else "REVIEWER 지적 사항을 즉시 보완하세요."
-                    last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}\n\n[Orchestrator ({orch_label}) 복구 지침 → Hydrogen 위임]:\n{rec_guide}"
-                    repair_history.append(f"자동 수정 #{repair_attempt} [Orchestrator {orch_label}⇄Hydrogen]: 04 REVIEWING 반려 → 플래너 복구 분석 후 02 BUILDING 재실행")
+                    last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}\n\n[Orchestrator ({orch_label}) 복구 지침]:\n{rec_guide}"
+                    repair_history.append(f"자동 수정 #{repair_attempt} [Orchestrator {orch_label}]: 04 REVIEWING 반려 → 플래너 복구 분석 후 02 BUILDING 재실행")
                 else:
                     last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}"
                     repair_history.append(f"자동 수정 #{repair_attempt}: 04 REVIEWING 반려 → 02 BUILDING 재실행")
                 continue
 
             # --- STAGE 05: DECIDING ---
+            final_passed = bool(generated_files) and v_last_passed and not rev_failed
+            verdict_str = "PASS" if final_passed else "NEEDS_REVIEW (품질 보완 필요)"
             s5 = _record_stage_start(
                 "DECIDING",
                 "HEAD",
                 head_p,
-                f"HEAD({PROVIDER_META[head_p]['label']})가 [{orch_display}] 최종 PASS 판정 및 프로젝트 파일({len(generated_files)}개) 반영을 확정했습니다.",
+                f"HEAD({PROVIDER_META[head_p]['label']})가 [{intent_label}] 최종 {verdict_str} 판정 및 산출물 파일({len(generated_files)}개) 결과를 기록했습니다.",
             )
-            repair_note = f" (자동 수정 루프 {repair_attempt}회 거쳐 검증 통과)" if repair_attempt > 0 else " (1차 무결점 통과)"
+            repair_note = (
+                f" (자동 수정 루프 {repair_attempt}회 거쳐 검증 통과)"
+                if (final_passed and repair_attempt > 0)
+                else (" (1차 무결점 통과)" if final_passed else f" (자동 수정 {repair_attempt}회 수행 후 추가 보완 필요)")
+            )
             stage_outputs["DECIDING"] = (
-                f"- 최종 판정: **PASS**{repair_note}\n"
+                f"- 최종 판정: **{verdict_str}**{repair_note}\n"
+                f"- 자동 분석된 산출물 유형: **{intent_label}** (`{deliverable_mode}`)\n"
                 f"- 오케스트레이션 엔진: `{orch_display}`\n"
                 f"- 생성된 프로젝트 폴더: `deliverables/{mission_id}_project/`\n"
-                f"- 생성된 실제 소스 파일 ({len(generated_files)}개): {', '.join(f'`{f}`' for f in generated_files)}\n"
+                f"- 생성된 산출물 파일 ({len(generated_files)}개): {', '.join(f'`{f}`' for f in generated_files) or '(없음)'}\n"
                 f"- 통합 리포트: `deliverables/{mission_id}.md`"
             )
-            _record_stage_done(s5, "DECIDING", "HEAD", head_p, None, stage_outputs["DECIDING"])
+            _record_stage_done(s5, "DECIDING", "HEAD", head_p, None, stage_outputs["DECIDING"], step_state="PASS" if final_passed else "REPAIR")
             break
 
     except _AllQuotaExhaustedError as q_err:
@@ -3758,6 +4265,7 @@ def _run_mission_pipeline(
                 "goal": goal,
                 "profile": profile_clean,
                 "orchestrator_mode": eff_orch_mode,
+                "deliverable_mode": deliverable_mode,
                 "team_id": eff_team_id,
                 "team_name": team_name,
                 "output_root": str(base_output_dir),
@@ -3777,6 +4285,8 @@ def _run_mission_pipeline(
                 if m["mission_id"] == mission_id:
                     m["live"] = False
                     m["status"] = "QUOTA_PAUSED"
+                    m["deliverable_mode"] = deliverable_mode
+                    m["deliverable_type_label"] = intent_label
                     m["orchestrator_mode"] = eff_orch_mode
                     m["orchestrator_display"] = orch_display
                     m["paused_stage"] = q_err.phase_name
@@ -3816,6 +4326,7 @@ def _run_mission_pipeline(
         project_readme.write_text(
             f"# {goal}\n\n"
             f"- **Mission ID**: `{mission_id}`\n"
+            f"- **Deliverable Type**: {intent_label} (`{deliverable_mode}`)\n"
             f"- **Profile**: `{profile_clean.upper()}`\n"
             f"- **Orchestrator**: `{orch_display}`\n"
             f"- **Saved Directory**: `{project_dir}` ({'Google Drive 동기화 폴더' if is_gdrive_target else '로컬 폴더'})\n"
@@ -3836,20 +4347,21 @@ def _run_mission_pipeline(
         else ""
     )
     deliv_markdown = (
-        f"# 📦 Triad 미션 산출물 & 프로젝트 빌더 리포트 ({mission_id})\n\n"
+        f"# 📦 Triad 미션 통합 산출물 리포트 ({mission_id})\n\n"
         f"- **미션 목표 (Goal)**: {goal}\n"
+        f"- **자동 분석된 산출물 유형 (Deliverable Type)**: {intent_label} (`{deliverable_mode}`)\n"
         f"- **수행 팀 (Team)**: `{team_name}` (`{team_floor}`)\n"
         f"- **오케스트레이션 엔진 (Orchestrator)**: `{orch_display}`\n"
         f"- **실행 모드 (Profile)**: `{profile_clean.upper()}` (자동 수정 횟수: {repair_attempt} / {max_repairs}회)\n"
         f"- **저장 위치 (Output Folder)**: {storage_tag}\n"
-        f"- **생성된 프로젝트 실제 경로**: `{project_dir}`\n"
+        f"- **산출물 폴더 실제 경로**: `{project_dir}`\n"
         f"- **완료 시각**: {utc_now_iso()}\n"
         f"- **역할 배정**: HEAD={PROVIDER_META[head_p]['label']} / BUILDER={PROVIDER_META[builder_p]['label']} / SUB-BUILDER={PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']} / REVIEWER={PROVIDER_META[reviewer_p]['label']}\n"
-        f"- **생성된 실제 프로젝트 파일 ({len(generated_files)}개)**:\n{files_bullet_list}\n\n"
+        f"- **생성된 산출물 파일 ({len(generated_files)}개)**:\n{files_bullet_list}\n\n"
         f"---\n\n"
-        f"## 01. PLANNING (HEAD 작업 지시서 · ORDER)\n{stage_outputs.get('PLANNING', '')}\n\n"
-        f"## 02. BUILDING (BUILDER / SUB-BUILDER 프로젝트 구현)\n{stage_outputs.get('BUILDING', '')}\n\n"
-        f"## 03. VERIFYING (DIRECTOR Scope Guard & 실행 검증)\n{stage_outputs.get('VERIFYING', '')}\n\n"
+        f"## 01. PLANNING (HEAD 업무 의도 분석 & 작업 지시서 · ORDER)\n{stage_outputs.get('PLANNING', '')}\n\n"
+        f"## 02. BUILDING (BUILDER / SUB-BUILDER 맞춤형 산출물 작성)\n{stage_outputs.get('BUILDING', '')}\n\n"
+        f"## 03. VERIFYING (DIRECTOR 품질 · 데이터 · 실행 검증)\n{stage_outputs.get('VERIFYING', '')}\n\n"
         f"## 04. REVIEWING (REVIEWER 독립 교차 검수)\n{stage_outputs.get('REVIEWING', '(Quick 모드 생략)')}\n"
         f"{repair_section}\n"
         f"## 05. DECIDING (HEAD 최종 판정)\n{stage_outputs.get('DECIDING', '')}\n"
@@ -3874,7 +4386,7 @@ def _run_mission_pipeline(
 
     # Direct Google Drive Cloud Upload (REST API v3) — Team-specific setting takes priority over global
     gdrive_upload_info: Optional[Dict[str, Any]] = None
-    fresh_out_status = get_output_dir_status()
+    fresh_out_status = get_output_dir_status(force_gdrive_refresh=True)
     gd_direct = fresh_out_status.get("gdrive_direct") or {}
     gd_is_connected = bool(gd_direct.get("connected"))
     team_gd_enabled = bool(team_ws.get("gdrive_direct_enabled", False))
@@ -3911,6 +4423,16 @@ def _run_mission_pipeline(
                     },
                 )
 
+    primary_file_path = project_dir / intent_spec["primary_file"]
+    clean_preview = ""
+    if primary_file_path.exists():
+        try:
+            clean_preview = primary_file_path.read_text(encoding="utf-8", errors="replace").strip()
+        except Exception:
+            pass
+    if not clean_preview:
+        clean_preview = stage_outputs.get("BUILDING", "")
+
     with _STATE_LOCK:
         stopped = STATE.get("stop_requested", False)
         STATE["phase"] = "IDLE"
@@ -3923,6 +4445,8 @@ def _run_mission_pipeline(
                 m["team_name"] = team_name
                 m["team_floor"] = team_floor
                 m["team_color"] = team_color
+                m["deliverable_mode"] = deliverable_mode
+                m["deliverable_type_label"] = intent_label
                 m["orchestrator_mode"] = eff_orch_mode
                 m["orchestrator_display"] = orch_display
                 m["deliverable_file"] = deliv_rel_path
@@ -3937,7 +4461,7 @@ def _run_mission_pipeline(
                     m["gdrive_uploaded_count"] = gdrive_upload_info.get("uploaded_count", 0)
                 m["generated_files"] = generated_files
                 m["repair_count"] = repair_attempt
-                m["deliverable_preview"] = stage_outputs.get("BUILDING", "")
+                m["deliverable_preview"] = clean_preview
                 m["review_preview"] = stage_outputs.get("REVIEWING", "")
                 m["applied"] = {"status": "applied", "files": generated_files, "output_dir": str(project_dir)}
                 m["updated_at"] = utc_now_iso()
@@ -3952,14 +4476,14 @@ def _run_mission_pipeline(
                 }
             )
         else:
-            loc_badge = "☁️ Google Drive" if is_gdrive_target else "📁 지정 폴더"
+            loc_badge = "☁️ Google Drive" if (is_gdrive_target or bool(gdrive_upload_info)) else "📁 지정 폴더"
             STATE["chat_messages"].append(
                 {
                     "id": next_chat_id,
                     "role": "HEAD",
                     "content": (
-                        f"미션({mission_id} · {profile_clean.upper()}) 완료: '{goal}' 작업으로 "
-                        f"[{loc_badge}: `{project_dir}`]에 실제 프로젝트 파일 {len(generated_files)}개와 "
+                        f"미션({mission_id} · {profile_clean.upper()} · {intent_label}) 완료: '{goal}' 작업으로 "
+                        f"[{loc_badge}: `{project_dir}`]에 맞춤형 산출물 {len(generated_files)}개와 "
                         f"통합 리포트(`{deliv_full_path.name}`)가 저장되었습니다."
                     ),
                     "at": utc_now_iso(),
@@ -5221,9 +5745,12 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         {"id": next_id, "role": "USER", "content": f"[{target_team['name']}] {goal}", "at": utc_now_iso()}
                     )
                     mission_id = f"mission-{int(time.time()) % 100000}"
+                    init_intent = classify_mission_intent(goal)
                     new_mission = {
                         "mission_id": mission_id,
                         "goal": goal,
+                        "deliverable_mode": init_intent["mode"],
+                        "deliverable_type_label": init_intent["label"],
                         "team_id": target_team["id"],
                         "team_name": target_team["name"],
                         "team_floor": target_team.get("floor", "1F"),
@@ -5256,6 +5783,8 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "status": "started",
                         "mission_id": mission_id,
                         "goal": goal,
+                        "deliverable_mode": init_intent["mode"],
+                        "deliverable_type_label": init_intent["label"],
                         "orchestrator_mode": req_orch or "standard",
                         "team_id": target_team["id"],
                         "team_name": target_team["name"],

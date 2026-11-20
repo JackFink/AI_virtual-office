@@ -6254,11 +6254,12 @@
           }
         } else if (latestMission.live || latestMission.status === 'RUNNING') {
           const curStep = (latestMission.steps || [])[latestMission.steps.length - 1];
-          if (replyRole) replyRole.textContent = `[1-Cycle 미션 진행 중 · ${data.phase || 'RUNNING'} (${latestMission.passed_steps || 0}/5)]`;
+          const typeTag = latestMission.deliverable_type_label ? ` · ${latestMission.deliverable_type_label}` : '';
+          if (replyRole) replyRole.textContent = `[1-Cycle 미션 진행 중 · ${data.phase || 'RUNNING'} (${latestMission.passed_steps || 0}/5)${typeTag}]`;
           if (replyText) {
             replyText.textContent = curStep
               ? `[${curStep.stage}] ${curStep.summary}`
-              : `'${latestMission.goal}' 목표에 대해 5단계 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)을 실행 중입니다...`;
+              : `'${latestMission.goal}' 업무 문장을 자동 분석하여 5단계 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)을 실행 중입니다...`;
           }
           if (replyMeta) replyMeta.textContent = `${data.phase || 'RUNNING'} · ${latestMission.mission_id}`;
         } else if (latestMission.status === 'DONE' && latestMission.deliverable_file && lastRenderedMissionId !== latestMission.mission_id) {
@@ -6266,6 +6267,7 @@
           const genFiles = Array.isArray(latestMission.generated_files) ? latestMission.generated_files : [];
           const repCnt = Number(latestMission.repair_count || 0);
           const profTag = (latestMission.profile || 'standard').toUpperCase();
+          const typeLbl = latestMission.deliverable_type_label || '';
           const absProjDir = latestMission.project_dir_abs || latestMission.output_root || '';
           const isGdMission = Boolean(latestMission.is_google_drive);
           const gdCloudUrl = latestMission.gdrive_project_url || latestMission.gdrive_report_url || '';
@@ -6275,9 +6277,9 @@
           const locPillHtml = absProjDir
             ? `<div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10.5px;color:${isGdMission ? '#0369a1' : '#334155'}"><span style="background:${isGdMission ? '#e0f2fe' : '#f1f5f9'};padding:2px 8px;border-radius:6px;font-weight:700">${isGdMission ? '☁️ Google Drive 저장됨' : '📁 저장 위치'}: ${absProjDir.replace(/</g, '&lt;')}</span><button type="button" class="btn small btn-open-mission-dir" data-dir="${absProjDir.replace(/"/g, '&quot;')}" style="height:24px;padding:0 8px;font-size:10px">🗂️ 탐색기로 열기</button>${gdCloudBtnHtml}</div>`
             : gdCloudBtnHtml;
-          if (replyRole) replyRole.textContent = `[✅ ${profTag} 미션 완료 · ${latestMission.mission_id}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''}]`;
+          if (replyRole) replyRole.textContent = `[✅ ${profTag} 미션 완료${typeLbl ? ` · ${typeLbl}` : ''} · ${latestMission.mission_id}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''}]`;
           if (replyText) {
-            const preview = (latestMission.deliverable_preview || '').slice(0, 380);
+            const preview = (latestMission.deliverable_preview || '').slice(0, 420);
             const filesLinksHtml = genFiles.length
               ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${genFiles.map(f => `<a href="${f}" target="_blank" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:700">📁 ${f} ↗</a>`).join('')}</div>`
               : '';
@@ -6301,6 +6303,9 @@
           const genFiles = Array.isArray(mItem.generated_files) ? mItem.generated_files : [];
           const repCnt = Number(mItem.repair_count || 0);
           const profTag = (mItem.profile || 'standard').toUpperCase();
+          const typeBadgeHtml = mItem.deliverable_type_label
+            ? `<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800;margin-right:4px">${escHtml(mItem.deliverable_type_label)}</span>`
+            : '';
           const absProjDir = mItem.project_dir_abs || mItem.output_root || '';
           const isGdMission = Boolean(mItem.is_google_drive);
           const gdCloudUrl = mItem.gdrive_project_url || mItem.gdrive_report_url || '';
@@ -6313,7 +6318,7 @@
             : '';
           cardEl.innerHTML = `
             <a href="${mItem.deliverable_file}" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800;gap:8px">
-              <span>${teamBadgeHtml}${isGdMission ? '☁️' : '📄'} ${mItem.deliverable_file} — ${(mItem.goal || '').replace(/</g, '&lt;')} (${profTag}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''})</span>
+              <span>${teamBadgeHtml}${typeBadgeHtml}${isGdMission ? '☁️' : '📄'} ${mItem.deliverable_file} — ${(mItem.goal || '').replace(/</g, '&lt;')} (${profTag}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''})</span>
               <span style="white-space:nowrap">리포트 열기 ↗</span>
             </a>
             ${(absProjDir || gdCloudUrl) ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;color:#475569;font-family:var(--font-mono,monospace)">${absProjDir ? `<span>저장 경로: ${absProjDir.replace(/</g, '&lt;')}</span><button type="button" class="btn small btn-open-deliv-dir" data-dir="${absProjDir.replace(/"/g, '&quot;')}" style="height:22px;padding:0 7px;font-size:9.5px">🗂️ 열기</button>` : ''}${gdCloudUrl ? `<a href="${gdCloudUrl}" target="_blank" class="btn small" style="height:22px;padding:0 8px;font-size:9.5px;background:#0284c7;color:#fff;border-color:#0284c7">☁️ Google Drive ↗</a>` : ''}</div>` : ''}

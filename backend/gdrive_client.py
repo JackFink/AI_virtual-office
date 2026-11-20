@@ -41,6 +41,7 @@ _LOCK = threading.Lock()
 _PENDING_OAUTH: Dict[str, Dict[str, Any]] = {}
 _GCLOUD_CACHE: Dict[str, Any] = {
     "checked_at": 0.0,
+    "expires_at": 0.0,
     "has_drive_scope": False,
     "access_token": None,
     "email": None,
@@ -51,6 +52,7 @@ _GCLOUD_CACHE: Dict[str, Any] = {
 def invalidate_gdrive_cache() -> None:
     with _LOCK:
         _GCLOUD_CACHE["checked_at"] = 0.0
+        _GCLOUD_CACHE["expires_at"] = 0.0
         _GCLOUD_CACHE["has_drive_scope"] = False
         _GCLOUD_CACHE["access_token"] = None
 
@@ -228,7 +230,7 @@ def exchange_oauth_code(code: str, state: str, fallback_redirect_uri: str) -> Di
     return saved_payload
 
 
-def _get_oauth_file_token() -> Optional[Tuple[str, Optional[str], Optional[str]]]:
+def _get_oauth_file_token(force_refresh: bool = False) -> Optional[Tuple[str, Optional[str], Optional[str]]]:
     if not GDRIVE_TOKEN_FILE.exists():
         return None
     try:
@@ -239,7 +241,7 @@ def _get_oauth_file_token() -> Optional[Tuple[str, Optional[str], Optional[str]]
         expires_at = float(tok.get("expires_at") or 0)
         email = tok.get("email")
         dname = tok.get("display_name")
-        if access_tok and time.time() < expires_at - 60:
+        if not force_refresh and access_tok and time.time() < expires_at - 180:
             return access_tok, email, dname
 
         refresh_tok = str(tok.get("refresh_token") or "").strip()
@@ -275,13 +277,21 @@ def _get_oauth_file_token() -> Optional[Tuple[str, Optional[str], Optional[str]]
 def _probe_gcloud_drive_token(force_refresh: bool = False) -> Dict[str, Any]:
     now = time.time()
     with _LOCK:
-        ttl = 2100.0 if _GCLOUD_CACHE["has_drive_scope"] else 25.0
-        if not force_refresh and (now - _GCLOUD_CACHE["checked_at"] < ttl):
-            return dict(_GCLOUD_CACHE)
+        if not force_refresh:
+            if _GCLOUD_CACHE["has_drive_scope"] and _GCLOUD_CACHE.get("access_token"):
+                exp_at = float(_GCLOUD_CACHE.get("expires_at") or 0.0)
+                age = now - float(_GCLOUD_CACHE.get("checked_at") or 0.0)
+                # Respect actual OAuth token expiry (refresh 180s early; throttle to 15s when near expiry)
+                if exp_at > now + 180.0 and age < 1800.0:
+                    return dict(_GCLOUD_CACHE)
+                if exp_at > now + 20.0 and age < 15.0:
+                    return dict(_GCLOUD_CACHE)
+            elif (now - float(_GCLOUD_CACHE.get("checked_at") or 0.0)) < 25.0:
+                return dict(_GCLOUD_CACHE)
 
     gcloud_exe = resolve_gcloud_exe()
     if not gcloud_exe:
-        res = {"checked_at": now, "has_drive_scope": False, "access_token": None, "email": None, "display_name": None}
+        res = {"checked_at": now, "expires_at": 0.0, "has_drive_scope": False, "access_token": None, "email": None, "display_name": None}
         with _LOCK:
             _GCLOUD_CACHE.update(res)
         return res
@@ -293,21 +303,22 @@ def _probe_gcloud_drive_token(force_refresh: bool = False) -> Dict[str, Any]:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=6.0,
+            timeout=8.0,
             shell=False,
         )
         tok = (proc.stdout or "").strip()
         if proc.returncode != 0 or not tok:
-            res = {"checked_at": now, "has_drive_scope": False, "access_token": None, "email": None, "display_name": None}
+            res = {"checked_at": now, "expires_at": 0.0, "has_drive_scope": False, "access_token": None, "email": None, "display_name": None}
             with _LOCK:
                 _GCLOUD_CACHE.update(res)
             return res
 
-        # Check token scopes & email
+        # Check token scopes, remaining lifetime (expires_in), & email
         with urlopen(f"{OAUTH_TOKENINFO_URL}?access_token={tok}", timeout=5) as r:
             info = json.loads(r.read().decode("utf-8"))
         scopes_str = str(info.get("scope") or "")
         email = info.get("email")
+        exp_in = float(info.get("expires_in") or 0.0)
         has_drive = "googleapis.com/auth/drive" in scopes_str
         dname = None
         if has_drive:
@@ -319,6 +330,7 @@ def _probe_gcloud_drive_token(force_refresh: bool = False) -> Dict[str, Any]:
                 pass
         res = {
             "checked_at": now,
+            "expires_at": (now + exp_in) if exp_in > 0 else (now + 1800.0),
             "has_drive_scope": has_drive,
             "access_token": tok if has_drive else None,
             "email": email,
@@ -328,7 +340,7 @@ def _probe_gcloud_drive_token(force_refresh: bool = False) -> Dict[str, Any]:
             _GCLOUD_CACHE.update(res)
         return res
     except Exception:
-        res = {"checked_at": now, "has_drive_scope": False, "access_token": None, "email": None, "display_name": None}
+        res = {"checked_at": now, "expires_at": 0.0, "has_drive_scope": False, "access_token": None, "email": None, "display_name": None}
         with _LOCK:
             _GCLOUD_CACHE.update(res)
         return res
@@ -336,7 +348,7 @@ def _probe_gcloud_drive_token(force_refresh: bool = False) -> Dict[str, Any]:
 
 def get_valid_access_token(force_refresh: bool = False) -> Tuple[Optional[str], str, Optional[str], Optional[str]]:
     """Returns (access_token, auth_mode, email, display_name)."""
-    oauth_res = _get_oauth_file_token()
+    oauth_res = _get_oauth_file_token(force_refresh=force_refresh)
     if oauth_res:
         return oauth_res[0], "oauth_client", oauth_res[1], oauth_res[2]
 
@@ -426,32 +438,41 @@ def _drive_api_json(
     raw_body: Optional[bytes] = None,
     content_type: str = "application/json; charset=UTF-8",
 ) -> Dict[str, Any]:
-    tok, _, _, _ = get_valid_access_token()
-    if not tok:
-        raise PermissionError("Google Drive에 아직 로그인/연결되어 있지 않습니다. 먼저 [🔑 Google Drive 직접 로그인]을 진행해 주세요.")
-
     data_bytes = raw_body if raw_body is not None else (
         json.dumps(body_obj, ensure_ascii=False).encode("utf-8") if body_obj is not None else None
     )
-    headers = {
-        "Authorization": f"Bearer {tok}",
-        "Accept": "application/json",
-    }
-    if data_bytes is not None:
-        headers["Content-Type"] = content_type
 
-    req = Request(url, data=data_bytes, headers=headers, method=method)
-    try:
-        with urlopen(req, timeout=25) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw.strip() else {}
-    except HTTPError as exc:
-        err_txt = exc.read().decode("utf-8", errors="replace")
-        if exc.code in (401, 403):
-            invalidate_gdrive_cache()
-        raise RuntimeError(f"Google Drive API 오류 ({exc.code}): {err_txt[:240]}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Google Drive 네트워크 연결 실패: {exc}") from exc
+    for attempt in range(2):
+        tok, _, _, _ = get_valid_access_token(force_refresh=(attempt > 0))
+        if not tok:
+            raise PermissionError("Google Drive에 아직 로그인/연결되어 있지 않습니다. 먼저 [🔑 Google Drive 직접 로그인]을 진행해 주세요.")
+
+        headers = {
+            "Authorization": f"Bearer {tok}",
+            "Accept": "application/json",
+        }
+        if data_bytes is not None:
+            headers["Content-Type"] = content_type
+
+        req = Request(url, data=data_bytes, headers=headers, method=method)
+        try:
+            with urlopen(req, timeout=25) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw.strip() else {}
+        except HTTPError as exc:
+            err_txt = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 401 and attempt == 0:
+                # 액세스 토큰 만료(401) 발생 시 캐시를 즉시 비우고 새 토큰을 강제 재발급받아 1회 자동 재시도
+                invalidate_gdrive_cache()
+                time.sleep(0.3)
+                continue
+            if exc.code in (401, 403):
+                invalidate_gdrive_cache()
+            raise RuntimeError(f"Google Drive API 오류 ({exc.code}): {err_txt[:240]}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Google Drive 네트워크 연결 실패: {exc}") from exc
+
+    raise RuntimeError("Google Drive API 인증 재시도에 실패했습니다.")
 
 
 def extract_folder_id_from_input(raw_input: str) -> str:
