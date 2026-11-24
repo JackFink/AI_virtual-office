@@ -29,6 +29,32 @@
 
 - 기본 구성으로 **1F 코어 플랫폼 개발팀(`#01`~`#10`)**과 **3F 신규 서비스 R&D팀(`#11`~`#20`)** 총 20명의 SDK 전담 직원이 배치되어 있으며, 각 팀 지시창에서 서로 다른 프로젝트를 **동시에 병렬 실행**할 수 있습니다.
 
+### 1.3 전체 협업 파이프라인 순서도
+
+```mermaid
+flowchart TD
+    USER["사용자 프로젝트 지시 (새 폴더 시작 / 기존 폴더 이어하기)"] --> PLAN["01 · 총괄팀장 업무분장 (LEAD_PLANNING)"]
+
+    subgraph P1["02 · 자료수집 파트 (PART_RESEARCH)"]
+        R_STAFF["일반 사원 1·2 병렬 원천조사"] --> R_LEAD["자료수집 파트장 팩트 검증·취합"]
+    end
+
+    subgraph P2["03 · 기획·구조설계 파트 (PART_STRUCTURE)"]
+        S_STAFF["일반 사원 1·2 데이터·목차 초안"] --> S_LEAD["기획·구조 파트장 아키텍처 확정"]
+    end
+
+    subgraph P3["04 · 제작·구현 파트 (PART_BUILD)"]
+        B_STAFF["일반 사원 1·2 핵심 모듈 초안"] --> B_LEAD["제작·구현 파트장 격리 공간 통합 제작 및 exe 빌드"]
+    end
+
+    PLAN --> P1 --> P2 --> P3 --> REV{"05 · 파트장 상호검토 및 무결성 검증 (PART_REVIEW)"}
+    REV -->|"결함 감지 (자동 보완 REPAIR)"| B_LEAD
+    REV -->|"검증 통과 (PASS)"| REP["06 · 총괄팀장 통합보고서 작성 (작업 폴더 내부 .md 저장)"]
+    REP --> DEC{"07 · 사용자 최종 결재 (AWAITING_APPROVAL)"}
+    DEC -->|"보완 재지시 (REVISE)"| PLAN
+    DEC -->|"최종 승인 (APPROVE)"| DONE["산출물 확정 및 Google Drive 자동 업로드 (DONE)"]
+```
+
 ---
 
 ## 2. 서버 자동 복구 (체크포인트 영속화 & 재시작 시 자동 이어하기)
@@ -42,6 +68,20 @@
 3. **재기동 시 자동 이어하기 (`load_runtime_state_and_auto_resume`)**
    - `python server.py 8080`을 다시 실행하면 저장된 `orchestrator_state.json`을 자동으로 불러와 결재 대기(`AWAITING_APPROVAL`)·일시중지(`QUOTA_PAUSED` / `PAUSED_ERROR`) 항목과 대화·로그 이력을 복원합니다.
    - 서버 종료 직전에 수행 중(`RUNNING`)이던 미션은 이미 완료된 선행 단계(`LEAD_PLANNING`, 완료된 실무 파트 등)를 건너뛰고 **중단된 단계부터 백그라운드 스레드로 즉시 자동 재개**합니다. (단, 사용자가 직접 `■ 작업 정지` 버튼을 눌러 중단한 미션은 임의로 재실행하지 않습니다.)
+
+### 2.1 서버 종료 및 재시작 자동 복구 흐름도
+
+```mermaid
+flowchart LR
+    STEP["파이프라인 각 단계 완료"] --> SAVE["원자적 체크포인트 저장 (.tmp -> orchestrator_state.json)"]
+    SAVE --> SHUT["서버 종료 감지 (Ctrl+C / SIGTERM / atexit)"]
+    SHUT --> KEEP["실행 중(RUNNING) 미션 진행 지점 보존 및 하위 프로세스 정리"]
+    KEEP --> BOOT["서버 재실행 (python server.py 8080)"]
+    BOOT --> ROUTE{"저장된 미션 상태 판별"}
+    ROUTE -->|"종료 직전 RUNNING"| RESUME["완료 단계 건너뛰고 중단된 단계부터 백그라운드 자동 재개"]
+    ROUTE -->|"AWAITING_APPROVAL / PAUSED"| RESTORE["결재 대기창·일시중지 상태 및 대화 이력 복원"]
+    ROUTE -->|"사용자 직접 정지 (STOPPED)"| SKIP["자동 재개 제외 (정지 상태 유지)"]
+```
 
 ---
 
