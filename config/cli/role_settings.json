@@ -1,7 +1,7 @@
 {
-  "head": "antigravity",
-  "builder": "antigravity",
-  "reviewer": "openai",
-  "researcher": "antigravity",
-  "sub_builder": "gemini"
+  "head": "antigravity_sdk",
+  "builder": "antigravity_sdk",
+  "reviewer": "antigravity_sdk",
+  "researcher": "antigravity_sdk",
+  "sub_builder": "antigravity_sdk"
 }

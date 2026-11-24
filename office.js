@@ -17,6 +17,7 @@
   const CLI_LABELS = {
     claude: 'Claude Code (claude)',
     antigravity: 'Google Antigravity (agy · 계정1)',
+    antigravity_sdk: 'Antigravity SDK (구독·로컬 $0)',
     gemini: 'Google Gemini 2 (gemini · 계정2)',
     openai: 'OpenAI Codex (codex)',
     grok: 'xAI Grok (grok)'
@@ -24,10 +25,22 @@
   const CLI_SHORT = {
     claude: 'Claude',
     antigravity: 'Antigravity',
+    antigravity_sdk: 'AGY SDK',
     gemini: 'Gemini 2',
     openai: 'Codex',
     grok: 'Grok'
   };
+  try {
+    const dynSlots = JSON.parse(localStorage.getItem('nexus-cli-slots-v1') || 'null');
+    if (Array.isArray(dynSlots)) {
+      dynSlots.forEach(s => {
+        if (s && s.key) {
+          if (s.label) CLI_LABELS[s.key] = s.label;
+          if (s.short) CLI_SHORT[s.key] = s.short;
+        }
+      });
+    }
+  } catch (_) {}
 
   const ROLE_STORAGE_KEY = 'nexus-triad-roles-v1';
   function loadLocalRoles() {
@@ -299,7 +312,10 @@
       const effectiveFlip = hasCustomFlip ? Boolean(sa.mapleFlipped) : Boolean(slot.flip);
 
       const triadRole = sa.triadRole || (idx % 3 === 0 ? 'HEAD' : idx % 3 === 1 ? 'BUILDER' : 'REVIEWER');
-      const cliKey = sa.cliProvider || (triadRole === 'HEAD' ? currentRoles.head : triadRole === 'BUILDER' ? currentRoles.builder : currentRoles.reviewer);
+      const orgRank = sa.orgRank || (triadRole === 'LEAD' || triadRole === 'HEAD' ? 'LEAD' : 'PART_LEAD');
+      const rankBadge = orgRank === 'LEAD' ? '👑총괄' : orgRank === 'STAFF' ? '👤사원' : '⭐파트장';
+      const cliKey = sa.cliProvider || 'antigravity_sdk';
+      const modShort = sa.cliModel ? ` · ${sa.cliModel}` : '';
       const statusKey = triadRole === 'REVIEWER' ? 'review' : 'running';
 
       specs.push({
@@ -307,11 +323,12 @@
         charId: sa.id,
         studioAgent: sa,
         triadRole,
+        orgRank,
         name: sa.name,
-        role: `${triadRole} · ${CLI_SHORT[cliKey] || cliKey}`,
-        dept: `${sa.floor} · ${triadRole} (${CLI_LABELS[cliKey] || cliKey})`,
+        role: `${rankBadge} · ${triadRole} · ${CLI_SHORT[cliKey] || cliKey}${modShort}`,
+        dept: `${sa.floor} · ${rankBadge} ${triadRole} (${CLI_LABELS[cliKey] || cliKey}${modShort})`,
         cliKey,
-        task: `${slot.label} · ${triadRole} 업무 수행 중`,
+        task: `${slot.label} · ${rankBadge} ${triadRole}${modShort}`,
         statusKey,
         xPct: slot.xPct,
         yPct: slot.yPct,
@@ -333,6 +350,7 @@
   let paused = false;
   let currentZoom = 1;
   let thinkingAgentId = null;
+  let parallelThinkingAgentIds = new Set();
   let officeBubbleOpen = true;
   const agentChatState = {};
 
@@ -443,7 +461,7 @@
           : '';
         const cliShort = CLI_SHORT[spec.cliKey] || spec.cliKey;
         const isSel = spec.id === selectedAgentId;
-        const isThink = spec.id === thinkingAgentId;
+        const isThink = spec.id === thinkingAgentId || parallelThinkingAgentIds.has(spec.id);
         const rowClass = spec.facing === 'back' ? ' is-front-row' : ' is-back-row';
         const bulbIcon = isThink ? '💭' : spec.triadRole === 'HEAD' ? '💡' : spec.triadRole === 'BUILDER' ? '🔨' : '🔍';
         const dirBadge = spec.facing === 'back' ? '뒷면(마주보기)' : '앞면';
@@ -1132,6 +1150,7 @@
   });
 
   let officeBackendAvailable = true;
+  let lastStreamThinkingAgentId = null;
   async function syncOfficeWithOrchestrator() {
     if (!officeBackendAvailable) return;
     try {
@@ -1146,9 +1165,94 @@
         currentRoles = { ...currentRoles, ...data.roles };
       }
       const phase = data.phase || 'IDLE';
+      const ls = data.live_agent_stream || null;
+      const latestM = Array.isArray(data.missions) ? data.missions[0] : null;
       const badge = document.getElementById('officePipelineBadge');
-      if (badge) {
-        badge.textContent = `⌖ 파이프라인: ${phase === 'IDLE' ? 'STANDBY' : phase} · 마주보는 6석(앞/뒤) · 초과 인원 타 층 빈자리 자동 배치`;
+
+      if (ls && ls.active) {
+        const paddedId = String(ls.agent_id || '').padStart(2, '0');
+        const targetSpec = agentSpecs.find(a => a.charId === paddedId || a.id === ls.agent_id)
+          || agentSpecs.find(a => a.triadRole === ls.role)
+          || null;
+        const parList = Array.isArray(ls.parallel_agents) ? ls.parallel_agents : [];
+        const nextParSet = new Set();
+        parList.forEach(pa => {
+          const pCid = String(pa.agent_id || '').padStart(2, '0');
+          const pSpec = agentSpecs.find(a => a.charId === pCid);
+          if (pSpec) nextParSet.add(pSpec.id);
+        });
+        const parChanged = nextParSet.size !== parallelThinkingAgentIds.size
+          || Array.from(nextParSet).some(x => !parallelThinkingAgentIds.has(x));
+        parallelThinkingAgentIds = nextParSet;
+
+        const streamHeader = parList.length >= 2
+          ? `⚡ [${ls.stage || phase}] 사원 ${parList.length}명 동시 병렬수행 중 (${parList.map(p => `#${p.agent_id} ${p.agent_name}`).join(' ∥ ')})`
+          : `⚡ [${ls.stage || phase}] ${ls.provider === 'antigravity_sdk' ? '📦 SDK 실시간 스트림 ($0)' : (ls.provider || 'CLI 실행 중')}`;
+        const thoughtLine = `💭 ${ls.thought || '실시간 추론 중...'}`;
+        const toolLine = ls.tool ? `\n🔧 ${ls.tool}` : '';
+        const subs = Array.isArray(ls.subagents) ? ls.subagents : [];
+        const subLine = subs.length ? `\n🤝 협업 로스터(${subs.length}명): ${subs.map(s => s.name).slice(0, 3).join(', ')}` : '';
+        const bubbleText = `${streamHeader}\n${thoughtLine}${toolLine}${subLine}`;
+
+        if (targetSpec) {
+          agentChatState[targetSpec.id] = bubbleText;
+          if (!bubbleAskSendEl?.disabled && (thinkingAgentId !== targetSpec.id || parChanged)) {
+            thinkingAgentId = targetSpec.id;
+            lastStreamThinkingAgentId = targetSpec.id;
+            if (document.activeElement !== bubbleAskInputEl) {
+              selectedAgentId = targetSpec.id;
+              if (targetSpec.floorId && targetSpec.floorId !== activeFloorId) {
+                activeFloorId = targetSpec.floorId;
+                renderFloorSwitcher();
+                centerSelectedFloorInView(true);
+              }
+            }
+            buildOffice();
+            renderFloorAgents();
+          }
+          if (selectedAgentId === targetSpec.id && document.activeElement !== bubbleAskInputEl) {
+            speechBubbleEl?.classList.add('thinking');
+            syncSpeechBubbleContent(targetSpec.id);
+            updateSpeechBubblePosition();
+          }
+        }
+        if (badge) {
+          const liveSummary = parList.length >= 2
+            ? `⚡ 병렬수행(${parList.length}명): ${parList.map(p => `#${p.agent_id}(${p.model})`).join(' ∥ ')}`
+            : (ls.tool ? `🔧 ${ls.tool}` : `💭 ${(ls.thought || '').slice(0, 48)}`);
+          badge.textContent = `⌖ ${phase} · #${paddedId} ${ls.agent_name || ls.role} (${ls.provider === 'antigravity_sdk' ? 'AGY SDK $0' : ls.provider}) — ${liveSummary}`;
+        }
+      } else if (phase === 'AWAITING_APPROVAL' || (latestM && latestM.status === 'AWAITING_APPROVAL')) {
+        parallelThinkingAgentIds = new Set();
+        const leadCid = String(latestM?.lead_agent_id || '01').padStart(2, '0');
+        const leadSpec = agentSpecs.find(a => a.charId === leadCid) || agentSpecs.find(a => a.triadRole === 'LEAD' || a.triadRole === 'HEAD') || agentSpecs[0];
+        if (leadSpec) {
+          agentChatState[leadSpec.id] = `📋 [총괄팀장 통합보고 · 최종 결재 대기 (${latestM?.mission_id || ''})]\n전 파트 수행 및 파트 담당 상호검토가 완료되었습니다!\n'AI 설정 & 질문' 탭에서 통합보고서를 검토하시고 [✅ 최종 승인] 또는 [🔄 보완 재지시]를 내려주세요.`;
+          if (selectedAgentId === leadSpec.id && document.activeElement !== bubbleAskInputEl) {
+            syncSpeechBubbleContent(leadSpec.id);
+          }
+        }
+        if (lastStreamThinkingAgentId && !bubbleAskSendEl?.disabled) {
+          thinkingAgentId = null;
+          lastStreamThinkingAgentId = null;
+          speechBubbleEl?.classList.remove('thinking');
+          buildOffice();
+        }
+        if (badge) {
+          badge.textContent = `⌖ 📋 총괄팀장 통합보고 도착 (${latestM?.mission_id || ''}) — 대표님 최종 승인 대기 중`;
+        }
+      } else {
+        parallelThinkingAgentIds = new Set();
+        if (lastStreamThinkingAgentId && !bubbleAskSendEl?.disabled) {
+          thinkingAgentId = null;
+          lastStreamThinkingAgentId = null;
+          speechBubbleEl?.classList.remove('thinking');
+          buildOffice();
+          if (selectedAgentId) syncSpeechBubbleContent(selectedAgentId);
+        }
+        if (badge) {
+          badge.textContent = `⌖ 파이프라인: ${phase === 'IDLE' ? 'STANDBY' : phase} · 총괄팀장 지휘 & 파트별 협업 · 마주보는 6석`;
+        }
       }
     } catch (_) {}
   }
@@ -1190,5 +1294,5 @@
   renderFloorAgents();
   setTimeout(() => centerSelectedFloorInView(false), 60);
   syncOfficeWithOrchestrator();
-  setInterval(syncOfficeWithOrchestrator, 3000);
+  setInterval(syncOfficeWithOrchestrator, 1800);
 })();

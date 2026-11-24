@@ -1,0 +1,74 @@
+{
+  "lead": {
+    "id": "LEAD",
+    "name": "프로젝트 총괄팀장",
+    "stage_label": "업무분장 · 통합보고",
+    "icon": "👑",
+    "is_lead": true,
+    "enabled": true,
+    "removable": false,
+    "default_cli_role": "head",
+    "legacy_aliases": [
+      "HEAD",
+      "LEAD",
+      "DIRECTOR"
+    ],
+    "instruction": "프로젝트 전체 목표를 분석하여 각 파트 담당에게 명확한 업무 지시서를 배분하고, 파트별 수행 및 파트 담당 간 상호 검증·검토 결과를 취합하여 사용자(최종 승인권자)에게 올릴 통합보고서를 작성합니다."
+  },
+  "parts": [
+    {
+      "id": "PART_RESEARCH",
+      "name": "자료수집 파트 담당",
+      "stage_label": "자료수집 · 팩트조사",
+      "icon": "🔎",
+      "part_kind": "research",
+      "is_lead": false,
+      "enabled": true,
+      "removable": true,
+      "default_cli_role": "researcher",
+      "legacy_aliases": [
+        "RESEARCHER",
+        "TRIAD",
+        "PART_RESEARCH"
+      ],
+      "instruction": "사용자의 업무 지시와 관련된 원천 자료·위치·규모·부대시설·평판·근거 출처를 조사하고, 모든 정보를 [확실]/[추정]/[불확실]/[모름] 4단계로 검증·분류하여 후속 파트에 전달합니다."
+    },
+    {
+      "id": "PART_STRUCTURE",
+      "name": "기획·구조설계 파트 담당",
+      "stage_label": "데이터정제 · 구조설계",
+      "icon": "🗂️",
+      "part_kind": "structure",
+      "is_lead": false,
+      "enabled": true,
+      "removable": true,
+      "default_cli_role": "sub_builder",
+      "legacy_aliases": [
+        "SUB-BUILDER",
+        "SUB_BUILDER",
+        "PART_STRUCTURE"
+      ],
+      "instruction": "자료수집 파트가 확보한 원천 데이터를 정제·구조화하고, 누락 없는 비교표·섹션 목차·정형 데이터(JSON 스키마) 및 시각화/코드 아키텍처 설계안을 수립합니다."
+    },
+    {
+      "id": "PART_BUILD",
+      "name": "제작·구현 파트 담당",
+      "stage_label": "산출물 제작 · 구현",
+      "icon": "🛠️",
+      "part_kind": "build",
+      "is_lead": false,
+      "enabled": true,
+      "removable": true,
+      "default_cli_role": "builder",
+      "legacy_aliases": [
+        "BUILDER",
+        "REVIEWER",
+        "PART_BUILD"
+      ],
+      "instruction": "선행 파트들의 수집 데이터와 구조 설계안을 빠짐없이 반영하여 완성도 높은 최종 산출물 파일(HTML 보고서, 마크다운 문서, 웹 UI, 실행 가능한 소스 코드 등)을 실제 파일로 제작합니다."
+    }
+  ],
+  "staff_execution_mode": "parallel",
+  "require_user_approval": true,
+  "updated_at": "2026-11-24T05:15:08Z"
+}

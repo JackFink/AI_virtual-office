@@ -13,14 +13,19 @@
         "02",
         "03",
         "04",
-        "05"
+        "05",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10"
       ],
       "roles": {
-        "head": "claude",
-        "builder": "antigravity",
-        "sub_builder": "gemini",
-        "reviewer": "openai",
-        "researcher": "grok"
+        "head": "antigravity_sdk",
+        "builder": "antigravity_sdk",
+        "sub_builder": "antigravity_sdk",
+        "reviewer": "antigravity_sdk",
+        "researcher": "antigravity_sdk"
       },
       "workspace": {
         "output_dir": "",
@@ -31,26 +36,33 @@
         "gdrive_folder_url": "https://drive.google.com/drive/folders/1Pf4YiCr9XriuUMxLilexxujVYcQyQlTv"
       },
       "created_at": "2026-11-19T07:00:00Z",
-      "updated_at": "2026-11-19T12:17:46Z"
+      "updated_at": "2026-11-24T08:55:00Z"
     },
     {
       "id": "team-rnd",
       "name": "신규 서비스 R&D팀",
-      "description": "프로토타입 실험·자동화 스크립트·신규 프로젝트 별도 폴더 분리 개발팀",
+      "description": "프로토타입 실험·자동화 스크립트·신규 프로젝트 별도 폴더 분리 전담 10인 R&D팀",
       "color": "#0284c7",
       "floor": "3F",
       "orchestrator_mode": "auto",
       "member_ids": [
-        "01",
-        "03",
-        "04"
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20"
       ],
       "roles": {
-        "head": "antigravity",
-        "builder": "antigravity",
-        "sub_builder": "gemini",
-        "reviewer": "openai",
-        "researcher": "grok"
+        "head": "antigravity_sdk",
+        "builder": "antigravity_sdk",
+        "sub_builder": "antigravity_sdk",
+        "reviewer": "antigravity_sdk",
+        "researcher": "antigravity_sdk"
       },
       "workspace": {
         "output_dir": "",
@@ -61,7 +73,7 @@
         "gdrive_folder_url": "https://drive.google.com/drive/folders/1VgATwX-6XQKvuL694zQpnelwAClriSXN"
       },
       "created_at": "2026-11-19T07:00:00Z",
-      "updated_at": "2026-11-19T11:39:16Z"
+      "updated_at": "2026-11-24T08:55:00Z"
     }
   ]
 }

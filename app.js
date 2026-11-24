@@ -66,14 +66,14 @@
   ];
 
   const ACTIVE_AGENT_COUNT_KEY = 'nexus-active-agent-count-v1';
-  const INITIAL_AGENT_COUNT = 5;
+  const INITIAL_AGENT_COUNT = 10;
   let activeAgentCount = INITIAL_AGENT_COUNT;
   try {
     const savedCnt = parseInt(localStorage.getItem(ACTIVE_AGENT_COUNT_KEY) || '', 10);
     if (!isNaN(savedCnt) && savedCnt >= 1 && savedCnt <= ALL_AGENT_PRESETS.length) {
       activeAgentCount = savedCnt;
     }
-  } catch (_) {}
+  } catch (_) { }
 
   const modularAgents = ALL_AGENT_PRESETS.slice(0, activeAgentCount);
   window.CharacterEngine = CharacterEngine;
@@ -85,6 +85,7 @@
   const CLI_BADGE_LABELS = {
     claude: 'Claude Code',
     antigravity: 'Google Antigravity (계정 1)',
+    antigravity_sdk: 'Antigravity SDK ($0)',
     gemini: 'Google Antigravity (계정 2)',
     openai: 'OpenAI Codex',
     grok: 'xAI Grok'
@@ -107,7 +108,7 @@
   let savedCharAiConfigs = {};
   try {
     savedCharAiConfigs = JSON.parse(localStorage.getItem(CHAR_AI_STORAGE_KEY) || '{}') || {};
-  } catch (_) {}
+  } catch (_) { }
 
   const DEFAULT_SKILLS_BY_ROLE = {
     HEAD: ['ORDER 명세 수립', '아키텍처 설계', 'PASS/FAIL 최종 판정'],
@@ -131,10 +132,123 @@
     '05': { skin: 2000, hair: 30004, face: 20001, overall: 1050005, shoes: 1070003, hat: 1000005 }
   };
 
+  function formatOrgRankBadge(orgRank, triadRole = '') {
+    const r = String(orgRank || (triadRole === 'LEAD' || triadRole === 'HEAD' ? 'LEAD' : 'PART_LEAD')).toUpperCase();
+    if (r === 'LEAD') return '👑 총괄팀장';
+    if (r === 'STAFF') return '👤 일반사원';
+    return '⭐ 파트장';
+  }
+
+  function formatAgentTimeoutBadge(timeoutSec) {
+    const t = String(timeoutSec || 'auto').trim().toLowerCase();
+    if (!t || t === 'auto') return '🔄 AUTO (자동연장)';
+    return `⏱️ ${t}초`;
+  }
+
+  var currentPartRoles = null;
+  var LEGACY_ROLE_MAP = {
+    HEAD: 'LEAD',
+    LEAD: 'LEAD',
+    DIRECTOR: 'LEAD',
+    RESEARCHER: 'PART_RESEARCH',
+    TRIAD: 'PART_RESEARCH',
+    'SUB-BUILDER': 'PART_STRUCTURE',
+    SUB_BUILDER: 'PART_STRUCTURE',
+    BUILDER: 'PART_BUILD',
+    REVIEWER: 'PART_BUILD'
+  };
+  var VERIFIED_SDK_SUBMODELS = [
+    { id: 'gemini-4-carbon-high', label: 'Gemini 4 Carbon High (Ultra 최상위 심층설계)' },
+    { id: 'gemini-4-carbon-medium', label: 'Gemini 4 Carbon Medium (Ultra)' },
+    { id: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon XHigh (Ultra 차세대 프론티어)' },
+    { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon High (Ultra)' },
+    { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 High (총괄·심층판단)' },
+    { id: 'claude-opus-5-5-medium', label: 'Claude Opus 5.5 Medium' },
+    { id: 'claude-opus-5-5-low', label: 'Claude Opus 5.5 Low' },
+    { id: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 High (수석구현·검수)' },
+    { id: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 Medium (구조·설계)' },
+    { id: 'claude-sonnet-5-5-low', label: 'Claude Sonnet 5.5 Low' },
+    { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon High (파트장·취합)' },
+    { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon Medium (품질·마감)' },
+    { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon Low' },
+    { id: 'gemini-4-hydrogen-xhigh', label: 'Gemini 4 Hydrogen XHigh (정밀설계)' },
+    { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen High (핵심구현)' },
+    { id: 'gemini-4-hydrogen-medium', label: 'Gemini 4 Hydrogen Medium' },
+    { id: 'gemini-4-hydrogen-low', label: 'Gemini 4 Hydrogen Low' },
+    { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash High (고속탐색 사원)' },
+    { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash Medium (데이터정제 사원)' },
+    { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash Low' },
+    { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B Medium (이기종 교차검증 사원)' },
+    { id: 'gemini-pro-orchestrator-argon', label: 'Orchestrator Argon (듀얼 플래너)' },
+    { id: 'gemini-pro-orchestrator', label: 'Orchestrator Carbon (Ultra 플래너)' },
+    { id: 'gemini-pro-orchestrator-neon', label: 'Orchestrator Neon (Ultra 플래너)' }
+  ];
+
+  function normalizeAgentPartRoleId(rawRole) {
+    const up = String(rawRole || '').trim().toUpperCase();
+    if (!up) return 'PART_BUILD';
+    if (currentPartRoles && Array.isArray(currentPartRoles.assignable_roles)) {
+      if (currentPartRoles.assignable_roles.some(r => r.id === up)) return up;
+    }
+    return (LEGACY_ROLE_MAP && LEGACY_ROLE_MAP[up]) || up;
+  }
+
+  function getPartRoleDisplayLabel(rawRole) {
+    const canon = normalizeAgentPartRoleId(rawRole);
+    if (currentPartRoles && Array.isArray(currentPartRoles.assignable_roles)) {
+      const found = currentPartRoles.assignable_roles.find(r => r.id === canon);
+      if (found) return `${found.icon || '🧩'} ${found.name}`;
+    }
+    const defaults = {
+      LEAD: '👑 프로젝트 총괄팀장',
+      PART_RESEARCH: '🔎 자료수집 파트 담당',
+      PART_STRUCTURE: '🗂️ 기획·구조설계 파트 담당',
+      PART_BUILD: '🛠️ 제작·구현 파트 담당'
+    };
+    return defaults[canon] || rawRole;
+  }
+
+  function getActiveCliProvidersMap() {
+    if (lastDiagnostics && lastDiagnostics.providers && Object.keys(lastDiagnostics.providers).length > 0) {
+      return lastDiagnostics.providers;
+    }
+    try {
+      const cached = JSON.parse(localStorage.getItem('nexus-cli-slots-v1') || 'null');
+      if (Array.isArray(cached) && cached.length > 0) {
+        const obj = {};
+        cached.forEach(s => {
+          if (s && s.key) {
+            obj[s.key] = {
+              provider: s.key,
+              base_type: s.base_type || s.key,
+              domain: s.domain || (s.key === 'antigravity_sdk' ? 'SDK' : s.key.toUpperCase()),
+              cli: s.cli || (s.key === 'antigravity_sdk' ? 'agy-sdk' : s.key),
+              label: String(s.label || s.key).replace(/\s*\([^)]*\)\s*$/, '') || s.label || s.key,
+              auth_state: s.auth_state || 'LOGGED_IN',
+              selected_model_display: s.selected_model_display || '기본 모델'
+            };
+          }
+        });
+        if (Object.keys(obj).length > 0) return obj;
+      }
+    } catch (_) { }
+    return {
+      antigravity_sdk: {
+        provider: 'antigravity_sdk',
+        base_type: 'antigravity_sdk',
+        domain: 'SDK',
+        cli: 'agy-sdk',
+        label: 'Antigravity SDK (구독·로컬 $0)',
+        auth_state: 'LOGGED_IN',
+        selected_model_display: 'Gemini 4 Carbon (High)'
+      }
+    };
+  }
+
   function applySavedConfigToAgent(a, idx = 0) {
-    const defCli = a.triadRole === 'HEAD' ? 'claude' : a.triadRole === 'BUILDER' ? 'antigravity' : a.triadRole === 'SUB-BUILDER' ? 'gemini' : a.triadRole === 'RESEARCHER' ? 'grok' : 'openai';
-    const defSandbox = a.triadRole === 'BUILDER' ? 'proposal' : 'read-only';
-    const defTimeout = a.triadRole === 'BUILDER' ? '600' : '300';
+    const defCli = 'antigravity_sdk';
+    const defSandbox = (a.triadRole === 'BUILDER' || a.triadRole === 'PART_BUILD') ? 'proposal' : 'read-only';
+    const defTimeout = 'auto';
     const saved = savedCharAiConfigs[a.id] || {};
     const defMaple = DEFAULT_MAPLE_EQUIPPED_BY_ID[a.id] || {
       skin: 2000,
@@ -147,10 +261,13 @@
     a.name = saved.name || a.name;
     a.floor = saved.floor || a.floor;
     a.triadRole = saved.triadRole || a.triadRole || 'HEAD';
+    a.orgRank = saved.orgRank || (a.triadRole === 'LEAD' || a.triadRole === 'HEAD' ? 'LEAD' : 'PART_LEAD');
+    a.staffOrder = Number(saved.staffOrder || 0);
     a.cliProvider = saved.cliProvider || defCli;
     a.cliModel = saved.cliModel || '';
     a.sandboxMode = saved.sandboxMode || defSandbox;
-    a.timeoutSec = String(saved.timeoutSec || defTimeout);
+    const rawTimeout = String(saved.timeoutSec || defTimeout).trim().toLowerCase();
+    a.timeoutSec = (!rawTimeout || rawTimeout === 'auto') ? 'auto' : rawTimeout;
     a.mapleEquipped = (saved.mapleEquipped && typeof saved.mapleEquipped === 'object' && Object.keys(saved.mapleEquipped).length > 0)
       ? { ...saved.mapleEquipped }
       : { ...defMaple };
@@ -160,7 +277,7 @@
     a.skills = Array.isArray(saved.skills) && saved.skills.length
       ? [...saved.skills]
       : [...(DEFAULT_SKILLS_BY_ROLE[a.triadRole] || DEFAULT_SKILLS_BY_ROLE.HEAD)];
-    a.systemPrompt = saved.systemPrompt || `당신은 ${a.floor} 소속 '${a.name}' (${a.triadRole} 역할) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.`;
+    a.systemPrompt = saved.systemPrompt || `당신은 ${a.floor} 소속 '${a.name}' (${a.triadRole} · ${a.orgRank}) 에이전트입니다. 맡은 전문 분야에 맞게 명확하고 정확하게 답변하세요.`;
   }
 
   ALL_AGENT_PRESETS.forEach((a, idx) => applySavedConfigToAgent(a, idx));
@@ -173,6 +290,8 @@
       floor: agent.floor,
       dept: agent.dept,
       triadRole: agent.triadRole,
+      orgRank: agent.orgRank || (agent.triadRole === 'LEAD' ? 'LEAD' : 'PART_LEAD'),
+      staffOrder: Number(agent.staffOrder || 0),
       cliProvider: agent.cliProvider,
       cliModel: agent.cliModel || '',
       sandboxMode: agent.sandboxMode,
@@ -187,7 +306,109 @@
     };
     try {
       localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
-    } catch (_) {}
+    } catch (_) { }
+  }
+
+  let lastServerCharConfigSig = '';
+  let renderConfiguredAgentsRosterFn = null;
+  let renderConfiguredTeamsSectionFn = null;
+  let renderDashboardAgentsAndStatsFn = null;
+
+  function syncServerCharConfigsIntoRuntime(srvConfigs, forceServerWin = false) {
+    if (!srvConfigs || typeof srvConfigs !== 'object') return false;
+    const srvKeys = Object.keys(srvConfigs).filter(cid => srvConfigs[cid] && typeof srvConfigs[cid] === 'object');
+    if (!srvKeys.length) return false;
+
+    const studioBox = document.getElementById('characters');
+    const userEditingStudio = Boolean(
+      !forceServerWin && studioBox && studioBox.contains(document.activeElement)
+    );
+    const incomingSig = JSON.stringify(srvKeys.sort().map(k => [
+      k,
+      srvConfigs[k].name,
+      srvConfigs[k].triadRole,
+      srvConfigs[k].orgRank,
+      srvConfigs[k].staffOrder,
+      srvConfigs[k].cliProvider,
+      srvConfigs[k].cliModel,
+      srvConfigs[k].timeoutSec,
+      srvConfigs[k].floor,
+      srvConfigs[k].updatedAt
+    ]));
+    if (!forceServerWin && incomingSig === lastServerCharConfigSig) {
+      return false;
+    }
+    if (userEditingStudio) {
+      return false;
+    }
+    lastServerCharConfigSig = incomingSig;
+
+    let maxConfiguredIdx = 5;
+    // Adopt server character_configs.json as Single Source of Truth
+    Object.keys(savedCharAiConfigs).forEach(k => {
+      if (!srvConfigs[k]) delete savedCharAiConfigs[k];
+    });
+    srvKeys.forEach(cid => {
+      const srv = srvConfigs[cid];
+      const numId = parseInt(cid, 10);
+      if (!isNaN(numId) && numId > maxConfiguredIdx && numId <= ALL_AGENT_PRESETS.length) {
+        maxConfiguredIdx = numId;
+      }
+      savedCharAiConfigs[cid] = { ...srv };
+    });
+
+    modularAgents.length = 0;
+    for (let i = 0; i < maxConfiguredIdx && i < ALL_AGENT_PRESETS.length; i++) {
+      modularAgents.push(ALL_AGENT_PRESETS[i]);
+    }
+    activeAgentCount = modularAgents.length;
+    try {
+      localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length));
+      localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
+    } catch (_) { }
+
+    ALL_AGENT_PRESETS.forEach((a, idx) => applySavedConfigToAgent(a, idx));
+
+    // Sync server character floor & seatIndex into virtual office floor/seat map so new R&D staff (#11~#20) appear cleanly
+    try {
+      const floors = loadOfficeFloorsMap();
+      const placements = loadOfficePlacementsMap();
+      srvKeys.sort().forEach((cid, idx) => {
+        const srv = srvConfigs[cid] || {};
+        const fNum = Math.max(1, Math.min(10, parseInt(String(srv.floor || '1F'), 10) || 1));
+        for (let f = 1; f <= fNum; f++) {
+          if (!floors.some(fl => fl.id === f)) {
+            floors.push({ id: f, name: `${f}층`, description: `${f}F 팀 오피스`, seatCount: 6 });
+          }
+        }
+        const targetFl = floors.find(fl => fl.id === fNum);
+        let sIdx = typeof srv.seatIndex === 'number'
+          ? Math.max(0, Math.min(9, srv.seatIndex))
+          : (placements[cid] && placements[cid].floorId === fNum ? placements[cid].seatIndex : (idx % 10));
+        if (targetFl && sIdx >= (targetFl.seatCount || 6)) {
+          targetFl.seatCount = Math.min(10, sIdx + 1);
+        }
+        placements[cid] = { floorId: fNum, seatIndex: sIdx };
+      });
+      floors.sort((a, b) => a.id - b.id);
+      localStorage.setItem(OFFICE_FLOORS_KEY, JSON.stringify(floors));
+      localStorage.setItem(OFFICE_PLACEMENTS_KEY, JSON.stringify(placements));
+    } catch (_) { }
+
+    const statReg = document.getElementById('statRegisteredAgents');
+    if (statReg) statReg.textContent = String(modularAgents.length).padStart(2, '0');
+    const totBadge = document.getElementById('studioTotalBadge');
+    if (totBadge) totBadge.innerHTML = `<span class="character-total-dot"></span> ${String(modularAgents.length).padStart(2, '0')} AGENTS`;
+    const libCnt = document.getElementById('studioLibraryCount');
+    if (libCnt) libCnt.textContent = `${modularAgents.length} AGENTS`;
+    renderTopRosterAvatars();
+    if (studioRefreshDirectoryFn) studioRefreshDirectoryFn();
+    if (renderConfiguredAgentsRosterFn) renderConfiguredAgentsRosterFn(true);
+    if (renderConfiguredTeamsSectionFn && window.NEXUS_TEAMS_SUMMARY) {
+      renderConfiguredTeamsSectionFn(window.NEXUS_TEAMS_SUMMARY, true);
+    }
+    window.dispatchEvent(new CustomEvent('nexus:character-configs-updated', { detail: { configs: savedCharAiConfigs } }));
+    return true;
   }
 
   async function saveCharacterConfigsToServer(targetAgent = null) {
@@ -197,66 +418,40 @@
       modularAgents.forEach(a => persistCharacterAiConfig(a));
     }
     try {
-      await fetch('/ops/character-config', {
+      const res = await fetch('/ops/character-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ configs: savedCharAiConfigs })
       });
-    } catch (_) {}
+      const d = await res.json().catch(() => ({}));
+      if (d && d.configs) {
+        lastServerCharConfigSig = '';
+        syncServerCharConfigsIntoRuntime(d.configs, true);
+      }
+    } catch (_) { }
     renderTopRosterAvatars();
+    if (renderConfiguredAgentsRosterFn) renderConfiguredAgentsRosterFn(true);
+    if (renderConfiguredTeamsSectionFn && window.NEXUS_TEAMS_SUMMARY) {
+      renderConfiguredTeamsSectionFn(window.NEXUS_TEAMS_SUMMARY, true);
+    }
     window.dispatchEvent(new CustomEvent('nexus:character-configs-updated', { detail: { configs: savedCharAiConfigs } }));
   }
 
   function renderTopRosterAvatars() {
-    // agents.html 상단 Triad 역할 체계별 AI 직원 목록(#agentList) 및 index.html 테이블 아바타에 KMS v389 캐릭터 반영
-    const topRows = document.querySelectorAll('#agentList .agent-card-row');
-    topRows.forEach((row, idx) => {
-      const ag = modularAgents[idx] || ALL_AGENT_PRESETS[idx];
-      if (!ag) return;
-      const avEl = row.querySelector('.agent-avatar');
-      if (avEl) {
-        avEl.style.overflow = 'hidden';
-        avEl.style.padding = '1px';
-        avEl.innerHTML = CharacterEngine.render(ag, { stance: ag.mapleAnim || 'stand1', animated: false });
-      }
-      const nameNode = row.querySelector('.agent-name');
-      if (nameNode && ag.name) nameNode.textContent = ag.name;
-    });
-    const dashRows = document.querySelectorAll('#dashboardAgentTableBody tr');
-    dashRows.forEach((tr, idx) => {
-      const ag = modularAgents[idx] || ALL_AGENT_PRESETS[idx];
-      if (!ag) return;
-      const avEl = tr.querySelector('.agent-avatar');
-      if (avEl) {
-        avEl.style.overflow = 'hidden';
-        avEl.style.padding = '1px';
-        avEl.innerHTML = CharacterEngine.render(ag, { stance: ag.mapleAnim || 'stand1', animated: false });
-      }
-    });
+    if (renderConfiguredAgentsRosterFn) renderConfiguredAgentsRosterFn(false);
+    if (renderDashboardAgentsAndStatsFn) renderDashboardAgentsAndStatsFn(false);
   }
 
-  // 페이지 로드 시 서버(data/character_configs.json)에 저장된 캐릭터 코디 설정도 동기화
+  // 페이지 로드 시 서버(config/characters/character_configs.json)에 저장된 실제 직원 설정을 기준(forceServerWin=true)으로 동기화
   fetch('/ops/character-config')
     .then(r => r.ok ? r.json() : null)
     .then(data => {
       if (data && data.configs && typeof data.configs === 'object' && Object.keys(data.configs).length > 0) {
-        savedCharAiConfigs = { ...data.configs, ...savedCharAiConfigs };
-        Object.keys(data.configs).forEach(cid => {
-          const srv = data.configs[cid];
-          const loc = savedCharAiConfigs[cid];
-          if (srv && (!loc || (srv.updatedAt && (!loc.updatedAt || srv.updatedAt >= loc.updatedAt)))) {
-            savedCharAiConfigs[cid] = srv;
-          }
-        });
-        try {
-          localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
-        } catch (_) {}
-        ALL_AGENT_PRESETS.forEach((a, idx) => applySavedConfigToAgent(a, idx));
-        renderTopRosterAvatars();
-        window.dispatchEvent(new CustomEvent('nexus:character-configs-updated', { detail: { configs: savedCharAiConfigs } }));
+        syncServerCharConfigsIntoRuntime(data.configs, true);
+        if (currentPartRoles) syncPartRolesToDOM(currentPartRoles, true);
       }
     })
-    .catch(() => {});
+    .catch(() => { });
 
   renderTopRosterAvatars();
 
@@ -293,7 +488,7 @@
     try {
       const parsed = JSON.parse(localStorage.getItem(OFFICE_FLOORS_KEY) || 'null');
       if (Array.isArray(parsed) && parsed.length) return parsed;
-    } catch (_) {}
+    } catch (_) { }
     return [
       { id: 1, name: '1층', description: 'GM 본관 · 마주보는 6석', seatCount: 6 },
       { id: 2, name: '2층', description: '개발 스튜디오 · 마주보는 6석', seatCount: 6 }
@@ -304,7 +499,7 @@
     try {
       const parsed = JSON.parse(localStorage.getItem(OFFICE_PLACEMENTS_KEY) || 'null');
       if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 1) return parsed;
-    } catch (_) {}
+    } catch (_) { }
     const def = {};
     modularAgents.forEach((ag, idx) => {
       const fNum = parseInt(String(ag.floor || '1F'), 10) || (Math.floor(idx / 6) + 1);
@@ -314,13 +509,18 @@
   }
 
   function getAgentOfficePlacement(agentId, fallbackFloorStr = '1F') {
+    const savedCfg = savedCharAiConfigs[agentId] || null;
     const map = loadOfficePlacementsMap();
     const p = map[agentId];
     if (p && Number.isInteger(p.floorId) && typeof p.seatIndex === 'number') {
       return { floorId: p.floorId, floorStr: `${p.floorId}F`, seatIndex: Math.max(0, Math.min(9, p.seatIndex)) };
     }
-    const fNum = Math.max(1, Math.min(10, parseInt(String(fallbackFloorStr || '1F'), 10) || 1));
-    return { floorId: fNum, floorStr: `${fNum}F`, seatIndex: 0 };
+    const effFlStr = savedCfg?.floor || fallbackFloorStr || '1F';
+    const fNum = Math.max(1, Math.min(10, parseInt(String(effFlStr), 10) || 1));
+    const sIdx = typeof savedCfg?.seatIndex === 'number'
+      ? Math.max(0, Math.min(9, savedCfg.seatIndex))
+      : ((Math.max(1, parseInt(agentId, 10) || 1) - 1) % 10);
+    return { floorId: fNum, floorStr: `${fNum}F`, seatIndex: sIdx };
   }
 
   function syncAgentOfficePlacement(agentId, floorStr, preferredSeatIdx = null, persistServer = true) {
@@ -389,7 +589,7 @@
     try {
       localStorage.setItem(OFFICE_FLOORS_KEY, JSON.stringify(floors));
       localStorage.setItem(OFFICE_PLACEMENTS_KEY, JSON.stringify(placements));
-    } catch (_) {}
+    } catch (_) { }
 
     // 3. Sync in-memory agent preset + savedCharAiConfigs
     const agPreset = ALL_AGENT_PRESETS.find(a => a.id === agentId);
@@ -401,14 +601,14 @@
     savedCharAiConfigs[agentId].seatIndex = finalSeat;
     try {
       localStorage.setItem(CHAR_AI_STORAGE_KEY, JSON.stringify(savedCharAiConfigs));
-    } catch (_) {}
+    } catch (_) { }
 
     if (persistServer) {
       fetch('/ops/character-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ configs: savedCharAiConfigs })
-      }).catch(() => {});
+      }).catch(() => { });
     }
     return { floorId: fNum, floorStr: normFloorStr, seatIndex: finalSeat };
   }
@@ -462,6 +662,7 @@
 
     // AI CLI Studio Controls
     const studioQuickRole = document.getElementById('studioQuickRole');
+    const studioQuickRank = document.getElementById('studioQuickRank');
     const studioQuickCli = document.getElementById('studioQuickCli');
     const studioAiModelSelect = document.getElementById('studioAiModelSelect');
     const studioAiModelSourceHint = document.getElementById('studioAiModelSourceHint');
@@ -687,7 +888,9 @@
             const tObj = teamsArr.find(x => x.id === tid);
             return Boolean(tObj && Array.isArray(tObj.member_ids) && tObj.member_ids.includes(a.id));
           }
-          return a.floor === effFilterVal || a.triadRole === effFilterVal;
+          const normAgRole = typeof normalizeAgentPartRoleId === 'function' ? normalizeAgentPartRoleId(a.triadRole) : a.triadRole;
+          const effRankAg = normAgRole === 'LEAD' ? 'LEAD' : (a.orgRank === 'STAFF' ? 'STAFF' : 'PART_LEAD');
+          return a.floor === effFilterVal || a.triadRole === effFilterVal || normAgRole === effFilterVal || effRankAg === effFilterVal;
         })
         .forEach(agent => {
           const card = document.createElement('div');
@@ -701,13 +904,15 @@
           const teamTagHtml = agentTeams.length > 0
             ? `<div style="font-size:8px;font-weight:800;color:${agentTeams[0].color || '#0f6848'};background:${(agentTeams[0].color || '#0f6848')}14;border:1px solid ${(agentTeams[0].color || '#0f6848')}36;padding:1.5px 5px;border-radius:4px;margin-bottom:3px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏢 ${agentTeams[0].name}${agentTeams.length > 1 ? ` +${agentTeams.length - 1}` : ''}</div>`
             : `<div style="font-size:8px;color:#94a3b8;margin-bottom:3px">미배정 팀</div>`;
+          const rankLbl = formatOrgRankBadge(agent.orgRank, agent.triadRole);
           card.innerHTML = `
             <div class="char-card-top">
-              <span>#${agent.id} · ${agent.triadRole || 'AGENT'}</span>
+              <span>#${agent.id} · ${rankLbl}</span>
               <span class="char-floor-tag">${plc.floorStr} · #${plc.seatIndex + 1}석</span>
             </div>
             <div class="char-svg-wrap">${CharacterEngine.render(agent, { stance: agent.mapleAnim || 'stand1', animated: false })}</div>
             <div class="char-card-name">${agent.name}</div>
+            <div style="font-size:8px;font-weight:800;color:#0369a1;margin-bottom:2px">${escHtml(agent.triadRole || 'PART_BUILD')}</div>
             ${teamTagHtml}
             <span class="char-cli-badge ${cliKey}">${cliLabel} · ⚡${skillCount}</span>
             ${agent.cliModel ? `<div style="font-size:7.5px;font-weight:800;color:#0f6848;margin-bottom:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="실제 실행 모델: ${escHtml(agent.cliModel)}">✨ ${escHtml(agent.cliModel)}</div>` : ''}
@@ -759,7 +964,7 @@
       syncAgentOfficePlacement(nextAgent.id, nextAgent.floor || '2F', null, true);
       try {
         localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length));
-      } catch (_) {}
+      } catch (_) { }
       renderDirectory();
       updateCustomizer();
       if (window.NEXUS_TEAMS_SUMMARY) renderTeamsAndWorkspacesDashboard(window.NEXUS_TEAMS_SUMMARY);
@@ -835,7 +1040,19 @@
       agent.floor = curPlc.floorStr;
       if (deptEl) deptEl.textContent = `${curPlc.floorStr} · #${curPlc.seatIndex + 1}석 · ${agent.triadRole} (${cliLabel})`;
 
-      if (studioQuickRole) studioQuickRole.value = agent.triadRole || 'HEAD';
+      if (studioQuickRole) {
+        const mappedRole = normalizeAgentPartRoleId(agent.triadRole || 'LEAD');
+        if (Array.from(studioQuickRole.options).some(o => o.value === mappedRole)) {
+          studioQuickRole.value = mappedRole;
+        } else {
+          studioQuickRole.value = agent.triadRole || 'LEAD';
+        }
+      }
+      if (studioQuickRank && document.activeElement !== studioQuickRank) {
+        const normRole = normalizeAgentPartRoleId(agent.triadRole || 'LEAD');
+        const effRank = normRole === 'LEAD' ? 'LEAD' : (agent.orgRank === 'STAFF' ? 'STAFF' : 'PART_LEAD');
+        studioQuickRank.value = effRank;
+      }
       const provMapNow = (typeof lastDiagnostics !== 'undefined' && lastDiagnostics?.providers) ? lastDiagnostics.providers : null;
       if (provMapNow && Object.keys(provMapNow).length > 0 && !provMapNow[agent.cliProvider]) {
         agent.cliProvider = provMapNow.antigravity ? 'antigravity' : Object.keys(provMapNow)[0];
@@ -892,7 +1109,16 @@
         ].join('');
       }
       if (studioAiSandboxSelect) studioAiSandboxSelect.value = agent.sandboxMode || 'read-only';
-      if (studioAiTimeoutSelect) studioAiTimeoutSelect.value = String(agent.timeoutSec || '300');
+      if (studioAiTimeoutSelect && document.activeElement !== studioAiTimeoutSelect) {
+        const tv = (!agent.timeoutSec || String(agent.timeoutSec).toLowerCase() === 'auto') ? 'auto' : String(agent.timeoutSec);
+        if (!Array.from(studioAiTimeoutSelect.options).some(o => o.value === tv)) {
+          const customOpt = document.createElement('option');
+          customOpt.value = tv;
+          customOpt.textContent = `${tv}초 (사용자 지정)`;
+          studioAiTimeoutSelect.appendChild(customOpt);
+        }
+        studioAiTimeoutSelect.value = tv;
+      }
       if (studioAiPromptInput && document.activeElement !== studioAiPromptInput) studioAiPromptInput.value = agent.systemPrompt || '';
       if (studioCharAskInput) studioCharAskInput.placeholder = `${agent.name} (${cliLabel})에게 시험 질문하기...`;
 
@@ -946,7 +1172,7 @@
               cliModel: agent.cliModel || '',
               cliLabel: cliLabel,
               sandboxMode: agent.sandboxMode,
-              timeoutSec: Number(agent.timeoutSec || 300),
+              timeoutSec: (!agent.timeoutSec || String(agent.timeoutSec).toLowerCase() === 'auto') ? 'auto' : (Number(agent.timeoutSec) || 'auto'),
               skills: Array.isArray(agent.skills) ? agent.skills : [],
               systemPrompt: agent.systemPrompt
             },
@@ -971,8 +1197,46 @@
       updateCustomizer();
     }
 
-    studioQuickRole?.addEventListener('change', (e) => {
-      updateSelectedAgentAiField(a => { a.triadRole = e.target.value; });
+    studioQuickRole?.addEventListener('change', async (e) => {
+      if (e.target.value === '__add_new_part__') {
+        const agent = modularAgents.find(a => a.id === selectedId);
+        e.target.value = normalizeAgentPartRoleId(agent?.triadRole || 'LEAD');
+        const newName = prompt('새로 추가할 실무 파트 담당 이름을 입력하세요 (예: 디자인·시각화 파트 담당):', '');
+        if (!newName || !newName.trim()) return;
+        const newInst = prompt('이 파트 담당의 핵심 업무·검증 지침을 입력하세요 (비워두면 자동 생성):', '') || '';
+        try {
+          const res = await apiFetch('/ops/part-roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'add', name: newName.trim(), instruction: newInst.trim() })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.part_roles) {
+            syncPartRolesToDOM(d.part_roles, true);
+            const addedId = d.part_roles.added_part?.id || e.target.value;
+            updateSelectedAgentAiField(a => { a.triadRole = addedId; });
+            saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
+          }
+        } catch (_) { }
+        return;
+      }
+      updateSelectedAgentAiField(a => {
+        a.triadRole = e.target.value;
+        if (e.target.value === 'LEAD') a.orgRank = 'LEAD';
+        else if (a.orgRank === 'LEAD') a.orgRank = 'PART_LEAD';
+      });
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
+      if (currentPartRoles) syncPartRolesToDOM(currentPartRoles, true);
+    });
+    studioQuickRank?.addEventListener('change', (e) => {
+      const nextRank = e.target.value;
+      updateSelectedAgentAiField(a => {
+        a.orgRank = nextRank;
+        if (nextRank === 'LEAD') a.triadRole = 'LEAD';
+        else if (a.triadRole === 'LEAD' || a.triadRole === 'HEAD') a.triadRole = 'PART_RESEARCH';
+      });
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
+      if (currentPartRoles) syncPartRolesToDOM(currentPartRoles, true);
     });
     studioQuickCli?.addEventListener('change', async (e) => {
       if (e.target.value === '__add_new_cli__') {
@@ -987,12 +1251,12 @@
         a.cliProvider = e.target.value;
         a.cliModel = '';
       });
-      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => {});
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
     });
     studioAiModelSelect?.addEventListener('change', (e) => {
       const chosenModel = (e.target.value || '').trim();
       updateSelectedAgentAiField(a => { a.cliModel = chosenModel; });
-      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => {});
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
     });
     document.getElementById('btnStudioRefreshModels')?.addEventListener('click', (e) => {
       if (typeof handleRefreshRealModels === 'function') {
@@ -1005,7 +1269,7 @@
           a.cliProvider = btn.dataset.cliVal;
           a.cliModel = '';
         });
-        saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => {});
+        saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
       });
     });
     studioAiNameInput?.addEventListener('input', (e) => {
@@ -1045,9 +1309,11 @@
     });
     studioAiSandboxSelect?.addEventListener('change', (e) => {
       updateSelectedAgentAiField(a => { a.sandboxMode = e.target.value; });
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
     });
     studioAiTimeoutSelect?.addEventListener('change', (e) => {
-      updateSelectedAgentAiField(a => { a.timeoutSec = e.target.value; });
+      updateSelectedAgentAiField(a => { a.timeoutSec = e.target.value || 'auto'; });
+      saveCharacterConfigsToServer(modularAgents.find(x => x.id === selectedId)).catch(() => { });
     });
     studioAiPromptInput?.addEventListener('input', (e) => {
       updateSelectedAgentAiField(a => { a.systemPrompt = e.target.value; });
@@ -1105,7 +1371,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ configs: savedCharAiConfigs })
         });
-      } catch (_) {}
+      } catch (_) { }
       setTimeout(() => { btnSaveCharAiConfig.textContent = orig; }, 1500);
     });
 
@@ -1708,7 +1974,7 @@
             updateCustomizer();
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     } else {
       updateMapleTabCategoryCounts();
       renderMapleSubFilters();
@@ -1720,46 +1986,761 @@
   }
 
   // ==========================================================================
-  // [4] agents.html AI 직원 & Triad 역할 필터 및 검색 기능
+  // [4] agents.html 전체 등록 AI 직원 목록 실시간 동기화 & 구성된 팀·팀원 목록 섹션
   // ==========================================================================
-  if (page === 'agents') {
-    const chips = [...document.querySelectorAll('.filter-chip')];
-    const rows = [...document.querySelectorAll('.agent-card-row')];
-    const search = document.getElementById('agentSearch');
-    const count = document.getElementById('agentCount');
-    let activeFilter = 'all';
+  let activeAgentsRosterFilter = 'all';
+  let lastAgentsRosterSig = '';
+  let lastConfiguredTeamsSectionSig = '';
 
-    function filterRows() {
-      const q = (search?.value || '').trim().toLowerCase();
+  function updateAgentsPageSummaryCards() {
+    const statReg = document.getElementById('statRegisteredAgents');
+    const statRegSub = document.getElementById('statRegisteredAgentsSub');
+    const statTeams = document.getElementById('statConfiguredTeams');
+    const statTeamsSub = document.getElementById('statConfiguredTeamsSub');
+    const statParts = document.getElementById('statActivePartsValue');
+    const statPartsSub = document.getElementById('statActivePartsSub');
+    const statToVal = document.getElementById('statTimeoutModeValue');
+    const statToSub = document.getElementById('statTimeoutModeSub');
+
+    const leadCnt = modularAgents.filter(a => normalizeAgentPartRoleId(a.triadRole) === 'LEAD' || a.orgRank === 'LEAD').length;
+    const pLeadCnt = modularAgents.filter(a => normalizeAgentPartRoleId(a.triadRole) !== 'LEAD' && a.orgRank !== 'LEAD' && a.orgRank !== 'STAFF').length;
+    const staffCnt = modularAgents.filter(a => a.orgRank === 'STAFF').length;
+    if (statReg) statReg.textContent = String(modularAgents.length).padStart(2, '0');
+    if (statRegSub) statRegSub.textContent = `총괄 ${leadCnt} · 파트장 ${pLeadCnt} · 일반사원 ${staffCnt}명`;
+
+    const teamsArr = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams : [];
+    if (statTeams && teamsArr.length > 0) {
+      statTeams.innerHTML = `${String(teamsArr.length).padStart(2, '0')} <span style="font-size:12px;color:#98a5b2;font-weight:600">TEAMS</span>`;
+    }
+    if (statTeamsSub && teamsArr.length > 0) {
+      statTeamsSub.textContent = teamsArr.map(t => `${t.name}(${(t.member_ids || []).length}명)`).join(' · ').slice(0, 48);
+    }
+
+    const enabledParts = Array.isArray(currentPartRoles?.parts)
+      ? currentPartRoles.parts.filter(p => p.enabled !== false)
+      : [];
+    if (statParts && enabledParts.length > 0) {
+      statParts.textContent = String(enabledParts.length).padStart(2, '0');
+    }
+    if (statPartsSub && enabledParts.length > 0) {
+      statPartsSub.textContent = enabledParts.map(p => p.name.replace(' 담당', '')).join(' → ').slice(0, 46);
+    }
+
+    const autoCnt = modularAgents.filter(a => !a.timeoutSec || String(a.timeoutSec).toLowerCase() === 'auto').length;
+    if (statToVal) statToVal.textContent = autoCnt === modularAgents.length ? 'AUTO' : `AUTO ${autoCnt}/${modularAgents.length}`;
+    if (statToSub) statToSub.textContent = `스트림 활동 감지 자동 연장 (${autoCnt}/${modularAgents.length}명 Auto)`;
+  }
+
+  function renderConfiguredAgentsRoster(forceRebuild = false) {
+    updateAgentsPageSummaryCards();
+    const listEl = document.getElementById('agentList');
+    const filtersEl = document.getElementById('filters');
+    const searchEl = document.getElementById('agentSearch');
+    const countEl = document.getElementById('agentCount');
+    if (!listEl) return;
+
+    const teamsArr = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams : [];
+    const partsList = Array.isArray(currentPartRoles?.parts) ? currentPartRoles.parts : [];
+    const workingIds = new Set(
+      Array.isArray(latestActivitySnapshot?.working_now)
+        ? latestActivitySnapshot.working_now.map(w => String(w.agent_id || '').padStart(2, '0'))
+        : []
+    );
+
+    const rosterSig = JSON.stringify([
+      modularAgents.map(a => [a.id, a.name, a.triadRole, a.orgRank, a.cliProvider, a.cliModel, a.timeoutSec, a.floor, a.skills]),
+      teamsArr.map(t => [t.id, t.name, t.floor, t.color, t.member_ids]),
+      partsList.map(p => [p.id, p.name, p.icon]),
+      Array.from(workingIds)
+    ]);
+
+    if (forceRebuild || rosterSig !== lastAgentsRosterSig || !listEl.querySelector('.agent-card-row')) {
+      lastAgentsRosterSig = rosterSig;
+
+      // 1) Dynamic Filter Chips (#filters)
+      if (filtersEl) {
+        const chipDefs = [
+          { key: 'all', label: `전체 (${modularAgents.length})` },
+          { key: 'RANK_LEAD', label: '👑 총괄팀장' },
+          { key: 'RANK_PART_LEAD', label: '⭐ 파트장' },
+          { key: 'RANK_STAFF', label: '👤 일반사원' },
+          ...partsList.map(p => ({ key: p.id, label: `${p.icon || '🧩'} ${p.name.replace(' 담당', '')}` })),
+          ...teamsArr.map(t => ({ key: `TEAM_${t.id}`, label: `🏢 ${t.name}` }))
+        ];
+        if (!chipDefs.some(c => c.key === activeAgentsRosterFilter)) {
+          activeAgentsRosterFilter = 'all';
+        }
+        filtersEl.innerHTML = chipDefs.map(c =>
+          `<button type="button" class="filter-chip ${c.key === activeAgentsRosterFilter ? 'active' : ''}" data-filter="${escHtml(c.key)}">${escHtml(c.label)}</button>`
+        ).join('');
+        filtersEl.querySelectorAll('.filter-chip').forEach(chip => {
+          chip.addEventListener('click', () => {
+            activeAgentsRosterFilter = chip.dataset.filter || 'all';
+            filtersEl.querySelectorAll('.filter-chip').forEach(x => x.classList.toggle('active', x === chip));
+            applyAgentsRosterFilter();
+          });
+        });
+      }
+
+      // 2) Render all configured employees (#01..#N) accurately matching character_configs.json
+      const rankWeight = { LEAD: 0, PART_LEAD: 1, STAFF: 2 };
+      const sortedAgents = [...modularAgents].sort((a, b) => {
+        const numA = parseInt(a.id, 10) || 99;
+        const numB = parseInt(b.id, 10) || 99;
+        return numA - numB;
+      });
+
+      listEl.innerHTML = sortedAgents.map(ag => {
+        const canonRole = normalizeAgentPartRoleId(ag.triadRole);
+        const effRank = canonRole === 'LEAD' ? 'LEAD' : (ag.orgRank === 'STAFF' ? 'STAFF' : 'PART_LEAD');
+        const rankLabel = formatOrgRankBadge(effRank, canonRole);
+        const partLabel = getPartRoleDisplayLabel(canonRole);
+        const cliKey = ag.cliProvider || 'antigravity_sdk';
+        const cliLabel = CLI_BADGE_LABELS[cliKey] || cliKey;
+        const modelStr = ag.cliModel || '계정 기본 모델';
+        const timeoutBadge = formatAgentTimeoutBadge(ag.timeoutSec);
+        const belongTeams = teamsArr.filter(t => Array.isArray(t.member_ids) && t.member_ids.includes(ag.id));
+        const teamBadgesHtml = belongTeams.length
+          ? belongTeams.map(t => `<span style="display:inline-flex;align-items:center;padding:1.5px 7px;border-radius:999px;background:${escHtml(t.color || '#0f6848')}15;color:${escHtml(t.color || '#0f6848')};border:1px solid ${escHtml(t.color || '#0f6848')}40;font-size:9.5px;font-weight:800">🏢 ${escHtml(t.floor)} · ${escHtml(t.name)}</span>`).join(' ')
+          : `<span style="display:inline-flex;padding:1.5px 7px;border-radius:999px;background:#f1f5f9;color:#64748b;font-size:9.5px;font-weight:700">팀 미배정</span>`;
+        const skillsArr = Array.isArray(ag.skills) ? ag.skills : [];
+        const skillsTxt = skillsArr.length ? `⚡ ${skillsArr.join(' · ')}` : (ag.systemPrompt || '').slice(0, 70);
+        const isWorkingNow = workingIds.has(String(ag.id).padStart(2, '0'));
+        const plc = getAgentOfficePlacement(ag.id, ag.floor || '1F');
+        const searchBlob = [
+          ag.id, `#${ag.id}`, ag.name, rankLabel, partLabel, canonRole, cliKey, cliLabel, modelStr,
+          ...skillsArr, ...belongTeams.map(t => t.name)
+        ].join(' ').toLowerCase();
+
+        return `
+          <div class="agent-card-row" data-aid="${escHtml(ag.id)}" data-role="${escHtml(canonRole)}" data-rank="${escHtml(effRank)}" data-teams="${escHtml(belongTeams.map(t => t.id).join(','))}" data-name="${escHtml(searchBlob)}" data-status="${isWorkingNow ? 'running' : 'ready'}">
+            <div class="agent-cell">
+              <div class="agent-avatar" style="overflow:hidden;padding:1px;background:#f8fafc;border:1px solid #e2e8f0">${CharacterEngine.render(ag, { stance: ag.mapleAnim || 'stand1', animated: false })}</div>
+              <div>
+                <div class="agent-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span>#${escHtml(ag.id)} ${escHtml(ag.name)}</span>
+                  <span style="font-size:9.5px;padding:1.5px 6px;border-radius:5px;background:${effRank === 'LEAD' ? '#fef3c7' : (effRank === 'PART_LEAD' ? '#e0f2fe' : '#f1f5f9')};color:${effRank === 'LEAD' ? '#92400e' : (effRank === 'PART_LEAD' ? '#0369a1' : '#334155')};font-weight:800">${escHtml(rankLabel)}</span>
+                </div>
+                <div class="agent-type" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:3px">
+                  <span style="font-weight:700;color:#0f6848">${escHtml(partLabel)}</span>
+                  <span>·</span>
+                  <span>${escHtml(plc.floorStr)} #${plc.seatIndex + 1}석</span>
+                  <span>·</span>
+                  ${teamBadgesHtml}
+                </div>
+              </div>
+            </div>
+            <div class="agent-task" style="font-size:11.5px;color:#334155">
+              <div style="font-weight:800;color:#0f172a">🤖 ${escHtml(cliLabel)} · <code style="color:#0f6848;font-weight:800">${escHtml(modelStr)}</code></div>
+              <div style="font-size:10.5px;color:#64748b;margin-top:2px">${escHtml(skillsTxt)}</div>
+            </div>
+            <div>
+              <div style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;font-size:10px;font-weight:800">${escHtml(timeoutBadge)}</div>
+              <div class="agent-type" style="margin-top:4px">${ag.sandboxMode === 'proposal' ? '격리 제안(proposal)' : '읽기 안전(read-only)'}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap">
+              <span class="status ${isWorkingNow ? 'running' : 'review'}" style="${isWorkingNow ? '' : 'background:#ecfdf5;color:#0f6848'}">${isWorkingNow ? '⚡ 수행 중' : '✓ 준비됨'}</span>
+              <button type="button" class="btn small btn-roster-edit-agent" data-aid="${escHtml(ag.id)}" style="height:26px;padding:0 9px;font-size:10px">⚙ 편집 ↓</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      listEl.querySelectorAll('.btn-roster-edit-agent').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (studioSelectAgentFn) studioSelectAgentFn(btn.dataset.aid, true);
+        });
+      });
+    }
+
+    function applyAgentsRosterFilter() {
+      const q = (searchEl?.value || '').trim().toLowerCase();
       let visible = 0;
-      rows.forEach(row => {
-        const matchFilter =
-          activeFilter === 'all' ||
-          row.dataset.status === activeFilter ||
-          row.dataset.role === activeFilter;
-        const matchSearch = !q || row.dataset.name.toLowerCase().includes(q) || (row.textContent || '').toLowerCase().includes(q);
+      listEl.querySelectorAll('.agent-card-row').forEach(row => {
+        const rRole = row.dataset.role || '';
+        const rRank = row.dataset.rank || '';
+        const rTeams = (row.dataset.teams || '').split(',').filter(Boolean);
+        let matchFilter = true;
+        if (activeAgentsRosterFilter === 'RANK_LEAD') matchFilter = rRank === 'LEAD';
+        else if (activeAgentsRosterFilter === 'RANK_PART_LEAD') matchFilter = rRank === 'PART_LEAD';
+        else if (activeAgentsRosterFilter === 'RANK_STAFF') matchFilter = rRank === 'STAFF';
+        else if (activeAgentsRosterFilter.startsWith('TEAM_')) matchFilter = rTeams.includes(activeAgentsRosterFilter.slice(5));
+        else if (activeAgentsRosterFilter !== 'all') matchFilter = rRole === activeAgentsRosterFilter;
+
+        const matchSearch = !q || (row.dataset.name || '').includes(q) || (row.textContent || '').toLowerCase().includes(q);
         const show = matchFilter && matchSearch;
         row.style.display = show ? 'grid' : 'none';
         if (show) visible++;
       });
-      if (count) count.textContent = `${visible}개 Triad 핵심 에이전트 표시 중 · 캐릭터 스튜디오 ${modularAgents.length}명 연동`;
+      if (countEl) {
+        countEl.textContent = `전체 등록 AI 직원 ${modularAgents.length}명 중 ${visible}명 표시 중 (character_configs.json 실시간 일치)`;
+      }
       const empty = document.getElementById('noAgents');
       if (!visible && !empty) {
         const node = document.createElement('div');
         node.id = 'noAgents';
         node.className = 'empty-state';
-        node.textContent = '조건에 맞는 AI 직원을 찾지 못했습니다.';
-        document.getElementById('agentList')?.appendChild(node);
-      } else if (visible && empty) empty.remove();
+        node.textContent = '선택한 필터/검색어에 해당하는 AI 직원이 없습니다.';
+        listEl.appendChild(node);
+      } else if (visible && empty) {
+        empty.remove();
+      }
     }
 
-    chips.forEach(chip => chip.addEventListener('click', () => {
-      activeFilter = chip.dataset.filter;
-      chips.forEach(c => c.classList.toggle('active', c === chip));
-      filterRows();
-    }));
-    search?.addEventListener('input', filterRows);
+    if (searchEl && !searchEl.dataset.boundRoster) {
+      searchEl.dataset.boundRoster = '1';
+      searchEl.addEventListener('input', applyAgentsRosterFilter);
+    }
+    applyAgentsRosterFilter();
   }
+
+  function renderConfiguredTeamsAndMembersSection(ts, forceRender = false) {
+    const detailBox = document.getElementById('configuredTeamsDetailList');
+    const chipsBox = document.getElementById('configuredTeamsSummaryChips');
+    const sumBadge = document.getElementById('configuredTeamsSummaryBadge');
+    const addTeamBtn = document.getElementById('btnConfiguredTeamsAddTeam');
+    const syncBtn = document.getElementById('btnRefreshAgentsSync');
+    if (addTeamBtn && !addTeamBtn.dataset.bound) {
+      addTeamBtn.dataset.bound = '1';
+      addTeamBtn.addEventListener('click', () => {
+        if (typeof openTeamBuilderModal === 'function') openTeamBuilderModal(null);
+      });
+    }
+    if (syncBtn && !syncBtn.dataset.bound) {
+      syncBtn.dataset.bound = '1';
+      syncBtn.addEventListener('click', async () => {
+        syncBtn.disabled = true;
+        try {
+          const [cRes, pRes, tRes] = await Promise.all([
+            apiFetch('/ops/character-config', { cache: 'no-store' }),
+            apiFetch('/ops/part-roles', { cache: 'no-store' }),
+            apiFetch('/ops/teams?refresh=1', { cache: 'no-store' })
+          ]);
+          const cData = cRes.ok ? await cRes.json() : null;
+          const pData = pRes.ok ? await pRes.json() : null;
+          const tData = tRes.ok ? await tRes.json() : null;
+          if (cData?.configs) {
+            lastServerCharConfigSig = '';
+            syncServerCharConfigsIntoRuntime(cData.configs, true);
+          }
+          if (pData?.part_roles) syncPartRolesToDOM(pData.part_roles, true);
+          if (tData) renderTeamsAndWorkspacesDashboard(tData, true);
+        } finally {
+          syncBtn.disabled = false;
+        }
+      });
+    }
+
+    if (!detailBox) return;
+    const teams = Array.isArray(ts?.teams) ? ts.teams : [];
+    const assignedSet = new Set();
+    teams.forEach(t => (t.member_ids || []).forEach(mid => assignedSet.add(String(mid).padStart(2, '0'))));
+    const unassignedAgents = modularAgents.filter(a => !assignedSet.has(a.id));
+
+    if (sumBadge) {
+      sumBadge.textContent = `구성된 팀 ${teams.length}개 · 등록 직원 ${modularAgents.length}명${unassignedAgents.length ? ` (미배정 ${unassignedAgents.length}명)` : ''}`;
+    }
+
+    const sig = JSON.stringify([
+      teams.map(t => [t.id, t.name, t.floor, t.color, t.is_active, t.member_ids, t.workspace_status?.display_path]),
+      modularAgents.map(a => [a.id, a.name, a.triadRole, a.orgRank, a.cliProvider, a.cliModel, a.timeoutSec, a.floor])
+    ]);
+    const hasRenderedTeamCards = Boolean(detailBox.querySelector('[id^="confTeamCard_"]'));
+    if (!forceRender && sig === lastConfiguredTeamsSectionSig && (teams.length === 0 || hasRenderedTeamCards)) {
+      return;
+    }
+    lastConfiguredTeamsSectionSig = sig;
+
+    if (chipsBox) {
+      chipsBox.innerHTML = teams.map(t => {
+        const c = t.color || '#0f6848';
+        const cnt = Array.isArray(t.member_ids) ? t.member_ids.length : 0;
+        return `
+          <a href="#confTeamCard_${escHtml(t.id)}" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;background:#ffffff;border:1.5px solid ${escHtml(c)}55;color:#0f172a;font-size:11px;font-weight:800;box-shadow:0 2px 6px rgba(15,23,42,0.04)">
+            <span style="width:8px;height:8px;border-radius:50%;background:${escHtml(c)}"></span>
+            <span>[${escHtml(t.floor || '1F')}] ${escHtml(t.name)}</span>
+            <span style="background:${escHtml(c)}16;color:${escHtml(c)};padding:1px 7px;border-radius:999px;font-size:10px">팀원 ${cnt}명</span>
+            ${t.is_active ? '<span style="color:#b45309;font-size:10px">★ 기본</span>' : ''}
+          </a>
+        `;
+      }).join('');
+    }
+
+    const rankOrderVal = (ag) => {
+      const cr = normalizeAgentPartRoleId(ag.triadRole);
+      if (cr === 'LEAD' || ag.orgRank === 'LEAD') return 0;
+      if (ag.orgRank === 'STAFF') return 2;
+      return 1;
+    };
+
+    const cardsHtml = teams.map(t => {
+      const c = t.color || '#0f6848';
+      const ws = t.workspace_status || {};
+      const gd = ws.gdrive_direct || {};
+      const isCloud = Boolean(ws.is_cloud_primary && gd.folder_url);
+      const memIds = Array.isArray(t.member_ids) ? t.member_ids : [];
+      const memberObjs = memIds.map(mid => {
+        const normId = String(mid).padStart(2, '0');
+        const found = modularAgents.find(a => a.id === normId) || ALL_AGENT_PRESETS.find(a => a.id === normId) || { id: normId, name: `직원 #${normId}`, triadRole: 'PART_BUILD', orgRank: 'STAFF', cliProvider: 'antigravity_sdk', timeoutSec: 'auto', floor: t.floor };
+        const saved = savedCharAiConfigs[normId] || {};
+        return { ...found, ...saved, id: normId };
+      }).sort((a, b) => (rankOrderVal(a) - rankOrderVal(b)) || ((parseInt(a.id, 10) || 99) - (parseInt(b.id, 10) || 99)));
+
+      const leadCount = memberObjs.filter(m => rankOrderVal(m) === 0).length;
+      const pLeadCount = memberObjs.filter(m => rankOrderVal(m) === 1).length;
+      const staffCount = memberObjs.filter(m => rankOrderVal(m) === 2).length;
+
+      const folderDisp = isCloud
+        ? `☁️ Google Drive: <a href="${escHtml(gd.folder_url)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline">${escHtml(gd.folder_name || gd.folder_url)} ↗</a>`
+        : `📂 작업 폴더: <code style="font-size:10px;color:#1e293b">${escHtml(ws.display_path || ws.effective_dir || 'deliverables/')}</code>`;
+
+      const rowsHtml = memberObjs.map(m => {
+        const cr = normalizeAgentPartRoleId(m.triadRole);
+        const effRank = cr === 'LEAD' ? 'LEAD' : (m.orgRank === 'STAFF' ? 'STAFF' : 'PART_LEAD');
+        const rkBadge = formatOrgRankBadge(effRank, cr);
+        const partLbl = getPartRoleDisplayLabel(cr);
+        const cliKey = m.cliProvider || 'antigravity_sdk';
+        const cliLbl = CLI_BADGE_LABELS[cliKey] || cliKey;
+        const modLbl = m.cliModel || '계정 기본 모델';
+        const toLbl = formatAgentTimeoutBadge(m.timeoutSec);
+        const plc = getAgentOfficePlacement(m.id, m.floor || t.floor || '1F');
+        return `
+          <tr style="border-top:1px solid #eef2f6">
+            <td style="padding:7px 10px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="width:28px;height:32px;flex-shrink:0">${CharacterEngine.render(m, { stance: m.mapleAnim || 'stand1', animated: false })}</div>
+                <div>
+                  <strong style="font-size:11.5px;color:#0f172a">#${escHtml(m.id)} ${escHtml(m.name)}</strong>
+                  ${(Array.isArray(m.skills) && m.skills.length) ? `<div style="font-size:9.5px;color:#64748b">⚡ ${escHtml(m.skills.slice(0, 3).join(' · '))}</div>` : ''}
+                </div>
+              </div>
+            </td>
+            <td style="padding:7px 8px;white-space:nowrap">
+              <span style="padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;background:${effRank === 'LEAD' ? '#fef3c7' : (effRank === 'PART_LEAD' ? '#e0f2fe' : '#f1f5f9')};color:${effRank === 'LEAD' ? '#92400e' : (effRank === 'PART_LEAD' ? '#0369a1' : '#334155')}">${escHtml(rkBadge)}</span>
+            </td>
+            <td style="padding:7px 8px;font-size:11px;font-weight:700;color:#0f6848;white-space:nowrap">${escHtml(partLbl)}</td>
+            <td style="padding:7px 8px;font-size:11px">
+              <span class="char-cli-badge ${escHtml(cliKey)}" style="margin:0 4px 0 0">${escHtml(cliLbl)}</span>
+              <code style="font-size:10.5px;color:#0f172a;font-weight:800">${escHtml(modLbl)}</code>
+            </td>
+            <td style="padding:7px 8px;white-space:nowrap"><span style="font-size:10px;font-weight:800;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;padding:2px 6px;border-radius:5px">${escHtml(toLbl)}</span></td>
+            <td style="padding:7px 8px;font-size:10.5px;color:#475569;white-space:nowrap">${escHtml(plc.floorStr)} · #${plc.seatIndex + 1}석</td>
+            <td style="padding:7px 10px;text-align:right;white-space:nowrap">
+              <button type="button" class="btn small btn-conf-team-edit-member" data-aid="${escHtml(m.id)}" style="height:24px;padding:0 8px;font-size:9.5px">⚙ 직원 편집 ↓</button>
+              ${memIds.length > 1 ? `<button type="button" class="btn small btn-conf-team-rem-member" data-tid="${escHtml(t.id)}" data-aid="${escHtml(m.id)}" style="height:24px;padding:0 7px;font-size:9.5px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">제외</button>` : ''}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <div id="confTeamCard_${escHtml(t.id)}" style="border-radius:12px;background:#ffffff;border:1px solid #cbd5e1;border-left:5px solid ${escHtml(c)};overflow:hidden;box-shadow:0 3px 10px rgba(15,23,42,0.03)">
+          <div style="padding:11px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="display:flex;flex-direction:column;gap:3px">
+              <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                <span style="background:${escHtml(c)}18;color:${escHtml(c)};border:1px solid ${escHtml(c)}44;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:800">🏢 ${escHtml(t.floor || '1F')}</span>
+                <strong style="font-size:13.5px;color:#0f172a">${escHtml(t.name)}</strong>
+                ${t.is_active ? '<span class="team-active-pill">★ 현재 기본 작업팀</span>' : ''}
+                <span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800">소속 팀원 ${memberObjs.length}명 (총괄 ${leadCount} · 파트장 ${pLeadCount} · 사원 ${staffCount})</span>
+              </div>
+              <div style="font-size:10.5px;color:#475569;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                ${t.description ? `<span>${escHtml(t.description)}</span><span>·</span>` : ''}
+                <span>${folderDisp}</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn small btn-conf-team-open-dir" data-dir="${escHtml(ws.active_project_dir || ws.effective_dir || '')}" data-cloud-url="${isCloud ? escHtml(gd.folder_url) : ''}" data-tname="${escHtml(t.name)}" data-tid="${escHtml(t.id)}" style="height:26px;padding:0 9px;font-size:10px">${isCloud ? '☁️ 웹 폴더 열기 ↗' : '🗂️ 작업폴더 열기'}</button>
+              <button type="button" class="btn small btn-conf-team-edit" data-tid="${escHtml(t.id)}" style="height:26px;padding:0 9px;font-size:10px;background:#f0fdf4;color:#0f6848;border-color:#86efac">✏️ 팀 설정·팀원 편집</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;text-align:left">
+              <thead>
+                <tr style="background:#ffffff;font-size:10px;color:#64748b;text-transform:uppercase">
+                  <th style="padding:7px 10px">소속 팀원 (사번 · 이름 · 스킬)</th>
+                  <th style="padding:7px 8px">직급</th>
+                  <th style="padding:7px 8px">담당 파트</th>
+                  <th style="padding:7px 8px">AI 엔진 · 세부 실행 모델</th>
+                  <th style="padding:7px 8px">타임아웃</th>
+                  <th style="padding:7px 8px">오피스 좌석</th>
+                  <th style="padding:7px 10px;text-align:right">빠른 관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8;font-size:11px">배정된 팀원이 없습니다.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const unassignedHtml = unassignedAgents.length
+      ? `
+        <div style="padding:11px 14px;border-radius:11px;background:#fffbeb;border:1px dashed #f59e0b;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:11px;color:#92400e">
+            <strong>📌 아직 팀에 배정되지 않은 등록 AI 직원 (${unassignedAgents.length}명):</strong>
+            ${unassignedAgents.map(ua => `<span style="margin-left:6px;font-weight:800">#${escHtml(ua.id)} ${escHtml(ua.name)} (${escHtml(ua.cliModel || ua.cliProvider)})</span>`).join(',')}
+          </div>
+          <a href="#agentsTeamPlacementSection" class="btn small" style="height:25px;padding:0 9px;font-size:10px;background:#fef3c7;color:#92400e;border-color:#f59e0b">팀 배치 보드에서 배정 ↓</a>
+        </div>
+      `
+      : '';
+
+    detailBox.innerHTML = cardsHtml + unassignedHtml;
+
+    detailBox.querySelectorAll('.btn-conf-team-edit').forEach(b => {
+      b.addEventListener('click', () => {
+        if (typeof openTeamBuilderModal === 'function') openTeamBuilderModal(b.dataset.tid);
+      });
+    });
+    detailBox.querySelectorAll('.btn-conf-team-open-dir').forEach(b => {
+      b.addEventListener('click', () => {
+        if (b.dataset.cloudUrl) {
+          window.open(b.dataset.cloudUrl, '_blank', 'noopener');
+          return;
+        }
+        openLocalFolderExplorer(b.dataset.dir || '', b.dataset.tname || '', b.dataset.tid || null);
+      });
+    });
+    detailBox.querySelectorAll('.btn-conf-team-edit-member').forEach(b => {
+      b.addEventListener('click', () => {
+        if (studioSelectAgentFn) studioSelectAgentFn(b.dataset.aid, true);
+      });
+    });
+    detailBox.querySelectorAll('.btn-conf-team-rem-member').forEach(b => {
+      b.addEventListener('click', () => {
+        assignAgentToTeamAndPlace(b.dataset.aid, b.dataset.tid, 'remove');
+      });
+    });
+  }
+
+  let activeDashboardTeamFilter = 'all';
+  let lastDashboardAgentsSig = '';
+  let lastDeliverablesSummarySig = '';
+  let showAllDeliverablesSummary = false;
+  const expandedDeliverableIds = new Set();
+
+  function renderDashboardAgentsAndStats(forceRender = false) {
+    const provMap = getActiveCliProvidersMap();
+    const provKeys = Object.keys(provMap);
+    const loggedInKeys = provKeys.filter(k => (provMap[k]?.auth_state || 'LOGGED_IN') === 'LOGGED_IN');
+    const teamsArr = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams : [];
+    const missionsArr = Array.isArray(latestActivitySnapshot?.missions) ? latestActivitySnapshot.missions : [];
+    const workingArr = Array.isArray(latestActivitySnapshot?.working_now) ? latestActivitySnapshot.working_now : [];
+    const workingMap = new Map();
+    workingArr.forEach(w => {
+      if (w && w.agent_id) workingMap.set(String(w.agent_id).padStart(2, '0'), w);
+    });
+
+    // 1. Sync Top Dashboard Stat Cards & Hero Subtitle on index.html
+    const statTotal = document.getElementById('statTotalAgents');
+    const statBadge = document.getElementById('statTotalAgentsBadge');
+    const statDesc = document.getElementById('statTotalAgentsDesc');
+    const heroSub = document.getElementById('dashboardHeroSubtitle');
+    const statRevCnt = document.getElementById('statReviewCount');
+    const statRevFoot = document.getElementById('statReviewFoot');
+    const statGuardVal = document.getElementById('statDashGuardValue');
+    const statGuardBadge = document.getElementById('statDashGuardBadge');
+    const statGuardSub = document.getElementById('statDashGuardSub');
+
+    if (statTotal) {
+      statTotal.innerHTML = `${String(modularAgents.length).padStart(2, '0')}<span style="font-size:13px;color:#98a5b2;font-weight:700;margin-left:3px">명</span>`;
+    }
+    const primaryProv = provMap[provKeys[0]] || {};
+    const tierUp = String(primaryProv.orchestrator_tier || '').toUpperCase();
+    const engineSummaryTxt = provKeys.map(k => {
+      const p = provMap[k] || {};
+      const shortLbl = (p.label || k).replace(/\s*\(.*?\)\s*/g, '').trim();
+      return p.orchestrator_tier && p.orchestrator_tier !== 'none'
+        ? `${shortLbl} (${String(p.orchestrator_tier).toUpperCase()})`
+        : shortLbl;
+    }).join(' · ');
+
+    if (statBadge) {
+      statBadge.textContent = `${loggedInKeys.length || provKeys.length}개 엔진 · ${teamsArr.length || 2}개 팀`;
+    }
+    if (statDesc) {
+      statDesc.textContent = workingMap.size > 0
+        ? `⚡ 현재 ${workingMap.size}명 실시간 작업 중 · ${engineSummaryTxt}`
+        : (engineSummaryTxt || 'Antigravity SDK ($0)');
+    }
+    if (heroSub) {
+      const teamNamesTxt = teamsArr.length
+        ? teamsArr.map(t => `${t.name}(${(t.member_ids || []).length}명)`).join(', ')
+        : `등록 에이전트 ${modularAgents.length}명`;
+      heroSub.textContent = `연동된 AI 엔진 ${provKeys.length}개(${engineSummaryTxt || 'Antigravity SDK'})와 ${teamsArr.length || 2}개 전담 팀[${teamNamesTxt}] 총 ${modularAgents.length}명의 AI 에이전트가 실시간 연동되어 있습니다.`;
+    }
+    if (statRevCnt || statRevFoot) {
+      const awaitingCnt = missionsArr.filter(m => m && m.status === 'AWAITING_APPROVAL').length;
+      const doneCnt = missionsArr.filter(m => m && m.status === 'DONE').length;
+      if (statRevCnt) {
+        statRevCnt.textContent = awaitingCnt > 0 ? `대기 ${awaitingCnt}건` : (doneCnt > 0 ? `완료 ${doneCnt}건` : 'PASS');
+      }
+      if (statRevFoot) {
+        statRevFoot.textContent = awaitingCnt > 0
+          ? `대표님 최종 결재 대기 ${awaitingCnt}건`
+          : `최종 승인 완료 ${doneCnt}건 · 상호검토 활성`;
+      }
+    }
+    if (statGuardVal) {
+      const autoCnt = modularAgents.filter(a => !a.timeoutSec || String(a.timeoutSec).toLowerCase() === 'auto').length;
+      statGuardVal.textContent = autoCnt === modularAgents.length ? 'AUTO' : `AUTO ${autoCnt}/${modularAgents.length}`;
+      if (statGuardBadge) statGuardBadge.textContent = tierUp === 'ULTRA' ? '💎 Ultra · $0' : '$0 구독전용';
+      if (statGuardSub) statGuardSub.textContent = `스트림 활동 자동 연장 (${modularAgents.length}명 연동)`;
+    }
+
+    // 2. Sync Bottom Dashboard Agent Table (#dashboardAgentTableBody)
+    const tbody = document.getElementById('dashboardAgentTableBody');
+    const filtersWrap = document.getElementById('dashboardAgentTeamFilters');
+    const subCap = document.getElementById('dashboardAgentsSubCaption');
+    if (!tbody) return;
+
+    if (subCap) {
+      subCap.textContent = `연결 엔진: ${engineSummaryTxt || 'Antigravity SDK'} · 총 ${teamsArr.length}개 팀 · 등록 에이전트 ${modularAgents.length}명${workingMap.size ? ` (⚡ 실시간 작업 ${workingMap.size}명)` : ''}`;
+    }
+
+    const sig = JSON.stringify([
+      activeDashboardTeamFilter,
+      provKeys.map(k => [k, provMap[k]?.label, provMap[k]?.auth_state, provMap[k]?.orchestrator_tier]),
+      teamsArr.map(t => [t.id, t.name, t.floor, t.color, t.member_ids]),
+      modularAgents.map(a => [a.id, a.name, a.triadRole, a.orgRank, a.cliProvider, a.cliModel, a.timeoutSec, a.floor]),
+      Array.from(workingMap.entries())
+    ]);
+    if (!forceRender && sig === lastDashboardAgentsSig && tbody.querySelector('tr[data-dash-aid]')) {
+      return;
+    }
+    lastDashboardAgentsSig = sig;
+
+    if (filtersWrap) {
+      const validFilters = ['all', 'working', ...teamsArr.map(t => `team:${t.id}`)];
+      if (!validFilters.includes(activeDashboardTeamFilter)) activeDashboardTeamFilter = 'all';
+      const chipItems = [
+        { key: 'all', label: `전체 (${modularAgents.length})` },
+        ...teamsArr.map(t => ({ key: `team:${t.id}`, label: `🏢 ${t.name} (${(t.member_ids || []).length})` })),
+        ...(workingMap.size > 0 ? [{ key: 'working', label: `⚡ 작업 중 (${workingMap.size})` }] : [])
+      ];
+      filtersWrap.innerHTML = chipItems.map(c => {
+        const isOn = c.key === activeDashboardTeamFilter;
+        return `<button type="button" class="btn small dash-agent-filter-btn" data-dfilter="${escHtml(c.key)}" style="height:25px;padding:0 9px;font-size:10px;${isOn ? 'background:#0f6848;color:#fff;border-color:#0f6848;font-weight:800' : 'background:#fff;color:#334155'}">${escHtml(c.label)}</button>`;
+      }).join('');
+      filtersWrap.querySelectorAll('.dash-agent-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activeDashboardTeamFilter = btn.dataset.dfilter || 'all';
+          renderDashboardAgentsAndStats(true);
+        });
+      });
+    }
+
+    const rankOrder = (ag) => {
+      const cr = normalizeAgentPartRoleId(ag.triadRole);
+      if (cr === 'LEAD' || ag.orgRank === 'LEAD') return 0;
+      if (ag.orgRank === 'STAFF') return 2;
+      return 1;
+    };
+
+    const filteredAgents = [...modularAgents]
+      .filter(ag => {
+        if (activeDashboardTeamFilter === 'working') return workingMap.has(ag.id);
+        if (activeDashboardTeamFilter.startsWith('team:')) {
+          const tid = activeDashboardTeamFilter.slice(5);
+          const tObj = teamsArr.find(t => t.id === tid);
+          return Boolean(tObj && Array.isArray(tObj.member_ids) && tObj.member_ids.includes(ag.id));
+        }
+        return true;
+      })
+      .sort((a, b) => (parseInt(a.id, 10) || 99) - (parseInt(b.id, 10) || 99));
+
+    if (!filteredAgents.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="padding:18px;text-align:center;color:#94a3b8;font-size:11.5px">선택한 조건에 해당하는 AI 에이전트가 없습니다.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filteredAgents.map(ag => {
+      const canonRole = normalizeAgentPartRoleId(ag.triadRole);
+      const effRank = canonRole === 'LEAD' ? 'LEAD' : (ag.orgRank === 'STAFF' ? 'STAFF' : 'PART_LEAD');
+      const rankLbl = formatOrgRankBadge(effRank, canonRole);
+      const partLbl = getPartRoleDisplayLabel(canonRole);
+      const cliKey = (ag.cliProvider && provMap[ag.cliProvider]) ? ag.cliProvider : (provKeys[0] || 'antigravity_sdk');
+      const provInfo = provMap[cliKey] || {};
+      const cliLbl = provInfo.label || CLI_BADGE_LABELS[cliKey] || cliKey;
+      const isLogged = (provInfo.auth_state || 'LOGGED_IN') === 'LOGGED_IN';
+      const modStr = ag.cliModel || provInfo.selected_model || '기본 모델';
+      const toStr = formatAgentTimeoutBadge(ag.timeoutSec);
+      const plc = getAgentOfficePlacement(ag.id, ag.floor || '1F');
+      const belongTeams = teamsArr.filter(t => Array.isArray(t.member_ids) && t.member_ids.includes(ag.id));
+      const teamBadges = belongTeams.length
+        ? belongTeams.map(t => `<span style="display:inline-flex;align-items:center;padding:1.5px 7px;border-radius:999px;background:${escHtml(t.color || '#0f6848')}15;color:${escHtml(t.color || '#0f6848')};border:1px solid ${escHtml(t.color || '#0f6848')}40;font-size:10px;font-weight:800">🏢 ${escHtml(t.name)}</span>`).join(' ')
+        : `<span style="font-size:10px;color:#94a3b8">미배정</span>`;
+      const workInfo = workingMap.get(ag.id) || null;
+      const statusHtml = workInfo
+        ? `<span class="status running" title="${escHtml(workInfo.task || workInfo.stage || '')}">⚡ 수행 중 · ${escHtml((workInfo.stage || 'ACTIVE').slice(0, 18))}</span>`
+        : `<span class="status review" style="background:${isLogged ? '#ecfdf5' : '#fef2f2'};color:${isLogged ? '#0f6848' : '#b91c1c'}">${isLogged ? '✓ 연동 대기' : '미로그인'}</span>`;
+
+      return `
+        <tr data-dash-aid="${escHtml(ag.id)}">
+          <td>
+            <div class="agent-cell">
+              <div class="agent-avatar" style="overflow:hidden;padding:1px;background:#f8fafc;border:1px solid #e2e8f0">${CharacterEngine.render(ag, { stance: ag.mapleAnim || 'stand1', animated: false })}</div>
+              <div>
+                <div class="agent-name">#${escHtml(ag.id)} ${escHtml(ag.name)}</div>
+                <div class="agent-type">${Array.isArray(ag.skills) && ag.skills.length ? `⚡ ${escHtml(ag.skills.slice(0, 2).join(' · '))}` : escHtml(canonRole)}</div>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">
+              ${teamBadges}
+              <span style="font-size:10px;color:#64748b">${escHtml(plc.floorStr)} · #${plc.seatIndex + 1}석</span>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex;flex-direction:column;gap:2px;align-items:flex-start">
+              <span style="padding:1.5px 6px;border-radius:5px;font-size:10px;font-weight:800;background:${effRank === 'LEAD' ? '#fef3c7' : (effRank === 'PART_LEAD' ? '#e0f2fe' : '#f1f5f9')};color:${effRank === 'LEAD' ? '#92400e' : (effRank === 'PART_LEAD' ? '#0369a1' : '#334155')}">${escHtml(rankLbl)}</span>
+              <span style="font-size:10.5px;font-weight:700;color:#0f6848">${escHtml(partLbl)}</span>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">
+              <span class="cli-pill ${escHtml(cliKey)}" style="font-size:10px;padding:2px 7px">${escHtml(cliLbl)}</span>
+              <code style="font-size:10.5px;color:#0f172a;font-weight:800">${escHtml(modStr)}</code>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span style="font-size:9.5px;font-weight:800;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;padding:2px 6px;border-radius:5px">${escHtml(toStr)}</span>
+              ${statusHtml}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderDashboardDeliverablesSummary(missions, forceRender = false) {
+    const delivBox = document.getElementById('deliverablesListBox');
+    const sumBadge = document.getElementById('deliverablesSummaryBadge');
+    if (!delivBox) return;
+
+    const list = Array.isArray(missions) ? missions : [];
+    const doneMissions = list.filter(m => m && m.status === 'DONE' && (m.deliverable_file || (Array.isArray(m.generated_files) && m.generated_files.length > 0)));
+    const totalFilesCount = doneMissions.reduce((acc, m) => acc + (Array.isArray(m.generated_files) ? m.generated_files.length : 0), 0);
+
+    if (sumBadge) {
+      sumBadge.textContent = doneMissions.length > 0
+        ? `완료 ${doneMissions.length}건 · 파일 ${totalFilesCount}개`
+        : '완료 0건';
+    }
+
+    const sig = JSON.stringify([
+      showAllDeliverablesSummary,
+      Array.from(expandedDeliverableIds).sort(),
+      doneMissions.map(m => [m.mission_id, m.updated_at, m.deliverable_file, (m.generated_files || []).length, m.gdrive_project_url])
+    ]);
+    if (!forceRender && sig === lastDeliverablesSummarySig) {
+      return;
+    }
+    lastDeliverablesSummarySig = sig;
+
+    if (doneMissions.length === 0) {
+      delivBox.innerHTML = `
+        <div style="padding:16px;border-radius:10px;background:#f8fafc;border:1px dashed #cbd5e1;text-align:center;color:#64748b;font-size:11.5px">
+          아직 최종 승인 확정된 프로젝트 산출물이 없습니다. 대표 결재함에서 승인하면 이곳에 요약 목록으로 정리됩니다.
+        </div>
+      `;
+      return;
+    }
+
+    const SUMMARY_LIMIT = 5;
+    const visibleList = showAllDeliverablesSummary ? doneMissions : doneMissions.slice(0, SUMMARY_LIMIT);
+    const hiddenCount = Math.max(0, doneMissions.length - visibleList.length);
+
+    const rowsHtml = visibleList.map(mItem => {
+      const mid = mItem.mission_id || '';
+      const genFiles = Array.isArray(mItem.generated_files) ? mItem.generated_files : [];
+      const absProjDir = mItem.project_dir_abs || mItem.output_root || '';
+      const isGdMission = Boolean(mItem.is_google_drive);
+      const gdCloudUrl = mItem.gdrive_project_url || mItem.gdrive_report_url || '';
+      const folderShort = mItem.project_folder_name
+        || (absProjDir ? absProjDir.replace(/\\/g, '/').split('/').filter(Boolean).pop() : '')
+        || (mItem.deliverable_file ? mItem.deliverable_file.replace(/\.md$/i, '').split('/').pop() : mid);
+      const goalFull = String(mItem.goal || folderShort || mid).trim();
+      const goalShort = goalFull.length > 44 ? `${goalFull.slice(0, 44)}…` : goalFull;
+      const tColor = mItem.team_color || '#0f6848';
+      const isExpanded = expandedDeliverableIds.has(mid);
+
+      const teamTag = mItem.team_name
+        ? `<span style="background:${escHtml(tColor)}15;color:${escHtml(tColor)};border:1px solid ${escHtml(tColor)}38;padding:1px 6px;border-radius:5px;font-size:9.5px;font-weight:800;white-space:nowrap">${escHtml(mItem.team_name.replace(' 개발팀', '팀').replace('신규 서비스 ', ''))}</span>`
+        : '';
+      const fileCountTag = `<span style="background:#f1f5f9;color:#334155;padding:1px 6px;border-radius:5px;font-size:9.5px;font-weight:800;white-space:nowrap">파일 ${genFiles.length}개</span>`;
+      const contTag = mItem.continue_existing
+        ? `<span style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;padding:1px 6px;border-radius:5px;font-size:9px;font-weight:800;white-space:nowrap">📂 이어하기</span>`
+        : '';
+
+      const expandedDetailHtml = isExpanded
+        ? `
+          <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:5px;font-size:10px">
+            <div style="color:#475569;font-family:var(--font-mono,monospace);word-break:break-all">📂 폴더: ${escHtml(folderShort)}${absProjDir ? ` (${escHtml(absProjDir)})` : ''}</div>
+            ${genFiles.length
+          ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${genFiles.map(f => {
+            const baseName = String(f).split('/').pop() || f;
+            return `<a href="${escHtml(f)}" target="_blank" style="background:#ffffff;border:1px solid #bbf7d0;color:#166534;padding:1.5px 6px;border-radius:4px;font-size:9.5px;font-weight:700" title="${escHtml(f)}">📄 ${escHtml(baseName)}</a>`;
+          }).join('')}</div>`
+          : ''}
+          </div>
+        `
+        : '';
+
+      return `
+        <div data-mission-id="${escHtml(mid)}" style="padding:8px 11px;border-radius:9px;border:1px solid #d1fae5;background:#f8fefb;display:flex;flex-direction:column">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px;min-width:0;flex:1;flex-wrap:wrap">
+              ${teamTag}
+              ${contTag}
+              <strong style="font-size:11.5px;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(goalFull)}">${isGdMission ? '☁️ ' : '📁 '}${escHtml(goalShort)}</strong>
+              ${fileCountTag}
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap">
+              ${mItem.deliverable_file ? `<a href="${escHtml(mItem.deliverable_file)}" target="_blank" class="btn small" style="height:23px;padding:0 8px;font-size:9.5px;background:#ecfdf5;color:#0f6848;border-color:#86efac;font-weight:800">📄 리포트 ↗</a>` : ''}
+              ${absProjDir ? `<button type="button" class="btn small btn-open-deliv-dir" data-dir="${escHtml(absProjDir)}" style="height:23px;padding:0 7px;font-size:9.5px">🗂️ 폴더</button>` : ''}
+              ${gdCloudUrl ? `<a href="${escHtml(gdCloudUrl)}" target="_blank" class="btn small" style="height:23px;padding:0 7px;font-size:9.5px;background:#e0f2fe;color:#0369a1;border-color:#7dd3fc">☁️ Drive ↗</a>` : ''}
+              ${genFiles.length > 0 ? `<button type="button" class="btn small btn-toggle-deliv-detail" data-mid="${escHtml(mid)}" style="height:23px;padding:0 7px;font-size:9.5px;color:#475569">${isExpanded ? '접기 ▴' : '상세 ▾'}</button>` : ''}
+            </div>
+          </div>
+          ${expandedDetailHtml}
+        </div>
+      `;
+    }).join('');
+
+    const moreToggleHtml = (doneMissions.length > SUMMARY_LIMIT)
+      ? `<button type="button" id="btnToggleAllDeliverablesSummary" class="btn small" style="align-self:center;height:25px;padding:0 12px;font-size:10px;color:#475569">${showAllDeliverablesSummary ? '▴ 최근 5건만 요약 보기' : `▾ 이전 완료 산출물 ${hiddenCount}건 더보기`}</button>`
+      : '';
+
+    delivBox.innerHTML = rowsHtml + moreToggleHtml;
+
+    delivBox.querySelectorAll('.btn-open-deliv-dir').forEach(b => {
+      b.addEventListener('click', () => {
+        openLocalFolderExplorer(b.dataset.dir || '', '프로젝트 산출물 폴더');
+      });
+    });
+    delivBox.querySelectorAll('.btn-toggle-deliv-detail').forEach(b => {
+      b.addEventListener('click', () => {
+        const mid = b.dataset.mid;
+        if (!mid) return;
+        if (expandedDeliverableIds.has(mid)) expandedDeliverableIds.delete(mid);
+        else expandedDeliverableIds.add(mid);
+        renderDashboardDeliverablesSummary(missions, true);
+      });
+    });
+    document.getElementById('btnToggleAllDeliverablesSummary')?.addEventListener('click', () => {
+      showAllDeliverablesSummary = !showAllDeliverablesSummary;
+      renderDashboardDeliverablesSummary(missions, true);
+    });
+  }
+
+  renderConfiguredAgentsRosterFn = renderConfiguredAgentsRoster;
+  renderConfiguredTeamsSectionFn = renderConfiguredTeamsAndMembersSection;
+  renderDashboardAgentsAndStatsFn = renderDashboardAgentsAndStats;
 
   // ==========================================================================
   // [5] AI DEV DIRECTOR × NEXUS Virtual Office (Triad Role & Multi-CLI 연동)
@@ -1767,6 +2748,7 @@
   const CLI_LABELS = {
     claude: 'Claude Code (claude)',
     antigravity: 'Google Antigravity (계정 1)',
+    antigravity_sdk: 'Antigravity SDK (구독·로컬 $0)',
     gemini: 'Google Antigravity (계정 2)',
     openai: 'OpenAI Codex (codex)',
     grok: 'xAI Grok (grok)'
@@ -1774,6 +2756,7 @@
   const CLI_SHORT = {
     claude: 'Claude',
     antigravity: 'Antigravity 1',
+    antigravity_sdk: 'AGY SDK',
     gemini: 'Antigravity 2',
     openai: 'Codex',
     grok: 'Grok'
@@ -1786,7 +2769,7 @@
       if (parsed && parsed.head && parsed.builder && parsed.reviewer) {
         return { sub_builder: 'gemini', researcher: 'grok', ...parsed };
       }
-    } catch (_) {}
+    } catch (_) { }
     return { head: 'claude', builder: 'antigravity', sub_builder: 'gemini', reviewer: 'openai', researcher: 'grok' };
   }
 
@@ -1794,21 +2777,466 @@
   let localPipelineTimer = null;
   let selectedOrchestratorMode = 'standard';
 
+  if (page === 'agents') {
+    renderConfiguredAgentsRoster(true);
+  }
+
+  function buildSdkModelOptionsHtml(selectedModel = '', cliProvider = 'antigravity_sdk') {
+    const cur = String(selectedModel || '').trim();
+    const provDiag = lastDiagnostics?.providers?.[cliProvider] || lastDiagnostics?.providers?.antigravity_sdk || null;
+    const dynModels = Array.isArray(provDiag?.available_models)
+      ? provDiag.available_models.filter(m => m && m.id && !m.locked)
+      : [];
+    const mergedMap = new Map();
+    VERIFIED_SDK_SUBMODELS.forEach(m => mergedMap.set(m.id, m.label));
+    dynModels.forEach(m => {
+      if (!mergedMap.has(m.id)) {
+        mergedMap.set(m.id, m.name || m.label || m.id);
+      }
+    });
+    if (cur && !mergedMap.has(cur)) {
+      mergedMap.set(cur, `${cur} (현재 지정됨)`);
+    }
+    const opts = [`<option value="" ${!cur ? 'selected' : ''}>🔄 계정 기본 모델</option>`];
+    mergedMap.forEach((lbl, id) => {
+      opts.push(`<option value="${escHtml(id)}" ${id === cur ? 'selected' : ''}>🤖 ${escHtml(lbl)}</option>`);
+    });
+    return opts.join('');
+  }
+
+  async function applyQuickAgentModelOrRank(agentId, patch, feedbackTarget = 'part') {
+    const ag = modularAgents.find(a => a.id === agentId) || ALL_AGENT_PRESETS.find(a => a.id === agentId);
+    if (!ag) return;
+    if (patch.cliModel !== undefined) {
+      ag.cliModel = String(patch.cliModel || '').trim();
+      if (ag.cliModel && VERIFIED_SDK_SUBMODELS.some(m => m.id === ag.cliModel)) {
+        ag.cliProvider = 'antigravity_sdk';
+      }
+    }
+    if (patch.orgRank !== undefined) {
+      ag.orgRank = patch.orgRank;
+      if (ag.orgRank === 'LEAD') ag.triadRole = 'LEAD';
+      else if (ag.triadRole === 'LEAD' || ag.triadRole === 'HEAD') ag.triadRole = 'PART_RESEARCH';
+    }
+    if (patch.triadRole !== undefined) {
+      ag.triadRole = patch.triadRole;
+      if (ag.triadRole === 'LEAD') ag.orgRank = 'LEAD';
+      else if (ag.orgRank === 'LEAD') ag.orgRank = 'PART_LEAD';
+    }
+    ag.dept = `${ag.triadRole} (${ag.orgRank || 'STAFF'}) · ${CLI_BADGE_LABELS[ag.cliProvider] || ag.cliProvider}${ag.cliModel ? ` (${ag.cliModel})` : ''}`;
+    await saveCharacterConfigsToServer(ag);
+    if (studioRefreshDirectoryFn) studioRefreshDirectoryFn();
+    if (currentPartRoles) syncPartRolesToDOM(currentPartRoles, true);
+    if (latestTeamsSummary) renderAgentsTeamPlacementBoard(latestTeamsSummary, true);
+    const msg = `✓ [#${ag.id} ${ag.name}] 직급(${formatOrgRankBadge(ag.orgRank, ag.triadRole)}) · 세부 모델(${ag.cliModel || '기본 모델'}) 설정이 즉시 저장되었습니다.`;
+    if (feedbackTarget === 'table') {
+      showAgentsPlacementFeedback(msg);
+    } else {
+      const fbBar = document.getElementById('partRolesFeedbackBar');
+      if (fbBar) {
+        fbBar.style.display = 'block';
+        fbBar.textContent = msg;
+      }
+    }
+  }
+
+  function syncPartRolesToDOM(partRolesCfg, forceGridRender = false) {
+    if (!partRolesCfg || typeof partRolesCfg !== 'object') return;
+    currentPartRoles = partRolesCfg;
+    if (renderConfiguredAgentsRosterFn) renderConfiguredAgentsRosterFn(forceGridRender);
+    if (renderConfiguredTeamsSectionFn && window.NEXUS_TEAMS_SUMMARY) {
+      renderConfiguredTeamsSectionFn(window.NEXUS_TEAMS_SUMMARY, forceGridRender);
+    }
+    try {
+      localStorage.setItem('nexus-part-roles-v1', JSON.stringify(partRolesCfg));
+    } catch (_) { }
+
+    const assignable = Array.isArray(partRolesCfg.assignable_roles) ? partRolesCfg.assignable_roles : [];
+    const stages = Array.isArray(partRolesCfg.pipeline_stages) ? partRolesCfg.pipeline_stages : [];
+    const parts = Array.isArray(partRolesCfg.parts) ? partRolesCfg.parts : [];
+    const lead = partRolesCfg.lead || { id: 'LEAD', name: '프로젝트 총괄팀장', icon: '👑', instruction: '' };
+
+    const staffExecMode = partRolesCfg.staff_execution_mode === 'sequential' ? 'sequential' : 'parallel';
+    const staffModeSel = document.getElementById('staffExecModeSelect');
+    if (staffModeSel && document.activeElement !== staffModeSel) {
+      staffModeSel.value = staffExecMode;
+      if (!staffModeSel.dataset.bound) {
+        staffModeSel.dataset.bound = '1';
+        staffModeSel.addEventListener('change', async (ev) => {
+          const nextMode = ev.currentTarget.value;
+          const fbBar = document.getElementById('partRolesFeedbackBar');
+          const res = await apiFetch('/ops/part-roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_staff_mode', mode: nextMode })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.part_roles) {
+            syncPartRolesToDOM(d.part_roles, true);
+            if (fbBar) {
+              fbBar.style.display = 'block';
+              fbBar.textContent = `✓ ${d.message || '사원 실행 모드가 변경되었습니다.'}`;
+            }
+          }
+        });
+      }
+    }
+
+    // 1. Update #partRolesCountBadge & #partRolesCardsGrid on agents.html
+    const cntBadge = document.getElementById('partRolesCountBadge');
+    if (cntBadge) {
+      const activeCnt = parts.filter(p => p.enabled !== false).length;
+      cntBadge.textContent = `총괄팀장 1 · 활성 파트 ${activeCnt}/${parts.length}개`;
+    }
+
+    const cardsGrid = document.getElementById('partRolesCardsGrid');
+    if (cardsGrid && (forceGridRender || !cardsGrid.contains(document.activeElement))) {
+      const teamsLookup = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams : [];
+      const renderMemberTeamTag = (aid) => {
+        const bt = teamsLookup.filter(t => Array.isArray(t.member_ids) && t.member_ids.includes(aid));
+        if (!bt.length) return '';
+        return bt.map(t => `<span style="font-size:8px;padding:1px 5px;border-radius:4px;background:${escHtml(t.color || '#0f6848')}18;color:${escHtml(t.color || '#0f6848')};font-weight:800;white-space:nowrap">${escHtml(t.name.replace(' 개발팀', '팀').replace('신규 서비스 ', ''))}</span>`).join(' ');
+      };
+      const leadAgents = modularAgents.filter(a => normalizeAgentPartRoleId(a.triadRole) === 'LEAD');
+      const leadRosterHtml = leadAgents.length
+        ? leadAgents.map(la => `
+          <div style="font-size:10px;padding:5px 7px;border-radius:7px;background:#fff7ed;border:1px solid #fed7aa;display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+              <span class="part-member-chip" data-focus-aid="${escHtml(la.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 하단 스튜디오에서 상세 페르소나 편집">👑 <b>#${escHtml(la.id)} ${escHtml(la.name)}</b> ${renderMemberTeamTag(la.id)}</span>
+              <small style="color:#0f6848;font-weight:800">SDK</small>
+            </div>
+            <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(la.id)}" style="height:25px;font-size:9.5px;font-weight:700;background:#fff;width:100%" aria-label="${escHtml(la.name)} 세부 모델 선택">
+              ${buildSdkModelOptionsHtml(la.cliModel, la.cliProvider)}
+            </select>
+          </div>
+        `).join('')
+        : `<div style="font-size:9.5px;color:#94a3b8">배정된 총괄팀장 캐릭터 없음 (자동 위임)</div>`;
+
+      const leadCardHtml = `
+        <div style="padding:12px 14px;border-radius:11px;border:1.5px solid #f59e0b;background:linear-gradient(180deg,#fffbeb,#ffffff);display:flex;flex-direction:column;gap:7px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+            <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;background:#fef3c7;color:#92400e">총괄 지휘 · 통합보고 (고정 코어)</span>
+            <button type="button" class="btn small btn-edit-part-role" data-role-id="LEAD" style="height:24px;padding:0 8px;font-size:9.5px">✏️ 이름·지침 수정</button>
+          </div>
+          <strong style="font-size:13px;color:#0f172a">${escHtml(lead.icon || '👑')} ${escHtml(lead.name)} <code style="font-size:9.5px;color:#64748b">(LEAD)</code></strong>
+          <div style="font-size:10.5px;color:#475569;line-height:1.45">${escHtml(lead.instruction || '')}</div>
+          <div style="margin-top:auto;padding-top:6px;border-top:1px dashed #fde68a;display:flex;flex-direction:column;gap:4px">
+            <span style="font-size:9.5px;font-weight:800;color:#92400e">팀별 총괄팀장 세부 실행 모델 설정 (${leadAgents.length}명)</span>
+            ${leadRosterHtml}
+          </div>
+        </div>
+      `;
+      const partsCardsHtml = parts.map((p, idx) => {
+        const isOn = p.enabled !== false;
+        const pMembers = modularAgents.filter(a => normalizeAgentPartRoleId(a.triadRole) === p.id);
+        const pLeads = pMembers.filter(a => String(a.orgRank || '').toUpperCase() !== 'STAFF');
+        const pStaff = pMembers.filter(a => String(a.orgRank || '').toUpperCase() === 'STAFF');
+        const effLeadsList = pLeads.length ? pLeads : (pStaff[0] ? [pStaff[0]] : []);
+        const effStaffList = pLeads.length ? pStaff : pStaff.slice(1);
+
+        const leadRowHtml = effLeadsList.length
+          ? effLeadsList.map(plObj => `
+            <div style="font-size:10px;padding:5px 7px;border-radius:7px;background:#ecfdf5;border:1px solid #86efac;display:flex;flex-direction:column;gap:3.5px">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
+                <span class="part-member-chip" data-focus-aid="${escHtml(plObj.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 파트장 상세 페르소나 편집">⭐ 파트장 · <b>#${escHtml(plObj.id)} ${escHtml(plObj.name)}</b> ${renderMemberTeamTag(plObj.id)}</span>
+                <span style="font-size:8.5px;color:#0f6848;font-weight:800">SDK 고정</span>
+              </div>
+              <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(plObj.id)}" style="height:24px;font-size:9.5px;font-weight:700;background:#fff;width:100%" aria-label="${escHtml(plObj.name)} 파트장 세부 모델 선택">
+                ${buildSdkModelOptionsHtml(plObj.cliModel, plObj.cliProvider)}
+              </select>
+            </div>
+          `).join('')
+          : `<div style="font-size:9.5px;color:#94a3b8;padding:3px 0">파트장 미지정 (자동 배정)</div>`;
+
+        const isPartParallel = effStaffList.length >= 2 && staffExecMode !== 'sequential';
+        const staffRowsHtml = effStaffList.length
+          ? effStaffList.map((st, sIdx) => `
+            <div style="font-size:9.5px;padding:5px 7px 5px 12px;border-radius:7px;background:#f8fafc;border:1px solid #cbd5e1;display:flex;flex-direction:column;gap:3.5px">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
+                <span class="part-member-chip" data-focus-aid="${escHtml(st.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 일반 사원 상세 페르소나·스킬 편집">↳ 👤 사원 · <b>#${escHtml(st.id)} ${escHtml(st.name)}</b> ${renderMemberTeamTag(st.id)}</span>
+                <span style="font-size:8px;color:${isPartParallel ? '#0f6848' : '#0369a1'};font-weight:800;background:${isPartParallel ? '#dcfce7' : '#e0f2fe'};padding:1px 5px;border-radius:4px">${isPartParallel ? `⚡ 병렬 #${(st.staffOrder || (sIdx % 2) + 1)}` : `순차 #${sIdx + 1}`}</span>
+              </div>
+              <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(st.id)}" style="height:24px;font-size:9.5px;font-weight:700;background:#fff;color:#0f172a;width:100%" aria-label="${escHtml(st.name)} 사원 세부 모델 선택">
+                ${buildSdkModelOptionsHtml(st.cliModel, st.cliProvider)}
+              </select>
+            </div>
+          `).join('')
+          : `<div style="font-size:9.5px;color:#94a3b8;padding-left:8px">↳ 소속 부하직원 없음 (아래에서 모델 선택 후 [＋ 사원 충원] 클릭)</div>`;
+
+        return `
+          <div style="padding:12px 14px;border-radius:11px;border:1.5px solid ${isOn ? '#86efac' : '#cbd5e1'};background:${isOn ? '#f8fefb' : '#f8fafc'};opacity:${isOn ? '1' : '0.68'};display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
+              <label style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;color:${isOn ? '#0f6848' : '#64748b'};cursor:pointer">
+                <input type="checkbox" class="chk-toggle-part-role" data-role-id="${escHtml(p.id)}" ${isOn ? 'checked' : ''} style="accent-color:#0f6848">
+                <span>실무 파트 #${idx + 1} (${isOn ? '활성' : '비활성'})</span>
+              </label>
+              <div style="display:flex;gap:4px;align-items:center">
+                <button type="button" class="btn small btn-move-part-role" data-role-id="${escHtml(p.id)}" data-dir="up" ${idx === 0 ? 'disabled' : ''} style="height:22px;padding:0 6px;font-size:9px" title="순서 앞으로">▲</button>
+                <button type="button" class="btn small btn-move-part-role" data-role-id="${escHtml(p.id)}" data-dir="down" ${idx === parts.length - 1 ? 'disabled' : ''} style="height:22px;padding:0 6px;font-size:9px" title="순서 뒤로">▼</button>
+                <button type="button" class="btn small btn-edit-part-role" data-role-id="${escHtml(p.id)}" style="height:22px;padding:0 7px;font-size:9px">✏️ 수정</button>
+                ${parts.length > 1 ? `<button type="button" class="btn-remove-cli-slot btn-delete-part-role" data-role-id="${escHtml(p.id)}" style="height:22px;padding:0 6px;font-size:9px">🗑️</button>` : ''}
+              </div>
+            </div>
+            <strong style="font-size:12.5px;color:#0f172a">${escHtml(p.icon || '🧩')} ${escHtml(p.name)} <small style="color:#0369a1;font-weight:700">[${escHtml(p.stage_label || p.name)}]</small></strong>
+            <div style="font-size:10.5px;color:#475569;line-height:1.45">${escHtml(p.instruction || '')}</div>
+            <div style="margin-top:auto;padding-top:7px;border-top:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:5px">
+              <div style="font-size:9.5px;font-weight:800;color:#0f6848">${isPartParallel ? `⚡ 사원 ${effStaffList.length}명 동시 병렬수행 (사원1 ∥ 사원2 → 파트장 취합)` : `파이프라인 진행: 일반사원(${effStaffList.length}명) → 파트장 취합`}</div>
+              ${leadRowHtml}
+              ${staffRowsHtml}
+              <div style="display:flex;gap:4px;align-items:center;margin-top:2px;padding-top:4px;border-top:1px dotted #e2e8f0">
+                <select class="triad-cli-select sel-recruit-staff-model" data-role-id="${escHtml(p.id)}" style="height:24px;font-size:9px;background:#fff;flex:1;min-width:0" aria-label="신규 충원 사원 세부 모델 선택">
+                  ${buildSdkModelOptionsHtml('gemini-3.8-flash-high', 'antigravity_sdk')}
+                </select>
+                <button type="button" class="btn small btn-recruit-part-staff" data-role-id="${escHtml(p.id)}" style="height:24px;padding:0 8px;font-size:8.5px;background:#f0fdf4;color:#0f6848;border-color:#86efac;white-space:nowrap;flex-shrink:0" title="선택한 SDK 세부 모델로 일반 사원을 이 파트에 즉시 추가합니다">＋ 사원 충원</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+      cardsGrid.innerHTML = leadCardHtml + partsCardsHtml;
+
+      cardsGrid.querySelectorAll('.sel-inline-agent-model').forEach(sel => {
+        sel.addEventListener('change', async (ev) => {
+          const aid = ev.currentTarget.dataset.aid;
+          const nextModel = ev.currentTarget.value;
+          await applyQuickAgentModelOrRank(aid, { cliModel: nextModel }, 'part');
+        });
+      });
+
+      cardsGrid.querySelectorAll('.part-member-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const aid = chip.dataset.focusAid;
+          if (aid && studioSelectAgentFn) studioSelectAgentFn(aid, true);
+        });
+      });
+
+      cardsGrid.querySelectorAll('.btn-recruit-part-staff').forEach(btn => {
+        btn.addEventListener('click', async (ev) => {
+          const pid = ev.currentTarget.dataset.roleId;
+          const modSel = cardsGrid.querySelector(`.sel-recruit-staff-model[data-role-id="${pid}"]`);
+          const chosenMod = (modSel?.value || '').trim();
+          const fbBar = document.getElementById('partRolesFeedbackBar');
+          ev.currentTarget.disabled = true;
+          try {
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'recruit_staff', part_id: pid, model: chosenMod })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.ok) {
+              if (d.character_configs) syncServerCharConfigsIntoRuntime(d.character_configs, true);
+              if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
+              if (d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+              if (fbBar) {
+                fbBar.style.display = 'block';
+                fbBar.textContent = `✓ ${d.message || '새 SDK 부하직원이 파트에 배치되었습니다.'}`;
+              }
+            } else {
+              alert(d.error || '사원 충원에 실패했습니다.');
+            }
+          } finally {
+            ev.currentTarget.disabled = false;
+          }
+        });
+      });
+
+      cardsGrid.querySelectorAll('.chk-toggle-part-role').forEach(chk => {
+        chk.addEventListener('change', async (ev) => {
+          const rid = ev.currentTarget.dataset.roleId;
+          const enabled = ev.currentTarget.checked;
+          const res = await apiFetch('/ops/part-roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update', id: rid, enabled })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+          else {
+            alert(d.error || '최소 1개 이상의 파트는 활성 상태여야 합니다.');
+            ev.currentTarget.checked = !enabled;
+          }
+        });
+      });
+
+      cardsGrid.querySelectorAll('.btn-move-part-role').forEach(btn => {
+        btn.addEventListener('click', async (ev) => {
+          const rid = ev.currentTarget.dataset.roleId;
+          const direction = ev.currentTarget.dataset.dir;
+          const res = await apiFetch('/ops/part-roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'reorder', id: rid, direction })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+        });
+      });
+
+      cardsGrid.querySelectorAll('.btn-edit-part-role').forEach(btn => {
+        btn.addEventListener('click', async (ev) => {
+          const rid = ev.currentTarget.dataset.roleId;
+          const targetObj = rid === 'LEAD' ? lead : parts.find(x => x.id === rid);
+          if (!targetObj) return;
+          const nextName = prompt(`[${targetObj.name}] 표시 이름을 수정하세요:`, targetObj.name);
+          if (nextName === null) return;
+          const nextStage = rid === 'LEAD'
+            ? targetObj.stage_label
+            : prompt(`[${nextName || targetObj.name}] 파이프라인 단계 라벨을 수정하세요:`, targetObj.stage_label || targetObj.name);
+          if (nextStage === null) return;
+          const nextInst = prompt(`[${nextName || targetObj.name}] 전담 업무 및 검증 지침을 수정하세요:`, targetObj.instruction || '');
+          if (nextInst === null) return;
+          const res = await apiFetch('/ops/part-roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'update',
+              id: rid,
+              name: nextName.trim() || targetObj.name,
+              stage_label: (nextStage || '').trim() || targetObj.stage_label,
+              instruction: nextInst.trim() || targetObj.instruction
+            })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+        });
+      });
+
+      cardsGrid.querySelectorAll('.btn-delete-part-role').forEach(btn => {
+        btn.addEventListener('click', async (ev) => {
+          const rid = ev.currentTarget.dataset.roleId;
+          const targetObj = parts.find(x => x.id === rid);
+          if (!confirm(`[${targetObj?.name || rid}] 파트를 파이프라인에서 제거하시겠습니까?`)) return;
+          const res = await apiFetch('/ops/part-roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'delete', id: rid })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+          else if (d.error) alert(d.error);
+        });
+      });
+    }
+
+    // 2. Bind #partRoleAddForm & #btnResetPartRoles once
+    const addForm = document.getElementById('partRoleAddForm');
+    if (addForm && !addForm.dataset.bound) {
+      addForm.dataset.bound = '1';
+      addForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const iconVal = document.getElementById('newPartIconSelect')?.value || '🧩';
+        const nameInp = document.getElementById('newPartNameInput');
+        const stageInp = document.getElementById('newPartStageInput');
+        const instInp = document.getElementById('newPartInstInput');
+        const fbBar = document.getElementById('partRolesFeedbackBar');
+        const nameVal = (nameInp?.value || '').trim();
+        if (!nameVal) return;
+        const res = await apiFetch('/ops/part-roles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'add',
+            icon: iconVal,
+            name: nameVal,
+            stage_label: (stageInp?.value || '').trim(),
+            instruction: (instInp?.value || '').trim()
+          })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok && d.part_roles) {
+          if (nameInp) nameInp.value = '';
+          if (stageInp) stageInp.value = '';
+          if (instInp) instInp.value = '';
+          syncPartRolesToDOM(d.part_roles, true);
+          if (fbBar) {
+            fbBar.style.display = 'block';
+            fbBar.textContent = `✓ ${d.message || '새 파트가 파이프라인에 추가되었습니다.'}`;
+          }
+        }
+      });
+    }
+    const sdkSquadBtn = document.getElementById('btnApplySdkSquadPreset');
+    if (sdkSquadBtn && !sdkSquadBtn.dataset.bound) {
+      sdkSquadBtn.dataset.bound = '1';
+      sdkSquadBtn.addEventListener('click', async () => {
+        const fbBar = document.getElementById('partRolesFeedbackBar');
+        sdkSquadBtn.disabled = true;
+        try {
+          const res = await apiFetch('/ops/part-roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'apply_sdk_squad' })
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.ok) {
+            if (d.character_configs) syncServerCharConfigsIntoRuntime(d.character_configs, true);
+            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
+            if (d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+            if (fbBar) {
+              fbBar.style.display = 'block';
+              fbBar.textContent = `✓ ${d.message || '10인 Antigravity SDK 표준 편제가 적용되었습니다.'}`;
+            }
+          } else if (d.error) {
+            alert(d.error);
+          }
+        } finally {
+          sdkSquadBtn.disabled = false;
+        }
+      });
+    }
+    const resetBtn = document.getElementById('btnResetPartRoles');
+    if (resetBtn && !resetBtn.dataset.bound) {
+      resetBtn.dataset.bound = '1';
+      resetBtn.addEventListener('click', async () => {
+        if (!confirm('총괄팀장 + 기본 3대 파트(자료수집 · 기획구조 · 제작구현) 구성으로 복원하시겠습니까?')) return;
+        const res = await apiFetch('/ops/part-roles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reset' })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+      });
+    }
+
+    // 3. Sync #studioQuickRole dropdown dynamically
+    const quickRoleSel = document.getElementById('studioQuickRole');
+    if (quickRoleSel && document.activeElement !== quickRoleSel && assignable.length) {
+      const curVal = normalizeAgentPartRoleId(quickRoleSel.value || 'LEAD');
+      quickRoleSel.innerHTML = assignable.map(r => {
+        const offTag = r.enabled === false ? ' [비활성]' : '';
+        return `<option value="${escHtml(r.id)}" ${r.id === curVal ? 'selected' : ''}>${escHtml(r.icon || '🧩')} ${escHtml(r.name)} (${escHtml(r.id)})${offTag}</option>`;
+      }).join('') + `<option value="__add_new_part__">➕ 새 실무 파트 직접 추가...</option>`;
+    }
+
+    // 4. Sync #triadPipelineSteps dynamically on settings.html
+    const stepsWrap = document.getElementById('triadPipelineSteps');
+    if (stepsWrap && stages.length) {
+      stepsWrap.innerHTML = stages.map(st => {
+        const idxStr = String(st.index).padStart(2, '0');
+        return `<div class="triad-step" data-stage="${escHtml(st.stage)}"><b>${idxStr} · ${escHtml(st.title)}</b><span>${escHtml(st.icon || '')} ${escHtml(st.role_name || '')}</span></div>`;
+      }).join('');
+    }
+  }
+
   // 각 AI CLI의 로그인 계정 요금제(Plan) 자동 감지 및 일일 제한(Daily) / 월간 제한(Monthly) 구분 계산
   // 주의: 구글 개인 계정(@gmail.com) OAuth 토큰은 Google One 개인 구독 등급을 노출하지 않으므로 임의로 Pro로 단정하지 않고 기본 Free로 표시 후 직접 선택 지원
   const CLI_QUOTA_CAPS = {
-    claude:      { domain: 'ANTHROPIC', dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null },
-    antigravity: { domain: 'GOOGLE',    dailyCalls: 20, dailyTokens: 120000, monthlyCalls: 600,  monthlyTokens: 3600000,  planName: 'Google 계정 연결됨 (기본 Free 적용 · Pro/Ultra 구독 시 직접 선택)', planLabel: 'Google Free (또는 구독 직접 선택)', isSubscribed: true, isPaid: false, accountEmail: null },
-    gemini:      { domain: 'GEMINI2',   dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '서브 구글 계정 (계정 2) 로그인 필요', planLabel: '미로그인 (계정 2 로그인 대기)', isSubscribed: false, isPaid: false, accountEmail: null },
-    openai:      { domain: 'OPENAI',    dailyCalls: 15, dailyTokens: 60000,  monthlyCalls: 300,  monthlyTokens: 1200000,  planName: 'ChatGPT Free (무료 플랜 · 유료 미구독)', planLabel: 'ChatGPT Free (무료 플랜)', isSubscribed: true, isPaid: false, accountEmail: null },
-    grok:        { domain: 'XAI',       dailyCalls: 0,  dailyTokens: 0,      monthlyCalls: 0,    monthlyTokens: 0,        planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null }
+    claude: { domain: 'ANTHROPIC', dailyCalls: 0, dailyTokens: 0, monthlyCalls: 0, monthlyTokens: 0, planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null },
+    antigravity: { domain: 'GOOGLE', dailyCalls: 20, dailyTokens: 120000, monthlyCalls: 600, monthlyTokens: 3600000, planName: 'Google 계정 연결됨 (기본 Free 적용 · Pro/Ultra 구독 시 직접 선택)', planLabel: 'Google Free (또는 구독 직접 선택)', isSubscribed: true, isPaid: false, accountEmail: null },
+    antigravity_sdk: { domain: 'SDK', dailyCalls: 80, dailyTokens: 600000, monthlyCalls: 2400, monthlyTokens: 18000000, planName: 'Antigravity SDK · 로컬 구독/오픈모델 공유 ($0 · API 키 차단)', planLabel: 'SDK 구독·로컬 공유 ($0)', isSubscribed: true, isPaid: false, accountEmail: null },
+    gemini: { domain: 'GEMINI2', dailyCalls: 0, dailyTokens: 0, monthlyCalls: 0, monthlyTokens: 0, planName: '서브 구글 계정 (계정 2) 로그인 필요', planLabel: '미로그인 (계정 2 로그인 대기)', isSubscribed: false, isPaid: false, accountEmail: null },
+    openai: { domain: 'OPENAI', dailyCalls: 15, dailyTokens: 60000, monthlyCalls: 300, monthlyTokens: 1200000, planName: 'ChatGPT Free (무료 플랜 · 유료 미구독)', planLabel: 'ChatGPT Free (무료 플랜)', isSubscribed: true, isPaid: false, accountEmail: null },
+    grok: { domain: 'XAI', dailyCalls: 0, dailyTokens: 0, monthlyCalls: 0, monthlyTokens: 0, planName: '미구독 (연결된 플랜 없음)', planLabel: '미구독 (로그인 안 됨)', isSubscribed: false, isPaid: false, accountEmail: null }
   };
   let latestUsageByProvider = {
     ANTHROPIC: { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 },
-    GOOGLE:    { calls: 1, tokens: 0, monthly_calls: 1, monthly_tokens: 0 },
-    GEMINI2:   { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 },
-    OPENAI:    { calls: 2, tokens: 53475, monthly_calls: 2, monthly_tokens: 53475 },
-    XAI:       { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 }
+    GOOGLE: { calls: 1, tokens: 0, monthly_calls: 1, monthly_tokens: 0 },
+    SDK: { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 },
+    GEMINI2: { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 },
+    OPENAI: { calls: 2, tokens: 53475, monthly_calls: 2, monthly_tokens: 53475 },
+    XAI: { calls: 0, tokens: 0, monthly_calls: 0, monthly_tokens: 0 }
   };
 
   function getCliQuotaStatus(cliKey) {
@@ -1912,7 +3340,7 @@
       telemetrySource,
       level,
       statusBadgeText: `일일 잔여 ${dailyRemainPct}% · 월간 잔여 ${monthlyRemainPct}%${hasServerRatePct ? ' (서버실측)' : ''}`,
-      topSummaryText: `일일 ${dailyUsedCalls}/${dailyMaxCalls}회 (${(dailyUsedTokens/1000).toFixed(1)}k tok) · 월간 ${monthlyUsedCalls}/${monthlyMaxCalls}회`,
+      topSummaryText: `일일 ${dailyUsedCalls}/${dailyMaxCalls}회 (${(dailyUsedTokens / 1000).toFixed(1)}k tok) · 월간 ${monthlyUsedCalls}/${monthlyMaxCalls}회`,
       bottomMetaText: `구독 플랜: ${planName}${serverResetsAt ? ` · 리셋: ${serverResetsAt}` : ''}`
     };
   }
@@ -2032,7 +3460,7 @@
 
   function applyRolesToDOM(roles) {
     currentRoles = { ...currentRoles, ...roles };
-    try { localStorage.setItem(ROLE_STORAGE_KEY, JSON.stringify(currentRoles)); } catch (_) {}
+    try { localStorage.setItem(ROLE_STORAGE_KEY, JSON.stringify(currentRoles)); } catch (_) { }
 
     // 1. Update role select dropdowns
     document.querySelectorAll('[data-role-select]').forEach(sel => {
@@ -2083,13 +3511,22 @@
   }
 
   function updatePipelinePhaseDOM(phase, events = [], usage = null) {
-    const stages = ['PLANNING', 'BUILDING', 'VERIFYING', 'REVIEWING', 'DECIDING'];
-    const atIdx = stages.indexOf(phase);
+    const dynStages = (currentPartRoles && Array.isArray(currentPartRoles.pipeline_stages) && currentPartRoles.pipeline_stages.length)
+      ? currentPartRoles.pipeline_stages.map(s => s.stage)
+      : ['LEAD_PLANNING', 'PART_RESEARCH', 'PART_STRUCTURE', 'PART_BUILD', 'PART_REVIEW', 'LEAD_REPORT', 'AWAITING_APPROVAL'];
+    const legacyAliasPhase = {
+      PLANNING: 'LEAD_PLANNING',
+      BUILDING: 'PART_BUILD',
+      VERIFYING: 'PART_REVIEW',
+      REVIEWING: 'PART_REVIEW',
+      DECIDING: 'LEAD_REPORT'
+    }[phase] || phase;
+    const atIdx = dynStages.indexOf(legacyAliasPhase);
 
     document.querySelectorAll('#triadPipelineSteps .triad-step').forEach(stepEl => {
       const st = stepEl.dataset.stage;
-      const idx = stages.indexOf(st);
-      stepEl.classList.toggle('on', idx === atIdx);
+      const idx = dynStages.indexOf(st);
+      stepEl.classList.toggle('on', idx === atIdx && atIdx >= 0);
       stepEl.classList.toggle('done', atIdx > idx && atIdx >= 0);
     });
 
@@ -2110,18 +3547,26 @@
 
     const statPhase = document.getElementById('statActivePhase');
     const statSub = document.getElementById('statActiveSub');
+    const activeProvsNow = getActiveCliProvidersMap();
+    const activeEngineNames = Object.keys(activeProvsNow)
+      .map(k => CLI_SHORT[k] || (activeProvsNow[k]?.label || k).replace(/\s*\(.*?\)\s*/g, '').trim())
+      .join(' · ') || 'AGY SDK';
+    const runningMissionsCnt = Array.isArray(latestActivitySnapshot?.missions)
+      ? latestActivitySnapshot.missions.filter(m => m && m.status === 'RUNNING').length
+      : 0;
+    const teamsCnt = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams.length : 2;
     if (statPhase) statPhase.textContent = phase === 'IDLE' ? 'STANDBY' : phase;
     if (statSub) {
-      statSub.textContent = phase === 'IDLE'
-        ? `HEAD(${CLI_SHORT[currentRoles.head]}) · BUILDER(${CLI_SHORT[currentRoles.builder]}) · REVIEWER(${CLI_SHORT[currentRoles.reviewer]})`
-        : `파이프라인 ${phase} 단계 실행 중`;
+      statSub.textContent = (phase === 'IDLE' && runningMissionsCnt === 0)
+        ? `${teamsCnt}개 팀 · ${modularAgents.length}명 에이전트 대기 (${activeEngineNames})`
+        : `${runningMissionsCnt > 0 ? `${runningMissionsCnt}개 팀 가동 중 · ` : ''}${phase} 단계 실행 중`;
     }
 
     const topText = document.getElementById('topSystemText');
     if (topText) {
-      topText.textContent = phase === 'IDLE'
-        ? `TRIAD STANDBY · HEAD=${CLI_SHORT[currentRoles.head]} / BUILDER=${CLI_SHORT[currentRoles.builder]} / REVIEWER=${CLI_SHORT[currentRoles.reviewer]}`
-        : `TRIAD LIVE · ${phase} 실행 중`;
+      topText.textContent = (phase === 'IDLE' && runningMissionsCnt === 0)
+        ? `STANDBY · ${activeEngineNames} (${teamsCnt}팀 · ${modularAgents.length}명 연동)`
+        : `LIVE · ${phase} 실행 중 (${activeEngineNames})`;
     }
 
     // Update dashboard activity feed if events provided
@@ -2184,7 +3629,7 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(nextR)
             });
-          } catch (_) {}
+          } catch (_) { }
         });
         return;
       }
@@ -2203,7 +3648,7 @@
           body: JSON.stringify(nextRoles)
         });
         pollOrchestrator();
-      } catch (_) {}
+      } catch (_) { }
     });
   });
 
@@ -2236,8 +3681,199 @@
     localPipelineTimer = setInterval(stepFn, 1600);
   }
 
-  async function dispatchMissionGoal(goal, profile = 'standard', teamId = null) {
+  const teamContinueFolderState = {};
+
+  function getTeamContinueState(stateKey) {
+    const k = stateKey || '__global__';
+    if (!teamContinueFolderState[k]) {
+      teamContinueFolderState[k] = { mode: 'new', dir: '' };
+    }
+    return teamContinueFolderState[k];
+  }
+
+  function formatShortFolderLabel(rawPath) {
+    const s = String(rawPath || '').replace(/[\\/]+$/, '');
+    if (!s) return '';
+    const parts = s.split(/[\\/]/);
+    return parts[parts.length - 1] || s;
+  }
+
+  function buildDispatchFolderSwitchButtonsHtml(stateKey) {
+    const st = getTeamContinueState(stateKey);
+    const isCont = st.mode === 'continue';
+    return `
+      <div class="dispatch-folder-mode-switch" data-fmode-switch="${escHtml(stateKey)}" role="group" aria-label="작업 폴더 연결 방식 선택">
+        <button type="button" class="dispatch-fmode-btn ${!isCont ? 'active' : ''}" data-state-key="${escHtml(stateKey)}" data-fmode="new" title="새 프로젝트 작업 폴더(YYYYMMDD_프로젝트명)를 자동 생성하여 시작합니다">🆕 새 폴더로 시작</button>
+        <button type="button" class="dispatch-fmode-btn ${isCont ? 'active' : ''}" data-state-key="${escHtml(stateKey)}" data-fmode="continue" title="기존에 작업했던 폴더를 선택해 파일들을 유지한 채 추가·수정 작업을 이어갑니다">📂 기존 폴더 이어하기</button>
+      </div>
+    `;
+  }
+
+  function buildDispatchContinueBarHtml(stateKey, teamName, initBrowseDir, recentFolders) {
+    const st = getTeamContinueState(stateKey);
+    const isCont = st.mode === 'continue';
+    const recList = Array.isArray(recentFolders) ? recentFolders : [];
+    const normCur = String(st.dir || '').trim();
+    const inRec = normCur && recList.some(r => String(r.path || '').toLowerCase() === normCur.toLowerCase());
+    const customOptHtml = (normCur && !inRec)
+      ? `<option value="${escHtml(normCur)}" selected>📌 직접 선택: ${escHtml(formatShortFolderLabel(normCur))} (${escHtml(normCur)})</option>`
+      : '';
+    const recOptsHtml = recList.map(r => {
+      const rPath = String(r.path || '');
+      const isSel = normCur && rPath.toLowerCase() === normCur.toLowerCase();
+      return `<option value="${escHtml(rPath)}" ${isSel ? 'selected' : ''}>📂 ${escHtml(r.name || formatShortFolderLabel(rPath))} (파일 ${Number(r.file_count || 0)}개)</option>`;
+    }).join('');
+    const chipHtml = normCur
+      ? `<span class="dispatch-picked-chip" data-continue-chip="${escHtml(stateKey)}" style="background:#dcfce7;color:#166534;border:1px solid #86efac" title="${escHtml(normCur)}">✓ 이어할 폴더: <b>${escHtml(formatShortFolderLabel(normCur))}</b> <button type="button" class="btn-clear-continue-dir" data-state-key="${escHtml(stateKey)}" style="border:0;background:transparent;color:#15803d;font-weight:900;cursor:pointer;padding:0 2px;font-size:10px" title="선택 해제">✕</button></span>`
+      : `<span class="dispatch-picked-chip" data-continue-chip="${escHtml(stateKey)}" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a">최근 목록에서 고르거나 [🗂️ 폴더 선택]으로 기존 폴더를 지정하세요</span>`;
+
+    return `
+      <div class="dispatch-continue-bar" data-continue-bar="${escHtml(stateKey)}" style="display:${isCont ? 'flex' : 'none'}">
+        <span style="font-size:10px;font-weight:800;color:#0369a1;white-space:nowrap">📂 기존 폴더 이어하기:</span>
+        <select class="dispatch-recent-folder-select" data-state-key="${escHtml(stateKey)}" aria-label="${escHtml(teamName || '팀')} 최근 작업 폴더 목록">
+          <option value="">📋 최근 작업 폴더 목록 (${recList.length}개)...</option>
+          ${customOptHtml}
+          ${recOptsHtml}
+        </select>
+        <button type="button" class="btn small btn-pick-continue-dir" data-state-key="${escHtml(stateKey)}" data-tname="${escHtml(teamName || '팀')}" data-init-dir="${escHtml(normCur || initBrowseDir || '')}" style="height:29px;padding:0 10px;font-size:10px;background:#ffffff;color:#0369a1;border-color:#38bdf8;font-weight:800;white-space:nowrap">🗂️ 폴더 선택...</button>
+        ${chipHtml}
+      </div>
+    `;
+  }
+
+  function syncDispatchContinueUiForKey(rootEl, stateKey) {
+    if (!rootEl) return;
+    const st = getTeamContinueState(stateKey);
+    const isCont = st.mode === 'continue';
+    rootEl.querySelectorAll(`.dispatch-fmode-btn[data-state-key="${stateKey}"]`).forEach(b => {
+      b.classList.toggle('active', b.dataset.fmode === st.mode);
+    });
+    const bar = rootEl.querySelector(`[data-continue-bar="${stateKey}"]`);
+    if (bar) {
+      bar.style.display = isCont ? 'flex' : 'none';
+      const sel = bar.querySelector('.dispatch-recent-folder-select');
+      const pickBtn = bar.querySelector('.btn-pick-continue-dir');
+      const normCur = String(st.dir || '').trim();
+      if (sel) {
+        if (normCur) {
+          let matched = Array.from(sel.options).find(o => o.value.toLowerCase() === normCur.toLowerCase());
+          if (!matched) {
+            matched = document.createElement('option');
+            matched.value = normCur;
+            matched.textContent = `📌 직접 선택: ${formatShortFolderLabel(normCur)} (${normCur})`;
+            sel.insertBefore(matched, sel.options[1] || null);
+          }
+          sel.value = matched.value;
+        } else {
+          sel.value = '';
+        }
+      }
+      if (pickBtn && normCur) {
+        pickBtn.dataset.initDir = normCur;
+      }
+      const oldChip = bar.querySelector(`[data-continue-chip="${stateKey}"]`);
+      if (oldChip) {
+        const wrap = document.createElement('span');
+        wrap.innerHTML = normCur
+          ? `<span class="dispatch-picked-chip" data-continue-chip="${escHtml(stateKey)}" style="background:#dcfce7;color:#166534;border:1px solid #86efac" title="${escHtml(normCur)}">✓ 이어할 폴더: <b>${escHtml(formatShortFolderLabel(normCur))}</b> <button type="button" class="btn-clear-continue-dir" data-state-key="${escHtml(stateKey)}" style="border:0;background:transparent;color:#15803d;font-weight:900;cursor:pointer;padding:0 2px;font-size:10px" title="선택 해제">✕</button></span>`
+          : `<span class="dispatch-picked-chip" data-continue-chip="${escHtml(stateKey)}" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a">최근 목록에서 고르거나 [🗂️ 폴더 선택]으로 기존 폴더를 지정하세요</span>`;
+        const newChip = wrap.firstElementChild;
+        if (newChip) {
+          oldChip.replaceWith(newChip);
+          newChip.querySelector('.btn-clear-continue-dir')?.addEventListener('click', () => {
+            st.dir = '';
+            syncDispatchContinueUiForKey(rootEl, stateKey);
+          });
+        }
+      }
+    }
+    const form = rootEl.querySelector(`form[data-fstate-key="${stateKey}"]`) || (stateKey === '__global__' ? document.getElementById('triadGoalForm') : null);
+    const goalInp = form ? (form.querySelector('.team-dispatch-input') || form.querySelector('#triadGoalInput')) : null;
+    if (goalInp) {
+      if (!goalInp.dataset.origPlaceholder) {
+        goalInp.dataset.origPlaceholder = goalInp.getAttribute('placeholder') || '';
+      }
+      if (isCont) {
+        const fShort = st.dir ? `'${formatShortFolderLabel(st.dir)}' 폴더에 ` : '선택한 기존 폴더에 ';
+        goalInp.setAttribute('placeholder', `📂 ${fShort}추가·수정할 작업 지시 입력 (예: 실행 가능한 exe 파일 추가 빌드, 기능 보강 등)...`);
+      } else {
+        goalInp.setAttribute('placeholder', goalInp.dataset.origPlaceholder);
+      }
+    }
+  }
+
+  function bindDispatchFolderConnectControls(rootEl) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('.dispatch-fmode-btn').forEach(btn => {
+      if (btn.dataset.boundFmode === '1') return;
+      btn.dataset.boundFmode = '1';
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.stateKey || '__global__';
+        const st = getTeamContinueState(key);
+        st.mode = btn.dataset.fmode === 'continue' ? 'continue' : 'new';
+        if (st.mode === 'continue' && !st.dir) {
+          const bar = rootEl.querySelector(`[data-continue-bar="${key}"]`);
+          const sel = bar?.querySelector('.dispatch-recent-folder-select');
+          if (sel && sel.options.length > 1 && sel.options[1].value) {
+            st.dir = sel.options[1].value;
+          }
+        }
+        syncDispatchContinueUiForKey(rootEl, key);
+      });
+    });
+
+    rootEl.querySelectorAll('.dispatch-recent-folder-select').forEach(sel => {
+      if (sel.dataset.boundFsel === '1') return;
+      sel.dataset.boundFsel = '1';
+      sel.addEventListener('change', () => {
+        const key = sel.dataset.stateKey || '__global__';
+        const st = getTeamContinueState(key);
+        st.mode = 'continue';
+        st.dir = (sel.value || '').trim();
+        syncDispatchContinueUiForKey(rootEl, key);
+      });
+    });
+
+    rootEl.querySelectorAll('.btn-pick-continue-dir').forEach(btn => {
+      if (btn.dataset.boundFpick === '1') return;
+      btn.dataset.boundFpick = '1';
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.stateKey || '__global__';
+        const tname = btn.dataset.tname || '팀';
+        const st = getTeamContinueState(key);
+        openLocalFolderPicker({
+          initialDir: st.dir || btn.dataset.initDir || '',
+          teamId: null,
+          teamName: `${tname} · 이어할 기존 작업 폴더`,
+          onPicked: (pickedPath) => {
+            if (!pickedPath) return;
+            st.mode = 'continue';
+            st.dir = pickedPath;
+            syncDispatchContinueUiForKey(rootEl, key);
+          }
+        });
+      });
+    });
+
+    rootEl.querySelectorAll('.btn-clear-continue-dir').forEach(btn => {
+      if (btn.dataset.boundFclr === '1') return;
+      btn.dataset.boundFclr = '1';
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.stateKey || '__global__';
+        const st = getTeamContinueState(key);
+        st.dir = '';
+        syncDispatchContinueUiForKey(rootEl, key);
+      });
+    });
+  }
+
+  async function dispatchMissionGoal(goal, profile = 'standard', teamId = null, options = {}) {
     if (!goal || !goal.trim()) return { ok: false, error: '업무 목표를 입력해 주세요.' };
+    const folderMode = options?.folderMode === 'continue' ? 'continue' : 'new';
+    const continueDir = folderMode === 'continue' ? String(options?.continueDir || '').trim() : '';
+    if (folderMode === 'continue' && !continueDir) {
+      return { ok: false, error: '이어서 작업할 기존 폴더를 [최근 작업 폴더 목록]에서 선택하거나 [🗂️ 폴더 선택] 버튼으로 지정해 주세요.' };
+    }
     const effTeamId = teamId || document.getElementById('triadTeamSelect')?.value || (window.NEXUS_TEAMS_SUMMARY && window.NEXUS_TEAMS_SUMMARY.active_team_id) || null;
     try {
       const res = await apiFetch('/chat', {
@@ -2246,7 +3882,9 @@
         body: JSON.stringify({
           message: goal.trim(),
           profile,
-          team_id: effTeamId
+          team_id: effTeamId,
+          folder_mode: folderMode,
+          continue_dir: continueDir
         })
       });
       if (res.ok || res.status === 202) {
@@ -2263,7 +3901,7 @@
         if (replyText) replyText.textContent = msg;
         return { ok: false, error: msg };
       }
-    } catch (_) {}
+    } catch (_) { }
     startLocalPipelineFallback(goal.trim());
     return { ok: true, fallback: true };
   }
@@ -2278,7 +3916,7 @@
       if (res.ok) {
         return await res.json();
       }
-    } catch (_) {}
+    } catch (_) { }
     return {
       ok: true,
       mode: 'LOCAL_FALLBACK',
@@ -2317,7 +3955,7 @@
         input.focus();
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // In agents.html, clicking an agent row navigates to settings.html for quick question
   document.querySelectorAll('#agentList .agent-card-row').forEach(row => {
@@ -2380,9 +4018,16 @@
     const selTeamEl = document.getElementById('triadTeamSelect');
     const chosenTeamId = selTeamEl?.value || null;
     const chosenTeamLabel = selTeamEl?.options?.[selTeamEl.selectedIndex]?.text || '';
-    if (replyRole) replyRole.textContent = `[개발 미션 가동${chosenTeamLabel ? ` · ${chosenTeamLabel}` : ''} · ${mode.toUpperCase()}]`;
-    if (replyText) replyText.textContent = `'${goal}' 미션이 시작되었습니다. 선택한 팀의 역할 구성과 작업 폴더로 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)이 진행됩니다.`;
-    await dispatchMissionGoal(goal, mode, chosenTeamId);
+    const gState = getTeamContinueState('__global__');
+    if (gState.mode === 'continue' && !String(gState.dir || '').trim()) {
+      input.value = goal;
+      if (replyRole) replyRole.textContent = '[⚠️ 기존 폴더 미선택 안내]';
+      if (replyText) replyText.textContent = '기존 폴더 이어하기 모드입니다. 입력창 위의 [최근 작업 폴더 목록]에서 선택하거나 [🗂️ 폴더 선택]으로 이어할 폴더를 먼저 지정해 주세요.';
+      return;
+    }
+    if (replyRole) replyRole.textContent = `[개발 미션 가동${chosenTeamLabel ? ` · ${chosenTeamLabel}` : ''} · ${mode.toUpperCase()}${gState.mode === 'continue' ? ' · 기존폴더 이어하기' : ''}]`;
+    if (replyText) replyText.textContent = `'${goal}' 미션이 시작되었습니다. ${gState.mode === 'continue' ? `선택한 기존 작업 폴더(${gState.dir})에서 추가·수정 작업을 이어갑니다.` : '선택한 팀의 역할 구성과 새 작업 폴더로 파이프라인이 진행됩니다.'}`;
+    await dispatchMissionGoal(goal, mode, chosenTeamId, { folderMode: gState.mode, continueDir: gState.dir });
   });
 
   // Bind "+ 미션 목표 지시" button on agents.html
@@ -2405,7 +4050,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: '버추얼 오피스 작업 정지 버튼' })
       });
-    } catch (_) {}
+    } catch (_) { }
     updatePipelinePhaseDOM('IDLE', [
       { to_state: 'STOPPED', state_ko: '작업 정지 실행 · 모든 실행 중인 미션 및 CLI 프로세스 종료', role: 'DIRECTOR', run_id: 'stop-signal' }
     ]);
@@ -2419,7 +4064,7 @@
         if (res.status !== 404 && res.status !== 405 && res.status !== 501) {
           return res;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     // Fallback to explicit local orchestrator server on 127.0.0.1:8080 (supports file:// or Live Server 5500)
     return fetch(`http://127.0.0.1:8080${path}`, options);
@@ -2607,6 +4252,7 @@
             <span class="triad-role-badge role-reviewer">💬 1줄 질문 테스트</span>
             <select id="cliModalAskTarget" class="triad-cli-select" style="height:32px">
               <option value="antigravity">Google Antigravity (agy · 계정1)</option>
+              <option value="antigravity_sdk">📦 Antigravity SDK (구독·로컬 $0)</option>
               <option value="gemini">Google Gemini 2 (gemini · 계정2)</option>
               <option value="claude">Claude Code (claude)</option>
               <option value="openai">OpenAI Codex (codex)</option>
@@ -2748,16 +4394,26 @@
       CLI_BADGE_LABELS[k] = lbl;
     });
 
-    // Save active CLI options to localStorage so office.js can also read them
+    // Save active CLI options to localStorage so office.js & fast page boot also read exact active slots
     try {
       const slotSummary = keys.map(k => ({
         key: k,
         label: CLI_LABELS[k],
         short: CLI_SHORT[k],
-        base_type: providersObj[k]?.base_type || k
+        base_type: providersObj[k]?.base_type || k,
+        domain: providersObj[k]?.domain || (k === 'antigravity_sdk' ? 'SDK' : k.toUpperCase()),
+        cli: providersObj[k]?.cli || (k === 'antigravity_sdk' ? 'agy-sdk' : k),
+        auth_state: providersObj[k]?.auth_state || 'LOGGED_IN',
+        selected_model_display: providersObj[k]?.selected_model_display || '기본 모델'
       }));
       localStorage.setItem('nexus-cli-slots-v1', JSON.stringify(slotSummary));
-    } catch (_) {}
+    } catch (_) { }
+
+    // Update sidebar active CLI caption across pages
+    document.querySelectorAll('.sidebar .workspace-caption').forEach(capEl => {
+      const activeEngineNames = keys.map(k => providersObj[k]?.label || CLI_SHORT[k] || k).join(' · ');
+      capEl.innerHTML = `${escHtml(activeEngineNames)}<br>LEAD · PART_RESEARCH · PART_STRUCTURE · PART_BUILD`;
+    });
 
     // 2. Sync all [data-role-select] dropdowns
     document.querySelectorAll('[data-role-select]').forEach(sel => {
@@ -2781,26 +4437,29 @@
     }
 
     // 4. Normalize agent cliProvider if pointing to a removed slot & sync #studioQuickCli + #studioCliCardGroup
-    const fallbackSlot = providersObj.antigravity ? 'antigravity' : keys[0];
+    const fallbackSlot = providersObj.antigravity_sdk ? 'antigravity_sdk' : (providersObj.antigravity ? 'antigravity' : keys[0]);
     modularAgents.forEach(ag => {
       if (!ag.cliProvider || !providersObj[ag.cliProvider]) {
         ag.cliProvider = fallbackSlot;
       }
     });
+    const studioBadgeAid = (document.getElementById('selectedCharBadge')?.textContent || '#01').replace('#', '').trim();
+    const selStudioAg = modularAgents.find(a => a.id === studioBadgeAid) || modularAgents[0] || null;
+    const desiredStudioCli = (selStudioAg?.cliProvider && keys.includes(selStudioAg.cliProvider)) ? selStudioAg.cliProvider : fallbackSlot;
+
     const studioCliSel = document.getElementById('studioQuickCli');
-    if (studioCliSel) {
-      const prevVal = studioCliSel.value && keys.includes(studioCliSel.value) ? studioCliSel.value : keys[0];
+    if (studioCliSel && document.activeElement !== studioCliSel) {
       studioCliSel.innerHTML = keys.map(k =>
-        `<option value="${k}" ${k === prevVal ? 'selected' : ''}>${CLI_LABELS[k]}</option>`
+        `<option value="${escHtml(k)}" ${k === desiredStudioCli ? 'selected' : ''}>${escHtml(CLI_LABELS[k])}</option>`
       ).join('') + `<option value="__add_new_cli__">➕ 드롭다운에서 새 CLI 로그인 추가...</option>`;
-      studioCliSel.value = prevVal;
+      studioCliSel.value = desiredStudioCli;
     }
 
     const studioCardGroup = document.getElementById('studioCliCardGroup');
     if (studioCardGroup) {
-      const countEm = studioCardGroup.previousElementSibling?.querySelector('em');
-      if (countEm) countEm.textContent = `${keys.length} Slots`;
-      const curSelVal = studioCliSel?.value || keys[0];
+      const countEm = document.getElementById('studioCliCountLabel') || studioCardGroup.previousElementSibling?.querySelector('em');
+      if (countEm) countEm.textContent = `${keys.length} Active ${keys.length === 1 ? 'Slot' : 'Slots'}`;
+      const curSelVal = studioCliSel?.value || desiredStudioCli;
       studioCardGroup.innerHTML = keys.map(k => {
         const p = providersObj[k] || {};
         const domTxt = p.domain || k.toUpperCase();
@@ -2872,22 +4531,62 @@
     }
   }
 
-  async function handleRemoveCliSlot(slotKey) {
+  let lastCliAuthGridSig = '';
+  let pendingRemoveSlotKey = '';
+  let pendingRemoveTimer = null;
+
+  async function handleRemoveCliSlot(slotKey, triggerBtn = null) {
     const prov = lastDiagnostics?.providers?.[slotKey];
     const label = prov?.label || slotKey;
+    const logBox = document.getElementById('cliInstallLogBox');
     const totalCount = Object.keys(lastDiagnostics?.providers || {}).length;
     if (totalCount <= 1) {
-      alert('최소 1개 이상의 AI CLI 로그인 슬롯은 유지되어야 합니다.');
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `⚠️ 최소 1개 이상의 AI CLI/SDK 로그인 슬롯은 유지되어야 합니다. 다른 슬롯을 먼저 추가한 뒤 [${label}] 슬롯을 제거해 주세요.`;
+      }
       return;
     }
-    const confirmed = window.confirm(
-      `정말로 [${label}] CLI 로그인 슬롯을 목록에서 제거하시겠습니까?\n\n` +
-      `• 확인(OK)을 누르면 목록과 선택 드롭다운에서 제거됩니다.\n` +
-      `• 제거 후에도 상단 드롭다운 목록에서 언제든 다시 추가할 수 있습니다.`
-    );
-    if (!confirmed) return;
 
-    const logBox = document.getElementById('cliInstallLogBox');
+    // Inline 2-click confirmation (works reliably even in embedded WebViews where window.confirm is blocked)
+    if (pendingRemoveSlotKey !== slotKey) {
+      pendingRemoveSlotKey = slotKey;
+      if (pendingRemoveTimer) clearTimeout(pendingRemoveTimer);
+      document.querySelectorAll(`.btn-remove-cli-slot[data-slot-key="${slotKey}"]`).forEach(b => {
+        b.dataset.origLabel = b.textContent;
+        b.textContent = '⚠️ 클릭 시 즉시 제거';
+        b.style.background = '#dc2626';
+        b.style.color = '#ffffff';
+        b.style.borderColor = '#b91c1c';
+      });
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `⚠️ [${label}] 슬롯을 제거하려면 4초 이내에 [⚠️ 클릭 시 즉시 제거] 버튼을 한 번 더 눌러 주세요.`;
+      }
+      pendingRemoveTimer = setTimeout(() => {
+        if (pendingRemoveSlotKey === slotKey) {
+          pendingRemoveSlotKey = '';
+          document.querySelectorAll(`.btn-remove-cli-slot[data-slot-key="${slotKey}"]`).forEach(b => {
+            b.textContent = b.dataset.origLabel || '🗑️ 제거';
+            b.style.background = '';
+            b.style.color = '';
+            b.style.borderColor = '';
+          });
+        }
+      }, 4500);
+      return;
+    }
+
+    pendingRemoveSlotKey = '';
+    if (pendingRemoveTimer) {
+      clearTimeout(pendingRemoveTimer);
+      pendingRemoveTimer = null;
+    }
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = '⏳ 제거 중...';
+    }
+
     try {
       const res = await apiFetch('/ops/cli-slots', {
         method: 'POST',
@@ -2896,9 +4595,13 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error || 'CLI 슬롯 제거에 실패했습니다.');
+        if (logBox) {
+          logBox.style.display = 'block';
+          logBox.textContent = `❌ ${data.error || 'CLI 슬롯 제거에 실패했습니다.'}`;
+        }
         return;
       }
+      lastCliAuthGridSig = '';
       if (data.roles) {
         currentRoles = { ...currentRoles, ...data.roles };
       }
@@ -2913,14 +4616,48 @@
         logBox.textContent = `🗑️ [${label}] CLI 로그인 슬롯이 제거되었습니다. 상단 드롭다운 목록에서 언제든 다시 추가할 수 있습니다.`;
       }
     } catch (err) {
-      alert(`CLI 슬롯 제거 실패: ${err.message}`);
+      if (logBox) {
+        logBox.style.display = 'block';
+        logBox.textContent = `❌ CLI 슬롯 제거 실패: ${err.message}`;
+      }
     }
   }
 
+  let pendingResetSlots = false;
+  let pendingResetTimer = null;
+
   async function handleResetCliSlots() {
-    const confirmed = window.confirm('CLI 로그인 슬롯 목록을 초기 기본 상태로 복원하시겠습니까?');
-    if (!confirmed) return;
+    const resetBtn = document.getElementById('btnResetCliSlots');
     const logBox = document.getElementById('cliInstallLogBox');
+    if (!pendingResetSlots) {
+      pendingResetSlots = true;
+      if (pendingResetTimer) clearTimeout(pendingResetTimer);
+      if (resetBtn) {
+        resetBtn.dataset.origTxt = resetBtn.textContent;
+        resetBtn.textContent = '⚠️ 클릭 시 복원 확정';
+        resetBtn.style.background = '#fff7ed';
+        resetBtn.style.color = '#c2410c';
+        resetBtn.style.borderColor = '#fdba74';
+      }
+      pendingResetTimer = setTimeout(() => {
+        pendingResetSlots = false;
+        if (resetBtn) {
+          resetBtn.textContent = resetBtn.dataset.origTxt || '↺ 기본 목록 복원';
+          resetBtn.style.background = '';
+          resetBtn.style.color = '';
+          resetBtn.style.borderColor = '';
+        }
+      }, 4500);
+      return;
+    }
+    pendingResetSlots = false;
+    if (pendingResetTimer) clearTimeout(pendingResetTimer);
+    if (resetBtn) {
+      resetBtn.textContent = resetBtn.dataset.origTxt || '↺ 기본 목록 복원';
+      resetBtn.style.background = '';
+      resetBtn.style.color = '';
+      resetBtn.style.borderColor = '';
+    }
     try {
       const res = await apiFetch('/ops/cli-slots', {
         method: 'POST',
@@ -2928,6 +4665,7 @@
         body: JSON.stringify({ action: 'reset' })
       });
       const data = await res.json().catch(() => ({}));
+      lastCliAuthGridSig = '';
       if (data.roles) currentRoles = { ...currentRoles, ...data.roles };
       if (data.diagnostics) {
         renderCliDiagnosticsModal(data.diagnostics, true);
@@ -2937,7 +4675,7 @@
         logBox.style.display = 'block';
         logBox.textContent = `↺ ${data.message || '기본 CLI 로그인 슬롯 목록으로 복원되었습니다.'}`;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   async function promptAndAddCliSlotFromSelect(onAddedCallback = null) {
@@ -2984,7 +4722,7 @@
           await onAddedCallback(data.added.key);
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   async function handleRenameCliSlot(slotKey, newLabel, triggerBtn = null) {
@@ -3025,38 +4763,6 @@
       if (triggerBtn) {
         triggerBtn.disabled = false;
       }
-    }
-  }
-
-  async function handleSetCliSlotPlan(slotKey, planOverride) {
-    const logBox = document.getElementById('cliInstallLogBox');
-    const orchFb = document.getElementById('orchestratorFeedbackText');
-    try {
-      const res = await apiFetch('/ops/cli-slots', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'set_plan', key: slotKey, plan_override: planOverride })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data.error || '구독 플랜 반영에 실패했습니다.');
-        return;
-      }
-      if (data.diagnostics) {
-        renderCliDiagnosticsModal(data.diagnostics, true);
-      } else {
-        await fetchAndRenderCliDiagnostics(false);
-      }
-      if (logBox) {
-        logBox.style.display = 'block';
-        logBox.textContent = `💳 ${data.message || '연결된 AI의 구독 플랜이 업데이트되었습니다.'}`;
-      }
-      if (orchFb && data.message) {
-        orchFb.style.color = '#0f6848';
-        orchFb.textContent = `✓ ${data.message} — 구독 등급에 맞춰 선택 가능한 Orchestrator(Argon / Carbon) 모드가 즉시 갱신되었습니다.`;
-      }
-    } catch (err) {
-      alert(`구독 플랜 변경 오류: ${err.message}`);
     }
   }
 
@@ -3145,7 +4851,7 @@
           orchFb.textContent = `✓ ${data.message || '실제 CLI 모델 목록 새로고침 완료'}`;
         }
       }
-    } catch (_) {} finally {
+    } catch (_) { } finally {
       if (triggerBtn) {
         triggerBtn.disabled = false;
         triggerBtn.textContent = orig || '🔄 실제 모델 목록 새로고침';
@@ -3232,6 +4938,7 @@
     syncAllCliDropdowns(providers);
     renderOrchestratorModeControls(lastDiagnostics);
     renderConnectedAccountsList(lastDiagnostics);
+    if (renderDashboardAgentsAndStatsFn) renderDashboardAgentsAndStatsFn(forceRender);
     if (studioRefreshDirectoryFn) {
       const ae = document.activeElement;
       const isTypingInStudio = !forceRender && ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && document.getElementById('characters')?.contains(ae);
@@ -3271,15 +4978,20 @@
       return;
     }
 
-    // 3초 주기 폴링 중 사용자가 타이틀 입력창·경로 입력창을 편집 중이거나 미저장 타이틀이 있으면 카드 DOM 덮어쓰기 방지
+    // 3초 주기 폴링 중 변경이 없거나 사용자가 편집/삭제 확인 중이면 카드 DOM 덮어쓰기 방지
+    const cliGridSig = JSON.stringify(keys.map(k => {
+      const p = providers[k] || {};
+      return [k, p.label, p.auth_state, p.account_email, p.plan_name, p.orchestrator_tier, p.selected_model, p.executable, p.custom_executable, (p.available_models || []).length];
+    }));
     if (!forceRender && grid.children.length === keys.length) {
       const activeInGrid = grid.contains(document.activeElement);
       const hasDirtyTitle = Array.from(grid.querySelectorAll('.cli-title-inline-input')).some(inp => inp.classList.contains('is-dirty'));
-      if (activeInGrid || hasDirtyTitle) {
+      if (activeInGrid || hasDirtyTitle || Boolean(pendingRemoveSlotKey) || cliGridSig === lastCliAuthGridSig) {
         renderCliQuotaGauges();
         return;
       }
     }
+    lastCliAuthGridSig = cliGridSig;
 
     grid.innerHTML = keys.map(key => {
       const p = providers[key] || {};
@@ -3287,10 +4999,7 @@
       const cardCls = state === 'LOGGED_IN' ? 'logged-in' : state === 'AUTH_REQUIRED' ? 'auth-required' : '';
       const cliName = p.cli || (key === 'claude' ? 'claude' : key === 'antigravity' ? 'agy' : key === 'gemini' ? 'gemini' : key === 'grok' ? 'grok' : 'codex');
       const dispTitle = p.label || key;
-
-      const curPlanOv = (p.plan_override || 'auto').toLowerCase();
-      const needsPlanConfirm = state === 'LOGGED_IN' && p.plan_source === 'unverified_default_free';
-      const planSrcLabel = p.plan_source_label || (state === 'LOGGED_IN' ? '로컬 인증 확인' : '로그인 후 확인');
+      const planSrcLabel = p.plan_source_label || (state === 'LOGGED_IN' ? '계정 연결 자동 실측' : '로그인 후 자동 로드');
 
       const actionButtonsHtml = !p.installed
         ? `
@@ -3299,12 +5008,12 @@
           <button type="button" class="btn small btn-remove-cli-slot" data-slot-key="${key}" title="이 CLI 로그인 슬롯 제거">🗑️ 제거</button>
         `
         : state === 'LOGGED_IN'
-        ? `
+          ? `
           <button type="button" class="btn small" style="background:#dcfce7;color:#15803d;border-color:#86efac" disabled>✓ 구독 로그인 완료됨</button>
           <button type="button" class="btn small mint btn-login-cli" data-cli="${key}" title="다른 계정으로 다시 로그인">🔑 계정 변경/재로그인</button>
           <button type="button" class="btn small btn-remove-cli-slot" data-slot-key="${key}" title="이 CLI 로그인 슬롯 제거">🗑️ 제거</button>
         `
-        : `
+          : `
           <button type="button" class="btn small mint btn-login-cli" data-cli="${key}">🔑 원클릭 로그인 창 열기</button>
           <button type="button" class="btn small btn-install-cli" data-cli="${cliName}">🔄 재설치/연결</button>
           <button type="button" class="btn small btn-remove-cli-slot" data-slot-key="${key}" title="이 CLI 로그인 슬롯 제거">🗑️ 제거</button>
@@ -3328,44 +5037,34 @@
           <div class="cli-auth-rows">
             <div class="cli-auth-row"><span>로그인 계정</span><strong>${p.account_email || '미로그인'}</strong></div>
             <div class="cli-auth-row"><span>적용 중인 플랜</span><strong style="color:${p.is_subscribed ? (p.is_paid ? '#15803d' : '#0284c7') : '#64748b'}">${p.plan_name || p.plan_label || '미구독 / 미로그인'}</strong></div>
-            <div class="cli-auth-row"><span>플랜 판별 근거</span><strong style="color:${needsPlanConfirm ? '#b45309' : '#334155'}">${planSrcLabel}</strong></div>
+            <div class="cli-auth-row"><span>플랜 판별 근거</span><strong style="color:#334155">${planSrcLabel}</strong></div>
             <div class="cli-auth-row"><span>CLI 명령어 / 슬롯 ID</span><code>${cliName} (${key})</code></div>
             ${p.profile_dir ? `<div class="cli-auth-row"><span>격리 프로필 폴더</span><code>${p.profile_dir}</code></div>` : ''}
             <div class="cli-auth-row"><span>감지된 버전</span><strong>${p.version || '미확인'}</strong></div>
             <div class="cli-auth-row"><span>실행 파일 경로</span><code>${p.executable || 'PATH 미감지 (원클릭 설치 가능)'}</code></div>
             <div class="cli-auth-row"><span>종량제 API 키</span><strong style="color:#15803d">차단됨 (구독 전용)</strong></div>
           </div>
-          <div class="cli-plan-verify-box ${needsPlanConfirm ? 'needs-confirm' : ''}">
+          <div class="cli-plan-verify-box">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
-              <label style="font-size:10px;font-weight:800;color:${needsPlanConfirm ? '#92400e' : '#334155'}">💳 실제 구독 중인 플랜 지정 ${needsPlanConfirm ? '(구글 개인 계정은 직접 선택 권장)' : ''}</label>
-              <span style="font-size:9.5px;font-weight:700;color:#64748b">등급: <b>${(p.orchestrator_tier || 'none').toUpperCase()}</b></span>
-            </div>
-            <select class="cli-plan-override-select" data-slot-key="${key}" aria-label="${escHtml(dispTitle)} 실제 구독 플랜 선택">
-              <option value="auto" ${curPlanOv === 'auto' ? 'selected' : ''}>🔍 자동 감지 (토큰·API 실측 / 미제공 시 Free 기본 적용)</option>
-              <option value="free" ${curPlanOv === 'free' ? 'selected' : ''}>🆓 Free 무료 플랜</option>
-              <option value="pro" ${curPlanOv === 'pro' ? 'selected' : ''}>🔷 Pro / Plus 유료 구독 (Argon 등 Pro 모델 해금)</option>
-              <option value="ultra" ${curPlanOv === 'ultra' ? 'selected' : ''}>💎 Ultra / Max 최상위 구독 (Carbon · Neon 등 전체 해금)</option>
-            </select>
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px">
               <label style="font-size:10px;font-weight:800;color:#0f6848">🤖 사용할 실제 모델 선택 (${p.models_source === 'agy_live_cli' ? `agy.exe 실시간 ${Array.isArray(p.available_models) ? p.available_models.length : 0}종` : 'CLI 지원 모델'})</label>
-              <code style="font-size:9px;color:#475569">${escHtml(p.selected_model || 'CLI 기본값')}</code>
+              <span style="font-size:9.5px;font-weight:700;color:#64748b">자동 로드 등급: <b>${(p.orchestrator_tier || 'none').toUpperCase()}</b> · <code style="font-size:9px;color:#475569">${escHtml(p.selected_model || 'CLI 기본값')}</code></span>
             </div>
             <select class="cli-plan-override-select cli-slot-model-select" data-slot-key="${key}" aria-label="${escHtml(dispTitle)} 사용할 실제 모델 선택">
               ${buildSlotModelOptionsHtml(p.available_models, p.selected_model)}
             </select>
           </div>
           ${(() => {
-            const q = getCliQuotaStatus(key);
-            if (!q.isSubscribed) {
-              return `
+          const q = getCliQuotaStatus(key);
+          if (!q.isSubscribed) {
+            return `
                 <div class="cli-quota-box" style="margin-top:0">
                   <div class="cli-quota-top"><span>✕ ${q.planName}</span><strong>일일 0/0회 · 월간 0/0회</strong></div>
                   <div class="cli-quota-track"><span class="cli-quota-fill unsub" style="width:0%"></span></div>
                   <div class="cli-quota-meta"><span>로그인 후 일일/월간 한도 활성화</span><span class="cli-quota-pct unsub">${q.statusBadgeText}</span></div>
                 </div>
               `;
-            }
-            return `
+          }
+          return `
               <div class="cli-quota-box" style="margin-top:0">
                 <div class="cli-quota-top"><span>📅 일일 제한 (Daily)</span><strong>${q.calls} / ${q.maxCalls}회 · 잔여 ${q.dailyRemainPct}%</strong></div>
                 <div class="cli-quota-track"><span class="cli-quota-fill ${q.level}" style="width:${q.dailyRemainPct}%"></span></div>
@@ -3374,7 +5073,7 @@
                 <div class="cli-quota-meta"><span>플랜: ${q.planName}</span><span class="cli-quota-pct ${q.level}">${q.statusBadgeText}</span></div>
               </div>
             `;
-          })()}
+        })()}
           <div>
             <label style="display:block;font-size:9.5px;font-weight:700;color:#475569;margin-bottom:4px">수동 실행 파일 경로 지정 (${cliName}.exe / .cmd)</label>
             <input type="text" class="cli-path-input" data-cli-path="${cliName}" value="${p.custom_executable || p.executable || ''}" placeholder="예: C:\\Users\\...\\${cliName}.exe">
@@ -3431,13 +5130,6 @@
       });
     });
 
-    grid.querySelectorAll('.cli-plan-override-select:not(.cli-slot-model-select)').forEach(sel => {
-      sel.addEventListener('change', (ev) => {
-        const sKey = ev.currentTarget.dataset.slotKey;
-        const val = ev.currentTarget.value || 'auto';
-        handleSetCliSlotPlan(sKey, val);
-      });
-    });
     grid.querySelectorAll('.cli-slot-model-select').forEach(sel => {
       sel.addEventListener('change', (ev) => {
         const sKey = ev.currentTarget.dataset.slotKey;
@@ -3452,7 +5144,7 @@
       btn.addEventListener('click', () => triggerCliLoginTerminal(btn.dataset.cli, btn));
     });
     grid.querySelectorAll('.btn-remove-cli-slot').forEach(btn => {
-      btn.addEventListener('click', () => handleRemoveCliSlot(btn.dataset.slotKey));
+      btn.addEventListener('click', (ev) => handleRemoveCliSlot(btn.dataset.slotKey, ev.currentTarget));
     });
     grid.querySelectorAll('.btn-copy-login').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -3481,7 +5173,7 @@
         return;
       }
       if (res.status === 404) backendAvailable = false;
-    } catch (_) {} finally {
+    } catch (_) { } finally {
       if (btn && deep) {
         btn.disabled = false;
         btn.textContent = '🔍 실시간 로그인 검증 (Deep Probe)';
@@ -3510,7 +5202,7 @@
         const data = await res.json();
         if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics, true);
       }
-    } catch (_) {} finally {
+    } catch (_) { } finally {
       if (btn) {
         btn.disabled = false;
         btn.textContent = '💾 실행 경로 저장 & 재검증';
@@ -3715,9 +5407,9 @@
           const wsUpdate = payload.action === 'reset'
             ? { output_dir: '' }
             : {
-                ...(payload.output_dir !== undefined ? { output_dir: payload.output_dir } : {}),
-                ...(payload.mirror_to_local !== undefined ? { mirror_to_local: payload.mirror_to_local } : {})
-              };
+              ...(payload.output_dir !== undefined ? { output_dir: payload.output_dir } : {}),
+              ...(payload.mirror_to_local !== undefined ? { mirror_to_local: payload.mirror_to_local } : {})
+            };
           const tRes = await apiFetch('/ops/teams', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3848,7 +5540,7 @@
     apiFetch('/ops/output-dir', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
       .then(st => { if (st) renderOutputDirStatus(st); })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   // ========================================================================
@@ -4013,7 +5705,7 @@
             fb.textContent = '💡 현재 서버가 백그라운드 데몬 모드로 실행 중이어서 OS 탐색기 창 대신 이 웹 탐색기에서 바로 파일을 확인하실 수 있습니다. ([📋 경로 복사] 활용 가능)';
           }
         }
-      } catch (_) {} finally {
+      } catch (_) { } finally {
         btn.disabled = false;
       }
     });
@@ -4071,7 +5763,7 @@
         } else {
           if (fb) fb.textContent = '';
         }
-      } catch (_) {} finally {
+      } catch (_) { } finally {
         btn.disabled = false;
         btn.textContent = orig;
       }
@@ -4170,7 +5862,7 @@
         apiFetch('/ops/teams', { cache: 'no-store' })
           .then(r => (r.ok ? r.json() : null))
           .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts, true); })
-          .catch(() => {});
+          .catch(() => { });
         close();
       } catch (_) {
         if (fb) { fb.style.color = '#dc2626'; fb.textContent = '❌ 서버 통신 오류가 발생했습니다.'; }
@@ -4402,7 +6094,7 @@
           nativeBadge.textContent = '💻 웹 내장 폴더 탐색기 활성';
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   function openLocalFolderPicker({ initialDir = '', teamId = null, teamName = '', onPicked = null } = {}) {
@@ -4664,7 +6356,7 @@
         if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
         await refreshGdriveModalState(true);
         setModalFeedback('✓ 연결이 해제되었습니다.', false);
-      } catch (_) {}
+      } catch (_) { }
     });
 
     document.getElementById('chkGdModalAutoSync')?.addEventListener('change', async (ev) => {
@@ -4678,7 +6370,7 @@
         const data = await res.json().catch(() => ({}));
         if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
         setModalFeedback(`✓ ${data.message || '동기화 설정이 변경되었습니다.'}`, false);
-      } catch (_) {}
+      } catch (_) { }
     });
 
     document.getElementById('btnGdApplyFolderUrl')?.addEventListener('click', async (ev) => {
@@ -4732,7 +6424,7 @@
         } else {
           setModalFeedback(`❌ ${data.error || '폴더 지정 실패'}`, true);
         }
-      } catch (_) {} finally {
+      } catch (_) { } finally {
         btn.disabled = false;
       }
     });
@@ -4772,7 +6464,7 @@
         } else {
           setModalFeedback(`❌ ${data.error || '폴더 생성 실패'}`, true);
         }
-      } catch (_) {} finally {
+      } catch (_) { } finally {
         btn.disabled = false;
       }
     });
@@ -4876,12 +6568,12 @@
                 fb.textContent = `☁️ Google Drive 웹 폴더(${d.folder.webViewLink || d.folder.name})가 저장 위치로 지정되었습니다!`;
               }
             }
-          } catch (_) {} finally {
+          } catch (_) { } finally {
             b.disabled = false;
           }
         });
       });
-    } catch (_) {}
+    } catch (_) { }
   }
 
   async function refreshGdriveModalState(forceRefresh = false) {
@@ -4923,7 +6615,7 @@
       if (gd.connected) {
         await loadGdriveSubfolders(gdriveCurrentBrowseId || 'root');
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   function openGdriveDirectModal(teamId = null, teamName = '') {
@@ -5094,17 +6786,21 @@
                   <span class="team-floor-pill" style="border-color:${escHtml(color)}44;color:${escHtml(color)}">🏢 ${escHtml(t.floor)}</span>
                   <span class="team-ws-name">${escHtml(t.name)}</span>
                   ${t.is_active
-                    ? '<span class="team-active-pill">★ 현재 기본 작업팀</span>'
-                    : `<button type="button" class="btn small btn-set-active-team" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀으로 전환</button>`}
+            ? '<span class="team-active-pill">★ 현재 기본 작업팀</span>'
+            : `<button type="button" class="btn small btn-set-active-team" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀으로 전환</button>`}
                   ${t.orchestrator_mode === 'carbon'
-                    ? '<span class="orch-tier-pill ultra">💎 Carbon</span>'
-                    : t.orchestrator_mode === 'argon'
-                    ? '<span class="orch-tier-pill pro">🔷 Argon</span>'
-                    : '<span class="orch-tier-pill free">⚡ Standard/전역</span>'}
+            ? '<span class="orch-tier-pill ultra">💎 Carbon</span>'
+            : t.orchestrator_mode === 'argon'
+              ? '<span class="orch-tier-pill pro">🔷 Argon</span>'
+              : '<span class="orch-tier-pill free">⚡ Standard/전역</span>'}
                 </div>
                 ${t.description ? `<div class="team-ws-desc">${escHtml(t.description)}</div>` : ''}
               </div>
-              <span style="font-size:10px;font-weight:800;color:#475569;background:#f1f5f9;padding:3px 8px;border-radius:6px">미션 ${Number(t.mission_count || 0)}건</span>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span data-team-status-pill="${escHtml(t.id)}" style="font-size:10px;font-weight:800;color:#15803d;background:#dcfce7;padding:3px 8px;border-radius:999px">🟢 대기 중</span>
+                <button type="button" class="btn small btn-stop-team-mission" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="display:none;height:24px;padding:0 8px;font-size:9.5px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">■ 이 팀 정지</button>
+                <span data-team-active-count="${escHtml(t.id)}" style="font-size:10px;font-weight:800;color:${Number(t.active_mission_count || 0) > 0 ? '#1d4ed8' : '#475569'};background:${Number(t.active_mission_count || 0) > 0 ? '#dbeafe' : '#f1f5f9'};padding:3px 8px;border-radius:6px">진행 중 ${Number(t.active_mission_count || 0)}건</span>
+              </div>
             </div>
 
             <div class="team-members-strip">
@@ -5114,40 +6810,49 @@
 
             <div class="team-folder-box">
               <div class="team-folder-row">
-                <span style="font-weight:800;color:${(isCloudPrimary || ws.is_google_drive_local) ? '#0369a1' : '#0f172a'}">${isCloudPrimary ? '☁️ Google Drive 클라우드 전용 폴더' : (ws.is_google_drive_local ? '☁️ 로컬 마운트 드라이브 폴더' : (ws.is_default ? '📁 기본 작업 폴더' : '📂 팀 전용 작업 폴더'))}</span>
+                <span style="font-weight:800;color:${(isCloudPrimary || ws.is_google_drive_local) ? '#0369a1' : '#0f172a'}">${isCloudPrimary ? '☁️ Google Drive 클라우드 전용 폴더' : (ws.is_google_drive_local ? '☁️ 로컬 마운트 드라이브 폴더' : (ws.is_default ? (ws.active_project_dir ? '📂 프로젝트 기반 작업 폴더 (자동 명명)' : '📂 프로젝트 기반 자동 폴더 (별도 미지정)') : '📂 팀 전용 작업 폴더'))}</span>
                 <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
                   ${nonAsciiWarn}
                   <span style="background:${(isCloudPrimary ? gd.connected : ws.is_accessible) ? '#dcfce7' : '#fee2e2'};color:${(isCloudPrimary ? gd.connected : ws.is_accessible) ? '#15803d' : '#b91c1c'};padding:1px 6px;border-radius:5px;font-size:9px;font-weight:800">${(isCloudPrimary ? gd.connected : ws.is_accessible) ? '✓ 연결됨' : '확인 필요'}</span>
                   <span style="font-size:9.5px;color:#475569;font-weight:700">프로젝트 ${ws.project_count || 0} · 리포트 ${ws.report_count || 0} · 파일 ${ws.file_count || 0}</span>
                 </div>
               </div>
-              <div class="team-folder-path">${isCloudPrimary ? `<a href="${escHtml(cloudWebUrl)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline;word-break:break-all">${escHtml(cloudWebUrl)}</a>` : escHtml(ws.effective_dir || 'deliverables/')}</div>
+              <div class="team-folder-path">${isCloudPrimary ? `<a href="${escHtml(cloudWebUrl)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline;word-break:break-all">${escHtml(cloudWebUrl)}</a>` : escHtml(ws.display_path || ws.effective_dir || 'deliverables/')}${(!isCloudPrimary && ws.is_default && !ws.active_project_dir) ? ` <span style="color:#64748b;font-size:9.5px">(시작 시 YYYYMMDD_프로젝트명으로 자동 생성)</span>` : ''}</div>
               ${gdLineHtml}
             </div>
 
             <div class="team-ws-actions">
-              <button type="button" class="btn small btn-team-open-exp" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.effective_dir || '')}" data-cloud-url="${isCloudPrimary ? escHtml(cloudWebUrl) : ''}" style="height:28px;padding:0 9px;font-size:10px">${isCloudPrimary ? '☁️ 웹 폴더 열기 ↗' : '🗂️ 폴더 열기'}</button>
+              <button type="button" class="btn small btn-team-open-exp" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.active_project_dir || ws.effective_dir || '')}" data-cloud-url="${isCloudPrimary ? escHtml(cloudWebUrl) : ''}" style="height:28px;padding:0 9px;font-size:10px">${isCloudPrimary ? '☁️ 웹 폴더 열기 ↗' : '🗂️ 폴더 열기'}</button>
               <button type="button" class="btn small btn-team-browse-dir" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.effective_dir || '')}" style="height:28px;padding:0 9px;font-size:10px">📂 작업 폴더 변경</button>
               <button type="button" class="btn small btn-team-edit" data-tid="${escHtml(t.id)}" style="height:28px;padding:0 10px;font-size:10px">✏️ 팀 &amp; 폴더 상세편집</button>
               <a href="settings.html?team=${encodeURIComponent(t.id)}#triadGoalForm" class="btn small" style="height:28px;padding:0 10px;font-size:10px;margin-left:auto;color:${escHtml(color)};border-color:${escHtml(color)}55;background:${escHtml(color)}0d">⚙ 상세 설정 ↗</a>
             </div>
 
             <div class="team-dispatch-box">
-              <form class="team-dispatch-form" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-head-cli="${escHtml(r.head || 'antigravity')}">
+              <div class="team-dispatch-head-row">
+                <span style="font-size:9.5px;font-weight:800;color:${escHtml(color)}">🚀 [${escHtml(t.name)}] 전용 프로젝트 지시창 (타 팀 프로젝트와 동시 가동 가능)</span>
+                ${buildDispatchFolderSwitchButtonsHtml(t.id)}
+              </div>
+              ${buildDispatchContinueBarHtml(t.id, t.name, ws.effective_dir || '', ws.recent_project_folders || [])}
+              <form class="team-dispatch-form" data-tid="${escHtml(t.id)}" data-fstate-key="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-head-cli="${escHtml(r.head || 'antigravity_sdk')}">
                 <select class="team-dispatch-select" aria-label="${escHtml(t.name)} 실행 모드 선택">
-                  <option value="standard" selected>🔄 Standard (5단계)</option>
-                  <option value="quick">⚡ Quick (2단계)</option>
-                  <option value="deep">🔬 Deep (모듈분할)</option>
+                  <option value="standard" selected>🔄 Standard (표준)</option>
+                  <option value="quick">⚡ Quick (고속)</option>
+                  <option value="deep">🔬 Deep (심층)</option>
                   <option value="ask">💬 간단 질문 (즉답)</option>
                 </select>
-                <input type="text" class="team-dispatch-input" placeholder="[${escHtml(t.name)}]에 지시할 업무 목표(Goal) 또는 질문을 입력하세요..." aria-label="${escHtml(t.name)} 업무지시 입력" required>
-                <button type="submit" class="team-dispatch-btn" style="background:${escHtml(color)}">🚀 업무 지시</button>
+                <input type="text" class="team-dispatch-input" placeholder="[${escHtml(t.name)}]에 맡길 프로젝트 목표(Goal) 입력..." aria-label="${escHtml(t.name)} 업무지시 입력" required>
+                <button type="submit" class="team-dispatch-btn" style="background:${escHtml(color)}">🚀 프로젝트 시작</button>
               </form>
+              <div class="team-live-progress-strip" data-team-live-strip="${escHtml(t.id)}" style="display:none;margin-top:6px;padding:8px 10px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;font-size:10.5px;line-height:1.5"></div>
               <div class="team-dispatch-status" data-status-tid="${escHtml(t.id)}"></div>
             </div>
           </div>
         `;
       }).join('');
+
+      bindDispatchFolderConnectControls(gridEl);
+      teams.forEach(t => syncDispatchContinueUiForKey(gridEl, t.id));
 
       gridEl.querySelectorAll('.team-dispatch-form').forEach(form => {
         form.addEventListener('submit', async (ev) => {
@@ -5162,9 +6867,9 @@
           const goal = (inp?.value || '').trim();
           if (!goal) return;
           const mode = modeSel?.value || 'standard';
-          inp.value = '';
 
           if (mode === 'ask') {
+            inp.value = '';
             const origTxt = btn ? btn.textContent : '🚀 업무 지시';
             if (btn) { btn.disabled = true; btn.textContent = '⏳ 응답 중...'; }
             if (stBox) {
@@ -5190,9 +6895,13 @@
             return;
           }
 
+          const fState = getTeamContinueState(tid);
           if (btn) btn.disabled = true;
-          const res = await dispatchMissionGoal(goal, mode, tid);
+          const res = await dispatchMissionGoal(goal, mode, tid, { folderMode: fState.mode, continueDir: fState.dir });
           if (btn) btn.disabled = false;
+          if (res && res.ok) {
+            inp.value = '';
+          }
           if (stBox) {
             stBox.style.display = 'block';
             stBox.dataset.pinned = '1';
@@ -5200,7 +6909,8 @@
               stBox.style.background = '#f0fdf4';
               stBox.style.borderColor = '#86efac';
               stBox.style.color = '#166534';
-              stBox.textContent = `🚀 [${tname} · ${mode.toUpperCase()}] '${goal}' 업무 파이프라인이 시작되었습니다! 바로 아래 실시간 파이프라인 실행 로그 및 산출물 섹션에서 진행 상황을 확인하세요.`;
+              const folderHint = fState.mode === 'continue' ? ` (📂 기존 폴더 이어하기: ${formatShortFolderLabel(fState.dir)})` : '';
+              stBox.textContent = `🚀 [${tname} · ${mode.toUpperCase()}] '${goal}' 업무 파이프라인이 시작되었습니다!${folderHint} 바로 아래 실시간 파이프라인 실행 로그 및 산출물 섹션에서 진행 상황을 확인하세요.`;
               setTimeout(() => {
                 delete stBox.dataset.pinned;
                 stBox.style.display = 'none';
@@ -5212,6 +6922,24 @@
               stBox.textContent = `⚠️ ${res?.error || '업무 지시를 시작할 수 없습니다.'}`;
               setTimeout(() => { delete stBox.dataset.pinned; }, 6000);
             }
+          }
+        });
+      });
+
+      gridEl.querySelectorAll('.btn-stop-team-mission').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const tid = btn.dataset.tid;
+          const tname = btn.dataset.tname || tid;
+          btn.disabled = true;
+          try {
+            await apiFetch('/ops/missions/stop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ team_id: tid, reason: `[${tname}] 팀 작업 개별 정지` })
+            });
+            pollOrchestrator();
+          } finally {
+            btn.disabled = false;
           }
         });
       });
@@ -5296,15 +7024,18 @@
       });
     }
 
-    // 2) Render Unified Connected Workspaces List (#connectedWorkspacesList on index.html)
+    // 2) Render Unified Connected Workspaces List (#connectedWorkspacesList on index.html & #settingsConnectedWorkspacesList on settings.html)
     const wsListEl = document.getElementById('connectedWorkspacesList');
+    const settingsWsListEl = document.getElementById('settingsConnectedWorkspacesList');
     const wsSumLbl = document.getElementById('connectedWsSummaryLabel');
-    if (wsSumLbl) {
-      const gdAcc = gdGlobal.connected ? ` · ☁️ Google Drive 계정 연결됨(${gdGlobal.account_email || 'OAuth'})` : '';
-      wsSumLbl.textContent = `총 ${connected.length}개 활성 작업 폴더 연결됨${unboundGdrives.length ? ` · 감지된 로컬 드라이브 ${unboundGdrives.length}개` : ''}${gdAcc}`;
-    }
+    const settingsWsSumLbl = document.getElementById('settingsConnectedWsSummaryLabel');
+    const gdAccTxt = gdGlobal.connected ? ` · ☁️ Google Drive 계정 연결됨(${gdGlobal.account_email || 'OAuth'})` : '';
+    const wsSummaryStr = `총 ${connected.length}개 활성 작업 폴더 연결됨${unboundGdrives.length ? ` · 감지된 로컬 드라이브 ${unboundGdrives.length}개` : ''}${gdAccTxt}`;
+    if (wsSumLbl) wsSumLbl.textContent = wsSummaryStr;
+    if (settingsWsSumLbl) settingsWsSumLbl.textContent = wsSummaryStr;
+
     const connSig = JSON.stringify([connected, unboundGdrives, gdGlobal]);
-    if (wsListEl && (forceRender || connSig !== lastConnWsHash)) {
+    if ((wsListEl || settingsWsListEl) && (forceRender || connSig !== lastConnWsHash)) {
       lastConnWsHash = connSig;
       const rowsHtml = connected.map(w => {
         const isCloud = w.kind === 'gdrive_cloud';
@@ -5349,14 +7080,18 @@
         </div>
       `).join('');
 
-      wsListEl.innerHTML = rowsHtml + unboundHtml;
-      wsListEl.querySelectorAll('.btn-conn-ws-open').forEach(b => {
-        b.addEventListener('click', () => {
-          openLocalFolderExplorer(b.dataset.dir || '', b.dataset.wname || '연결된 작업 폴더');
+      const combinedWsHtml = rowsHtml + unboundHtml;
+      [wsListEl, settingsWsListEl].forEach(targetBox => {
+        if (!targetBox) return;
+        targetBox.innerHTML = combinedWsHtml;
+        targetBox.querySelectorAll('.btn-conn-ws-open').forEach(b => {
+          b.addEventListener('click', () => {
+            openLocalFolderExplorer(b.dataset.dir || '', b.dataset.wname || '연결된 작업 폴더');
+          });
         });
-      });
-      wsListEl.querySelectorAll('.btn-bind-mounted-gd').forEach(b => {
-        b.addEventListener('click', () => openTeamBuilderModal(null, b.dataset.suggested || ''));
+        targetBox.querySelectorAll('.btn-bind-mounted-gd').forEach(b => {
+          b.addEventListener('click', () => openTeamBuilderModal(null, b.dataset.suggested || ''));
+        });
       });
     }
 
@@ -5374,7 +7109,7 @@
             const pSel = document.getElementById('triadProfileSelect');
             if (pSel && pSel.value === 'ask') pSel.value = 'standard';
           }
-        } catch (_) {}
+        } catch (_) { }
       }
       if (!teams.some(t => t.id === desiredId)) desiredId = ts.active_team_id || teams[0]?.id || '';
 
@@ -5388,9 +7123,558 @@
       syncSettingsBarFromTeam(desiredId);
     }
 
-    // 4) Render AI 직원 관리(agents.html)의 팀 추가·수정 & 오피스 배치 보드 동기화
+    // 3-B) Render separated Per-Team Project Input Cards on settings.html (#settingsPerTeamMissionGrid)
+    renderSettingsPerTeamMissionBoard(ts, forceRender);
+    if (latestActivitySnapshot) {
+      updatePerTeamLiveProgressStrips(latestActivitySnapshot);
+    }
+
+    // 4) Render AI 직원 관리(agents.html) 및 대시보드(index.html) 팀·직원 현황 동기화
     renderAgentsTeamPlacementBoard(ts, forceRender);
+    if (renderDashboardAgentsAndStatsFn) renderDashboardAgentsAndStatsFn(forceRender);
     if (studioRefreshDirectoryFn) studioRefreshDirectoryFn();
+  }
+
+  var latestActivitySnapshot = null;
+  let lastSettingsPerTeamSig = '';
+  let lastApprovalCenterStamp = '';
+
+  function bindTeamDispatchFormsInContainer(containerEl) {
+    if (!containerEl) return;
+    bindDispatchFolderConnectControls(containerEl);
+    containerEl.querySelectorAll('.per-team-project-form').forEach(form => {
+      const fKey = form.dataset.fstateKey || form.dataset.tid;
+      if (fKey) syncDispatchContinueUiForKey(containerEl, fKey);
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const tid = form.dataset.tid;
+        const stateKey = form.dataset.fstateKey || tid;
+        const tname = form.dataset.tname || '선택 팀';
+        const headCli = form.dataset.headCli || 'antigravity_sdk';
+        const modeSel = form.querySelector('.team-dispatch-select');
+        const inp = form.querySelector('.team-dispatch-input');
+        const btn = form.querySelector('.team-dispatch-btn');
+        const stBox = containerEl.querySelector(`.team-dispatch-status[data-status-tid="${tid}"]`);
+        const goal = (inp?.value || '').trim();
+        if (!goal) return;
+        const mode = modeSel?.value || 'standard';
+
+        if (mode === 'ask') {
+          inp.value = '';
+          const origTxt = btn ? btn.textContent : '🚀 프로젝트 시작';
+          if (btn) { btn.disabled = true; btn.textContent = '⏳ 응답 중...'; }
+          if (stBox) {
+            stBox.style.display = 'block';
+            stBox.style.background = '#f8fafc';
+            stBox.style.borderColor = '#cbd5e1';
+            stBox.style.color = '#334155';
+            stBox.dataset.pinned = '1';
+            stBox.textContent = `💭 [${tname}] '${goal}' 질문 응답 생성 중...`;
+          }
+          const ans = await askDirectQuestion(headCli, goal, `${tname} 총괄팀장`);
+          if (stBox) {
+            stBox.style.background = '#f0fdf4';
+            stBox.style.borderColor = '#86efac';
+            stBox.style.color = '#166534';
+            stBox.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div><strong>💬 [${escHtml(ans.label || tname)}]</strong> ${escHtml(ans.answer || '')}</div><button type="button" class="btn-close-dispatch-status" style="border:0;background:transparent;color:#64748b;cursor:pointer;font-size:11px;padding:0 2px">✕</button></div>`;
+            stBox.querySelector('.btn-close-dispatch-status')?.addEventListener('click', () => {
+              delete stBox.dataset.pinned;
+              stBox.style.display = 'none';
+            });
+          }
+          if (btn) { btn.disabled = false; btn.textContent = origTxt; }
+          return;
+        }
+
+        const fState = getTeamContinueState(stateKey);
+        if (btn) btn.disabled = true;
+        const res = await dispatchMissionGoal(goal, mode, tid, { folderMode: fState.mode, continueDir: fState.dir });
+        if (btn) btn.disabled = false;
+        if (res && res.ok) {
+          inp.value = '';
+        }
+        if (stBox) {
+          stBox.style.display = 'block';
+          stBox.dataset.pinned = '1';
+          if (res && res.ok) {
+            stBox.style.background = '#f0fdf4';
+            stBox.style.borderColor = '#86efac';
+            stBox.style.color = '#166534';
+            const contNote = fState.mode === 'continue' ? ` (📂 기존 폴더 이어하기: ${formatShortFolderLabel(fState.dir)})` : '';
+            stBox.textContent = `🚀 [${tname}] '${goal}' 프로젝트가 독립 파이프라인으로 시작되었습니다!${contNote} 다른 팀 입력창에서도 동시에 새 프로젝트를 실행할 수 있습니다.`;
+            setTimeout(() => {
+              delete stBox.dataset.pinned;
+              stBox.style.display = 'none';
+            }, 6000);
+          } else {
+            stBox.style.background = '#fef2f2';
+            stBox.style.borderColor = '#fecaca';
+            stBox.style.color = '#b91c1c';
+            stBox.textContent = `⚠️ ${res?.error || '프로젝트를 시작할 수 없습니다.'}`;
+          }
+        }
+      });
+    });
+
+    containerEl.querySelectorAll('.btn-stop-team-mission').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const tid = btn.dataset.tid;
+        const tname = btn.dataset.tname || tid;
+        btn.disabled = true;
+        try {
+          await apiFetch('/ops/missions/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team_id: tid, reason: `[${tname}] 팀 작업 개별 정지` })
+          });
+          pollOrchestrator();
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  function renderSettingsPerTeamMissionBoard(ts, forceRender = false) {
+    const addBtn = document.getElementById('btnPerTeamBoardAddTeam');
+    if (addBtn && !addBtn.dataset.bound) {
+      addBtn.dataset.bound = '1';
+      addBtn.addEventListener('click', () => openTeamBuilderModal(null));
+    }
+    const gdModalBtn = document.getElementById('btnSettingsBoardOpenGdrive');
+    if (gdModalBtn && !gdModalBtn.dataset.bound) {
+      gdModalBtn.dataset.bound = '1';
+      gdModalBtn.addEventListener('click', () => openGdriveDirectModal());
+    }
+    const refWsBtn = document.getElementById('btnSettingsBoardRefreshWs');
+    if (refWsBtn && !refWsBtn.dataset.bound) {
+      refWsBtn.dataset.bound = '1';
+      refWsBtn.addEventListener('click', () => {
+        apiFetch('/ops/teams?refresh=1', { cache: 'no-store' })
+          .then(r => (r.ok ? r.json() : null))
+          .then(d => { if (d) renderTeamsAndWorkspacesDashboard(d, true); })
+          .catch(() => { });
+      });
+    }
+    const globalContMount = document.getElementById('settingsGlobalContinueMount');
+    if (globalContMount) {
+      const selTeamId = document.getElementById('triadTeamSelect')?.value || ts?.active_team_id || (teams[0] && teams[0].id) || '';
+      const activeTeamObj = teams.find(t => t.id === selTeamId) || teams[0] || {};
+      const gWs = activeTeamObj.workspace_status || {};
+      const gRecs = Array.isArray(gWs.recent_project_folders) ? gWs.recent_project_folders : [];
+      const gSig = JSON.stringify([selTeamId, gWs.effective_dir, gRecs]);
+      if (forceRender || globalContMount.dataset.renderedSig !== gSig) {
+        globalContMount.dataset.renderedSig = gSig;
+        globalContMount.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:6px;padding:8px 11px;border-radius:10px;background:#f8fafc;border:1px solid #cbd5e1">
+            <div class="team-dispatch-head-row">
+              <span style="font-size:10.5px;font-weight:800;color:#0f172a">📂 작업 폴더 방식 선택 <span style="font-weight:600;color:#64748b;font-size:10px">(미션 실행 모드일 때 적용 · 통합보고서 .md 파일도 해당 작업 폴더 내부에 생성됨)</span></span>
+              ${buildDispatchFolderSwitchButtonsHtml('__global__')}
+            </div>
+            ${buildDispatchContinueBarHtml('__global__', activeTeamObj.name || '선택 팀', gWs.effective_dir || '', gRecs)}
+          </div>
+        `;
+        bindDispatchFolderConnectControls(globalContMount);
+        syncDispatchContinueUiForKey(globalContMount, '__global__');
+      }
+      const tSel = document.getElementById('triadTeamSelect');
+      if (tSel && !tSel.dataset.boundGlobalCont) {
+        tSel.dataset.boundGlobalCont = '1';
+        tSel.addEventListener('change', () => {
+          if (window.NEXUS_TEAMS_SUMMARY) renderSettingsPerTeamMissionBoard(window.NEXUS_TEAMS_SUMMARY, true);
+        });
+      }
+    }
+
+    const gridEl = document.getElementById('settingsPerTeamMissionGrid');
+    if (!gridEl) return;
+    const teams = Array.isArray(ts?.teams) ? ts.teams : [];
+    const gdGlobal = ts?.gdrive_connection || {};
+    const sig = JSON.stringify([teams.map(t => [t.id, t.name, t.floor, t.color, (t.member_ids || []).length, t.workspace_status]), gdGlobal]);
+    const hasActiveInput = gridEl.contains(document.activeElement)
+      || Array.from(gridEl.querySelectorAll('.team-dispatch-input')).some(inp => (inp.value || '').trim().length > 0)
+      || Array.from(gridEl.querySelectorAll('.team-dispatch-status')).some(st => st.dataset.pinned === '1');
+    if (!forceRender && gridEl.children.length === teams.length && (sig === lastSettingsPerTeamSig || hasActiveInput)) {
+      return;
+    }
+    lastSettingsPerTeamSig = sig;
+    gridEl.innerHTML = teams.map(t => {
+      const color = t.color || '#0f6848';
+      const ws = t.workspace_status || {};
+      const gd = ws.gdrive_direct || {};
+      const r = t.roles || {};
+      const isCloudPrimary = Boolean(ws.is_cloud_primary && gd.folder_url);
+      const cloudWebUrl = gd.folder_url || 'https://drive.google.com/drive/my-drive';
+      const isConnectedOk = isCloudPrimary ? Boolean(gd.connected) : Boolean(ws.is_accessible);
+      const folderTypeTitle = isCloudPrimary
+        ? '☁️ Google Drive 클라우드 전용 폴더'
+        : (ws.is_google_drive_local ? '☁️ 로컬 마운트 드라이브 폴더' : (ws.is_default ? (ws.active_project_dir ? '📂 프로젝트 기반 작업 폴더 (자동 명명)' : '📂 프로젝트 기반 자동 폴더 (별도 미지정)') : '📂 팀 전용 작업 폴더'));
+      const gdSubLineHtml = gd.configured_enabled
+        ? `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;padding-top:4px;margin-top:2px;border-top:1px dashed #cbd5e1;font-size:9.5px">
+             <span style="color:#0369a1;font-weight:700">☁️ 클라우드 폴더: <b>${escHtml(gd.folder_name)}</b> ${gd.connected ? '<span style="color:#15803d">(자동 업로드 ON)</span>' : '<span style="color:#d97706">(로그인 대기)</span>'}</span>
+             <div style="display:flex;gap:7px;align-items:center">
+               <button type="button" class="btn-settings-team-gdrive" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="border:0;background:transparent;color:#0369a1;font-weight:800;font-size:9.5px;cursor:pointer;padding:0;text-decoration:underline">웹 폴더 변경</button>
+               <a href="${escHtml(cloudWebUrl)}" target="_blank" rel="noopener" style="color:#0284c7;font-weight:800;font-size:9.5px;text-decoration:underline">웹 열기 ↗</a>
+             </div>
+           </div>`
+        : `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding-top:4px;margin-top:2px;border-top:1px dashed #e2e8f0;font-size:9.5px;color:#64748b">
+             <span>☁️ Google Drive 클라우드 폴더 미지정</span>
+             <button type="button" class="btn-settings-team-gdrive" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="border:0;background:transparent;color:#0284c7;font-weight:800;font-size:9.5px;cursor:pointer;padding:0;text-decoration:underline">${gdGlobal.connected ? '+ 웹 폴더 선택' : '구글 계정 연결'}</button>
+           </div>`;
+
+      return `
+        <div style="padding:12px 14px;border-radius:11px;background:#ffffff;border:1px solid #cbd5e1;border-left:4px solid ${escHtml(color)};display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;background:${escHtml(color)}15;color:${escHtml(color)};border:1px solid ${escHtml(color)}44">🏢 ${escHtml(t.floor || '1F')}</span>
+              <strong style="font-size:12.5px;color:#0f172a">${escHtml(t.name)}</strong>
+              <span style="font-size:9.5px;color:#64748b;font-weight:700">(${(t.member_ids || []).length}명)</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+              <span data-team-status-pill="${escHtml(t.id)}" style="font-size:9.5px;font-weight:800;color:#15803d;background:#dcfce7;padding:2px 8px;border-radius:999px">🟢 대기 중</span>
+              <span data-team-active-count="${escHtml(t.id)}" style="font-size:9.5px;font-weight:800;color:${Number(t.active_mission_count || 0) > 0 ? '#1d4ed8' : '#475569'};background:${Number(t.active_mission_count || 0) > 0 ? '#dbeafe' : '#f1f5f9'};padding:2px 7px;border-radius:6px">진행 중 ${Number(t.active_mission_count || 0)}건</span>
+              <button type="button" class="btn small btn-stop-team-mission" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" style="display:none;height:22px;padding:0 7px;font-size:9px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">■ 이 팀 정지</button>
+            </div>
+          </div>
+
+          <div class="team-dispatch-head-row">
+            <span style="font-size:9.5px;font-weight:800;color:${escHtml(color)}">🚀 프로젝트 지시 방식</span>
+            ${buildDispatchFolderSwitchButtonsHtml(`settings-${t.id}`)}
+          </div>
+          ${buildDispatchContinueBarHtml(`settings-${t.id}`, t.name, ws.effective_dir || '', ws.recent_project_folders || [])}
+          <form class="team-dispatch-form per-team-project-form" data-tid="${escHtml(t.id)}" data-fstate-key="settings-${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-head-cli="${escHtml(r.head || 'antigravity_sdk')}" style="margin:0">
+            <select class="team-dispatch-select" aria-label="${escHtml(t.name)} 실행 모드">
+              <option value="standard" selected>🔄 Standard</option>
+              <option value="quick">⚡ Quick</option>
+              <option value="deep">🔬 Deep</option>
+              <option value="ask">💬 질문</option>
+            </select>
+            <input type="text" class="team-dispatch-input" placeholder="[${escHtml(t.name)}] 독립 프로젝트 목표 입력..." required>
+            <button type="submit" class="team-dispatch-btn" style="background:${escHtml(color)}">🚀 시작</button>
+          </form>
+          <div class="team-live-progress-strip" data-team-live-strip="${escHtml(t.id)}" style="display:none;padding:7px 9px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;font-size:10px;line-height:1.45"></div>
+          <div class="team-dispatch-status" data-status-tid="${escHtml(t.id)}"></div>
+
+          <!-- 팀 입력창 하단: 이 팀에 연결된 작업 폴더 상세 정보 및 바로가기 -->
+          <div class="team-folder-box" style="margin-top:auto;padding:8px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
+              <span style="font-size:10px;font-weight:800;color:${(isCloudPrimary || ws.is_google_drive_local) ? '#0369a1' : '#0f172a'}">${folderTypeTitle}</span>
+              <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                <span style="background:${isConnectedOk ? '#dcfce7' : '#fee2e2'};color:${isConnectedOk ? '#15803d' : '#b91c1c'};padding:1px 6px;border-radius:5px;font-size:9px;font-weight:800">${isConnectedOk ? '✓ 연결됨' : '확인 필요'}</span>
+                <span style="font-size:9px;color:#475569;font-weight:700">프로젝트 ${ws.project_count || 0} · 리포트 ${ws.report_count || 0} · 파일 ${ws.file_count || 0}</span>
+              </div>
+            </div>
+            <div style="font-family:var(--font-mono,monospace);font-size:10px;color:#1e293b;word-break:break-all">
+              ${isCloudPrimary ? `<a href="${escHtml(cloudWebUrl)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline">${escHtml(cloudWebUrl)}</a>` : escHtml(ws.display_path || ws.effective_dir || 'deliverables/')}${(!isCloudPrimary && ws.is_default && !ws.active_project_dir) ? ` <span style="color:#64748b;font-family:var(--font-sans,sans-serif)">(시작 시 YYYYMMDD_프로젝트명 폴더로 자동 작업)</span>` : ''}
+            </div>
+            ${gdSubLineHtml}
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">
+              <button type="button" class="btn small btn-settings-team-open-dir" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.active_project_dir || ws.effective_dir || '')}" data-cloud-url="${isCloudPrimary ? escHtml(cloudWebUrl) : ''}" style="height:24px;padding:0 8px;font-size:9.5px">${isCloudPrimary ? '☁️ 웹 폴더 열기 ↗' : '🗂️ 폴더 열기'}</button>
+              <button type="button" class="btn small btn-settings-team-browse-dir" data-tid="${escHtml(t.id)}" data-tname="${escHtml(t.name)}" data-dir="${escHtml(ws.effective_dir || '')}" style="height:24px;padding:0 8px;font-size:9.5px">📂 로컬 폴더 변경</button>
+              <button type="button" class="btn small btn-settings-team-edit" data-tid="${escHtml(t.id)}" style="height:24px;padding:0 8px;font-size:9.5px">✏️ 팀·폴더 편집</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    bindTeamDispatchFormsInContainer(gridEl);
+    gridEl.querySelectorAll('.btn-settings-team-open-dir').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.cloudUrl) {
+          window.open(btn.dataset.cloudUrl, '_blank', 'noopener');
+          return;
+        }
+        openLocalFolderExplorer(btn.dataset.dir, btn.dataset.tname || '', btn.dataset.tid || null);
+      });
+    });
+    gridEl.querySelectorAll('.btn-settings-team-browse-dir').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openLocalFolderPicker({
+          initialDir: btn.dataset.dir || '',
+          teamId: btn.dataset.tid || null,
+          teamName: btn.dataset.tname || ''
+        });
+      });
+    });
+    gridEl.querySelectorAll('.btn-settings-team-gdrive').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openGdriveDirectModal(btn.dataset.tid || null, btn.dataset.tname || '');
+      });
+    });
+    gridEl.querySelectorAll('.btn-settings-team-edit').forEach(btn => {
+      btn.addEventListener('click', () => openTeamBuilderModal(btn.dataset.tid));
+    });
+  }
+
+  function updatePerTeamLiveProgressStrips(data) {
+    if (!data || !Array.isArray(data.missions)) return;
+    const missions = data.missions;
+    const teamStreams = data.team_streams || {};
+    const teamIds = new Set();
+    document.querySelectorAll('[data-team-status-pill]').forEach(el => {
+      if (el.dataset.teamStatusPill) teamIds.add(el.dataset.teamStatusPill);
+    });
+    teamIds.forEach(tid => {
+      const activeTeamMissions = missions.filter(
+        m => m && m.team_id === tid && ['RUNNING', 'AWAITING_APPROVAL', 'QUOTA_PAUSED', 'PAUSED_ERROR'].includes(m.status)
+      );
+      const runningM = missions.find(m => m && m.team_id === tid && m.status === 'RUNNING');
+      const pendingM = missions.find(m => m && m.team_id === tid && m.status === 'AWAITING_APPROVAL');
+      const pausedM = missions.find(m => m && m.team_id === tid && (m.status === 'QUOTA_PAUSED' || m.status === 'PAUSED_ERROR'));
+      const tsLive = teamStreams[tid] || null;
+      const pills = document.querySelectorAll(`[data-team-status-pill="${tid}"]`);
+      const activeCountBadges = document.querySelectorAll(`[data-team-active-count="${tid}"]`);
+      const stopBtns = document.querySelectorAll(`.btn-stop-team-mission[data-tid="${tid}"]`);
+      const strips = document.querySelectorAll(`[data-team-live-strip="${tid}"]`);
+
+      activeCountBadges.forEach(cb => {
+        const cnt = activeTeamMissions.length;
+        cb.textContent = `진행 중 ${cnt}건`;
+        cb.style.background = cnt > 0 ? '#dbeafe' : '#f1f5f9';
+        cb.style.color = cnt > 0 ? '#1d4ed8' : '#475569';
+      });
+
+      if (runningM) {
+        const curStage = tsLive?.stage || ((runningM.steps || [])[runningM.steps.length - 1]?.stage) || 'LEAD_PLANNING';
+        const passed = Number(runningM.passed_steps || (runningM.steps || []).length || 0);
+        const resumedCnt = Number(runningM.resumed_count || 0);
+        const resumeTag = resumedCnt > 0 ? ` · ♻️ 자동 이어하기 #${resumedCnt}` : '';
+        pills.forEach(p => {
+          p.style.background = '#dbeafe';
+          p.style.color = '#1d4ed8';
+          p.textContent = `⚡ 실행 중 · ${curStage}${resumedCnt > 0 ? ' ♻️' : ''}`;
+        });
+        stopBtns.forEach(b => { b.style.display = 'inline-flex'; });
+        const parList = Array.isArray(tsLive?.parallel_agents) ? tsLive.parallel_agents : [];
+        const whoLine = parList.length >= 2
+          ? `⚡ 사원 ${parList.length}명 동시 병렬 가동: ${parList.map(x => `#${escHtml(x.agent_id)} ${escHtml(x.agent_name)}`).join(' ∥ ')}`
+          : (tsLive?.agent_name ? `👤 수행 중: #${escHtml(tsLive.agent_id || '')} ${escHtml(tsLive.agent_name)} — ${escHtml((tsLive.thought || '').slice(0, 70))}` : `진행 단계 완료: ${passed}건`);
+        strips.forEach(s => {
+          s.style.display = 'block';
+          s.style.background = '#eff6ff';
+          s.style.borderColor = '#93c5fd';
+          s.style.color = '#1e3a8a';
+          s.innerHTML = `<div><b>[${escHtml(runningM.mission_id)}]</b> ${escHtml((runningM.goal || '').slice(0, 65))}${resumeTag ? `<span style="margin-left:6px;background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:800">${resumeTag.slice(3)}</span>` : ''}</div><div style="margin-top:2px;color:#0369a1">${whoLine}</div>`;
+        });
+      } else if (pausedM) {
+        pills.forEach(p => {
+          p.style.background = '#ffedd5';
+          p.style.color = '#c2410c';
+          p.textContent = '⏸ 체크포인트 일시중지';
+        });
+        stopBtns.forEach(b => { b.style.display = 'none'; });
+        strips.forEach(s => {
+          s.style.display = 'block';
+          s.style.background = '#fff7ed';
+          s.style.borderColor = '#fdba74';
+          s.style.color = '#9a3412';
+          s.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span>⏸ <b>[${escHtml(pausedM.mission_id)}]</b> 체크포인트 보존됨 — 이어서 재개 가능</span><button type="button" class="btn small btn-inline-resume-mission" data-mid="${escHtml(pausedM.mission_id)}" style="height:22px;padding:0 8px;font-size:9.5px;background:#ea580c;color:#fff;border-color:#ea580c">▶ 이어서 재개</button></div>`;
+          s.querySelector('.btn-inline-resume-mission')?.addEventListener('click', async (ev) => {
+            const b = ev.currentTarget;
+            b.disabled = true;
+            try {
+              await apiFetch('/ops/missions/resume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mission_id: pausedM.mission_id })
+              });
+              pollOrchestrator();
+            } finally {
+              b.disabled = false;
+            }
+          });
+        });
+      } else if (pendingM) {
+        pills.forEach(p => {
+          p.style.background = '#fef3c7';
+          p.style.color = '#92400e';
+          p.textContent = `📋 통합보고 결재 대기`;
+        });
+        stopBtns.forEach(b => { b.style.display = 'none'; });
+        strips.forEach(s => {
+          s.style.display = 'block';
+          s.style.background = '#fffbeb';
+          s.style.borderColor = '#fcd34d';
+          s.style.color = '#92400e';
+          s.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span>📋 <b>[${escHtml(pendingM.mission_id)}]</b> 총괄팀장 통합보고 도착 — 결재 대기 중</span><a href="index.html#dashboardMyAiOfficeSection" style="color:#b45309;font-weight:800;text-decoration:underline">대표 결재함 확인 ↑</a></div>`;
+        });
+      } else {
+        pills.forEach(p => {
+          p.style.background = '#dcfce7';
+          p.style.color = '#15803d';
+          p.textContent = '🟢 대기 중';
+        });
+        stopBtns.forEach(b => { b.style.display = 'none'; });
+        strips.forEach(s => { s.style.display = 'none'; });
+      }
+    });
+  }
+
+  function renderDashboardApprovalCenter(data) {
+    const listBox = document.getElementById('dashboardApprovalCardsList');
+    const cntBadge = document.getElementById('dashboardApprovalCountBadge');
+    const approveAllBtn = document.getElementById('btnApproveAllPendingMissions');
+    if (!listBox || !Array.isArray(data?.missions)) return;
+
+    const pendingList = data.missions.filter(m => m && m.status === 'AWAITING_APPROVAL');
+    const runningList = data.missions.filter(m => m && m.status === 'RUNNING');
+    const recentApproved = data.missions.filter(m => m && m.status === 'DONE' && m.approved_by_user).slice(0, 2);
+
+    if (cntBadge) {
+      if (pendingList.length > 0) {
+        cntBadge.style.background = '#fef3c7';
+        cntBadge.style.color = '#92400e';
+        cntBadge.style.borderColor = '#f59e0b';
+        cntBadge.textContent = `⏳ 결재 대기 ${pendingList.length}건`;
+      } else {
+        cntBadge.style.background = '#ecfdf5';
+        cntBadge.style.color = '#0f6848';
+        cntBadge.style.borderColor = '#86efac';
+        cntBadge.textContent = `✓ 결재 대기 0건`;
+      }
+    }
+    if (approveAllBtn) {
+      approveAllBtn.style.display = pendingList.length >= 2 ? 'inline-flex' : 'none';
+      if (!approveAllBtn.dataset.bound) {
+        approveAllBtn.dataset.bound = '1';
+        approveAllBtn.addEventListener('click', async () => {
+          const curPending = (latestActivitySnapshot?.missions || []).filter(m => m && m.status === 'AWAITING_APPROVAL');
+          if (!curPending.length) return;
+          approveAllBtn.disabled = true;
+          try {
+            for (const pm of curPending) {
+              await apiFetch('/ops/missions/decision', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mission_id: pm.mission_id, decision: 'approve', feedback: '대시보드 대표 결재함 일괄 최종 승인' })
+              });
+            }
+            lastApprovalCenterStamp = '';
+            pollOrchestrator();
+          } finally {
+            approveAllBtn.disabled = false;
+          }
+        });
+      }
+    }
+
+    const stamp = JSON.stringify({
+      p: pendingList.map(m => [m.mission_id, m.updated_at]),
+      r: runningList.map(m => [m.mission_id, (m.steps || []).length]),
+      d: recentApproved.map(m => [m.mission_id, m.approved_at])
+    });
+    if (stamp === lastApprovalCenterStamp || listBox.contains(document.activeElement)) {
+      return;
+    }
+    lastApprovalCenterStamp = stamp;
+
+    if (pendingList.length === 0) {
+      const runningNoticeHtml = runningList.length
+        ? `<div style="padding:10px 13px;border-radius:9px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:11px;font-weight:700">⚡ 현재 <b>${runningList.length}개 팀</b>에서 프로젝트를 수행 중입니다 (${runningList.map(rm => `[${escHtml(rm.team_name || '팀')} · ${escHtml(rm.mission_id)}]`).join(', ')}). 파트 상호검토 후 통합보고가 도착하면 즉시 이곳에 결재 카드가 생성됩니다.</div>`
+        : '';
+      const recentHtml = recentApproved.length
+        ? `<div style="display:flex;flex-direction:column;gap:5px;margin-top:4px"><span style="font-size:10px;font-weight:800;color:#64748b">최근 대표 최종 승인 완료 내역</span>${recentApproved.map(am => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:10.5px"><span>✅ <b>[${escHtml(am.team_name || '기본팀')} · ${escHtml(am.mission_id)}]</b> ${escHtml(am.goal || '')}</span>${am.deliverable_file ? `<a href="${escHtml(am.deliverable_file)}" target="_blank" style="color:#0f6848;font-weight:800;white-space:nowrap">통합보고서 ↗</a>` : ''}</div>`).join('')}</div>`
+        : '';
+      listBox.innerHTML = `
+        ${runningNoticeHtml}
+        <div style="padding:16px;border-radius:10px;background:#f8fafc;border:1px dashed #cbd5e1;text-align:center;color:#475569;font-size:11.5px">
+          현재 대표님의 최종 결재를 기다리는 미결 항목이 없습니다. 상단 <b>팀별 프로젝트 지시창</b>에서 팀마다 원하는 프로젝트를 실행해 보세요!
+        </div>
+        ${recentHtml}
+      `;
+      return;
+    }
+
+    listBox.innerHTML = pendingList.map(pm => {
+      const tColor = pm.team_color || '#0f6848';
+      const leadName = pm.lead_agent_name || '총괄팀장 AI';
+      const genFiles = Array.isArray(pm.generated_files) ? pm.generated_files : [];
+      const absDir = pm.project_dir_abs || pm.output_root || '';
+      const reportTxt = pm.consolidated_report || pm.deliverable_preview || '전 파트 수행 및 파트장 상호검토가 완료되었습니다.';
+      const filesHtml = genFiles.map(f =>
+        `<a href="${escHtml(f)}" target="_blank" style="background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;padding:4px 9px;border-radius:6px;font-size:10.5px;font-weight:800">📁 ${escHtml(f)} 미리보기 ↗</a>`
+      ).join('') + (pm.deliverable_file
+        ? `<a href="${escHtml(pm.deliverable_file)}" target="_blank" style="background:#f0fdf4;border:1px solid #86efac;color:#0f6848;padding:4px 9px;border-radius:6px;font-size:10.5px;font-weight:800">📄 통합보고서 전문(${escHtml(pm.deliverable_file)}) ↗</a>`
+        : '');
+
+      return `
+        <div class="dash-approval-item-card" data-mid="${escHtml(pm.mission_id)}" style="padding:14px 16px;border-radius:12px;background:#ffffff;border:1.5px solid #f59e0b;border-left:5px solid ${escHtml(tColor)};box-shadow:0 6px 16px rgba(15,23,42,0.05);display:flex;flex-direction:column;gap:9px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span style="background:${escHtml(tColor)}18;color:${escHtml(tColor)};border:1px solid ${escHtml(tColor)}44;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:800">🏢 ${escHtml(pm.team_floor || '1F')} · ${escHtml(pm.team_name || '수행팀')}</span>
+              <strong style="font-size:13px;color:#0f172a">[${escHtml(pm.mission_id)}] ${escHtml(pm.goal || '')}</strong>
+              ${pm.deliverable_type_label ? `<span style="background:#eff6ff;color:#1d4ed8;padding:2px 7px;border-radius:5px;font-size:9.5px;font-weight:800">${escHtml(pm.deliverable_type_label)}</span>` : ''}
+              ${Number(pm.resumed_count || 0) > 0 ? `<span style="background:#dcfce7;color:#15803d;padding:2px 7px;border-radius:5px;font-size:9.5px;font-weight:800">♻️ 서버 재기동 이어하기 완수 (#${Number(pm.resumed_count)})</span>` : ''}
+            </div>
+            <span style="background:#fef3c7;color:#92400e;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:800">👑 ${escHtml(leadName)} 통합보고 · 결재 대기</span>
+          </div>
+          <div style="white-space:pre-wrap;padding:10px 12px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:11px;line-height:1.6;color:#1e293b;max-height:220px;overflow-y:auto">${escHtml(reportTxt)}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            ${filesHtml}
+            ${absDir ? `<button type="button" class="btn small btn-dash-open-approval-dir" data-dir="${escHtml(absDir)}" style="height:27px;padding:0 9px;font-size:10px">🗂️ 로컬 산출물 폴더 열기</button>` : ''}
+          </div>
+          <div style="padding-top:8px;border-top:1px dashed #fcd34d;display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn small primary btn-dash-card-approve" data-mid="${escHtml(pm.mission_id)}" style="height:34px;padding:0 15px;font-size:11.5px;background:#0f6848;border-color:#0f6848;font-weight:800">✅ 최종 승인 및 납품 확정</button>
+            <input type="text" class="triad-goal-input inp-dash-card-feedback" data-mid="${escHtml(pm.mission_id)}" style="height:34px;font-size:11px;min-width:220px;flex:1;background:#fff" placeholder="보완 지시 사항 입력 후 [🔄 보완 재지시] 클릭 (또는 승인 메모 입력)">
+            <button type="button" class="btn small btn-dash-card-revise" data-mid="${escHtml(pm.mission_id)}" style="height:34px;padding:0 13px;font-size:11px;background:#fff7ed;color:#c2410c;border-color:#fdba74;font-weight:800">🔄 총괄팀장에게 보완 재지시</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    listBox.querySelectorAll('.btn-dash-open-approval-dir').forEach(b => {
+      b.addEventListener('click', () => openLocalFolderExplorer(b.dataset.dir || '', '결재 대기 산출물 폴더'));
+    });
+
+    listBox.querySelectorAll('.btn-dash-card-approve').forEach(btn => {
+      btn.addEventListener('click', async (ev) => {
+        const b = ev.currentTarget;
+        const mid = b.dataset.mid;
+        const inp = listBox.querySelector(`.inp-dash-card-feedback[data-mid="${mid}"]`);
+        const memo = (inp?.value || '').trim();
+        b.disabled = true;
+        b.textContent = '⏳ 최종 승인 반영 중...';
+        try {
+          await apiFetch('/ops/missions/decision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mission_id: mid, decision: 'approve', feedback: memo })
+          });
+          lastApprovalCenterStamp = '';
+          pollOrchestrator();
+        } catch (_) {
+          b.disabled = false;
+          b.textContent = '✅ 최종 승인 및 납품 확정';
+        }
+      });
+    });
+
+    listBox.querySelectorAll('.btn-dash-card-revise').forEach(btn => {
+      btn.addEventListener('click', async (ev) => {
+        const b = ev.currentTarget;
+        const mid = b.dataset.mid;
+        const inp = listBox.querySelector(`.inp-dash-card-feedback[data-mid="${mid}"]`);
+        let fb = (inp?.value || '').trim();
+        if (!fb) {
+          fb = (prompt('총괄팀장 및 파트 담당에게 전달할 보완 재지시 내용을 입력하세요:', '') || '').trim();
+          if (!fb) return;
+        }
+        b.disabled = true;
+        b.textContent = '⏳ 보완 재지시 전달 중...';
+        try {
+          await apiFetch('/ops/missions/decision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mission_id: mid, decision: 'revise', feedback: fb })
+          });
+          lastApprovalCenterStamp = '';
+          pollOrchestrator();
+        } catch (_) {
+          b.disabled = false;
+          b.textContent = '🔄 총괄팀장에게 보완 재지시';
+        }
+      });
+    });
   }
 
   function showAgentsPlacementFeedback(msg, isError = false) {
@@ -5445,6 +7729,8 @@
   }
 
   function renderAgentsTeamPlacementBoard(ts, forceRender = false) {
+    renderConfiguredTeamsAndMembersSection(ts, forceRender);
+    renderConfiguredAgentsRoster(forceRender);
     const boardEl = document.getElementById('agentsTeamCardsBoard');
     const tbodyEl = document.getElementById('agentsPlacementTableBody');
     const countBadge = document.getElementById('agentsTeamsCountBadge');
@@ -5457,7 +7743,7 @@
 
     const agentsBoardSig = JSON.stringify([
       teams,
-      modularAgents.map(a => [a.id, a.name, a.triadRole, a.cliProvider, a.cliModel]),
+      modularAgents.map(a => [a.id, a.name, a.triadRole, a.orgRank, a.cliProvider, a.cliModel]),
       lastDiagnostics?.checked_at || ''
     ]);
     if (
@@ -5514,13 +7800,13 @@
                   <span class="team-floor-pill" style="border-color:${escHtml(color)}44;color:${escHtml(color)}">🏢 ${escHtml(t.floor)}</span>
                   <strong style="font-size:13px;color:#0f172a">${escHtml(t.name)}</strong>
                   ${t.is_active
-                    ? '<span class="team-active-pill">★ 기본 팀</span>'
-                    : `<button type="button" class="btn small btn-ag-set-active" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀 지정</button>`}
+            ? '<span class="team-active-pill">★ 기본 팀</span>'
+            : `<button type="button" class="btn small btn-ag-set-active" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀 지정</button>`}
                   ${t.orchestrator_mode === 'carbon'
-                    ? '<span class="orch-tier-pill ultra">💎 Carbon</span>'
-                    : t.orchestrator_mode === 'argon'
-                    ? '<span class="orch-tier-pill pro">🔷 Argon</span>'
-                    : ''}
+            ? '<span class="orch-tier-pill ultra">💎 Carbon</span>'
+            : t.orchestrator_mode === 'argon'
+              ? '<span class="orch-tier-pill pro">🔷 Argon</span>'
+              : ''}
                 </div>
                 <div style="font-size:10px;color:${ws.is_cloud_primary ? '#0284c7' : '#64748b'};margin-top:3px;font-family:var(--font-mono);word-break:break-all">${ws.is_cloud_primary ? `☁️ 웹 폴더: <a href="${escHtml(ws.gdrive_direct?.folder_url || '')}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline">${escHtml(ws.gdrive_direct?.folder_url || '')}</a>` : `📂 폴더: ${escHtml(ws.effective_dir || 'deliverables/')}`}</div>
               </div>
@@ -5639,7 +7925,7 @@
             if (modularAgents.length >= ALL_AGENT_PRESETS.length) return;
             const nextAg = ALL_AGENT_PRESETS[modularAgents.length];
             modularAgents.push(nextAg);
-            try { localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length)); } catch (_) {}
+            try { localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length)); } catch (_) { }
             aid = nextAg.id;
           }
           await assignAgentToTeamAndPlace(aid, tid, 'add');
@@ -5679,8 +7965,15 @@
             </td>
             <td>
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                <span class="char-cli-badge ${escHtml(cliKey)}" style="margin:0">${escHtml(ag.triadRole || 'BUILDER')} · ${escHtml(cliLbl)}</span>
-                <span style="font-size:9.5px;font-weight:700;color:#0f6848;background:#f0fdf4;border:1px solid #bbf7d0;padding:1.5px 6px;border-radius:5px">🤖 ${escHtml(agModelDisp)}</span>
+                <select class="triad-cli-select sel-row-rank" data-aid="${escHtml(ag.id)}" style="height:27px;font-size:10px;font-weight:800;background:#fff" aria-label="직급 선택">
+                  <option value="LEAD" ${(ag.orgRank === 'LEAD' || ag.triadRole === 'LEAD') ? 'selected' : ''}>👑 총괄팀장</option>
+                  <option value="PART_LEAD" ${(ag.orgRank !== 'LEAD' && ag.orgRank !== 'STAFF' && ag.triadRole !== 'LEAD') ? 'selected' : ''}>⭐ 파트장</option>
+                  <option value="STAFF" ${ag.orgRank === 'STAFF' ? 'selected' : ''}>👤 일반사원</option>
+                </select>
+                <span class="char-cli-badge ${escHtml(cliKey)}" style="margin:0">${escHtml(ag.triadRole || 'PART_BUILD')} · ${escHtml(cliLbl)}</span>
+                <select class="triad-cli-select sel-row-model" data-aid="${escHtml(ag.id)}" style="height:27px;font-size:10px;font-weight:700;background:#f0fdf4;border-color:#86efac;color:#0f172a;min-width:195px" aria-label="세부 실행 모델 선택">
+                  ${buildSdkModelOptionsHtml(ag.cliModel, cliKey)}
+                </select>
               </div>
             </td>
             <td>
@@ -5712,6 +8005,16 @@
             return;
           }
           await assignAgentToTeamAndPlace(aid, val, 'move');
+        });
+      });
+      tbodyEl.querySelectorAll('.sel-row-rank').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          await applyQuickAgentModelOrRank(sel.dataset.aid, { orgRank: sel.value }, 'table');
+        });
+      });
+      tbodyEl.querySelectorAll('.sel-row-model').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          await applyQuickAgentModelOrRank(sel.dataset.aid, { cliModel: sel.value }, 'table');
         });
       });
       tbodyEl.querySelectorAll('.btn-row-focus-studio').forEach(btn => {
@@ -5927,7 +8230,7 @@
           const fb = document.getElementById('tbModalFeedback');
           if (fb) { fb.style.color = '#dc2626'; fb.textContent = `❌ ${d.error || '삭제 실패'}`; }
         }
-      } catch (_) {} finally {
+      } catch (_) { } finally {
         btn.disabled = false;
       }
     });
@@ -6005,8 +8308,8 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ configs: savedCharAiConfigs })
-            }).catch(() => {});
-          } catch (_) {}
+            }).catch(() => { });
+          } catch (_) { }
         }
         if (d.teams_summary) {
           renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
@@ -6074,11 +8377,11 @@
       ].join('');
     }
 
-    // Populate Role CLI selects
-    const provEntries = lastDiagnostics?.providers
-      ? Object.entries(lastDiagnostics.providers).map(([k, p]) => [k, p.label || CLI_LABELS[k] || k])
-      : Object.entries(CLI_LABELS);
-    const roleDefaults = existing?.roles || currentRoles || { head: 'claude', builder: 'antigravity', sub_builder: 'gemini', reviewer: 'openai', researcher: 'grok' };
+    // Populate Role CLI selects strictly from active CLI slots
+    const activeProvsMap = getActiveCliProvidersMap();
+    const provEntries = Object.entries(activeProvsMap).map(([k, p]) => [k, p.label || CLI_LABELS[k] || k]);
+    const defaultActiveKey = activeProvsMap.antigravity_sdk ? 'antigravity_sdk' : (provEntries[0]?.[0] || 'antigravity_sdk');
+    const roleDefaults = existing?.roles || currentRoles || {};
     [
       ['tbRoleHead', 'head'],
       ['tbRoleBuilder', 'builder'],
@@ -6088,7 +8391,8 @@
     ].forEach(([selId, rKey]) => {
       const sel = document.getElementById(selId);
       if (!sel) return;
-      const curVal = roleDefaults[rKey] || 'antigravity';
+      const rawRoleVal = roleDefaults[rKey] || defaultActiveKey;
+      const curVal = activeProvsMap[rawRoleVal] ? rawRoleVal : defaultActiveKey;
       sel.innerHTML = provEntries.map(([k, lbl]) => `<option value="${escHtml(k)}" ${k === curVal ? 'selected' : ''}>${escHtml(lbl)}</option>`).join('');
     });
 
@@ -6142,7 +8446,7 @@
       const nextAg = ALL_AGENT_PRESETS[modularAgents.length];
       modularAgents.push(nextAg);
       const plc = syncAgentOfficePlacement(nextAg.id, nextAg.floor || '2F', null, true);
-      try { localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length)); } catch (_) {}
+      try { localStorage.setItem(ACTIVE_AGENT_COUNT_KEY, String(modularAgents.length)); } catch (_) { }
       if (latestTeamsSummary) renderTeamsAndWorkspacesDashboard(latestTeamsSummary);
       showAgentsPlacementFeedback(`✨ 새 AI 직원 [#${nextAg.id} ${nextAg.name}] 충원 완료 (${plc.floorStr} · #${plc.seatIndex + 1}번석 배치)! 원하는 팀으로 드래그하거나 선택해 배정하세요.`);
     });
@@ -6162,20 +8466,20 @@
         });
         const d = await res.json().catch(() => ({}));
         if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary);
-      } catch (_) {}
+      } catch (_) { }
     });
     document.getElementById('btnRefreshTeamsDashboard')?.addEventListener('click', () => {
       apiFetch('/ops/teams?refresh=1', { cache: 'no-store' })
         .then(r => (r.ok ? r.json() : null))
         .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts, true); })
-        .catch(() => {});
+        .catch(() => { });
     });
 
     // Initial load of teams & connected workspaces
     apiFetch('/ops/teams', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
       .then(ts => { if (ts) renderTeamsAndWorkspacesDashboard(ts, true); })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   async function pollOrchestrator() {
@@ -6190,10 +8494,18 @@
       }
       if (!res.ok) return;
       const data = await res.json();
+      latestActivitySnapshot = data;
+      if (data.character_configs) syncServerCharConfigsIntoRuntime(data.character_configs, false);
+      if (data.part_roles) syncPartRolesToDOM(data.part_roles);
       if (data.roles) applyRolesToDOM(data.roles);
       if (data.diagnostics) renderCliDiagnosticsModal(data.diagnostics);
+      if (data.sdk_status) renderAntigravitySdkCard(data.sdk_status);
       if (data.output_dir_status) renderOutputDirStatus(data.output_dir_status);
       if (data.teams_summary) renderTeamsAndWorkspacesDashboard(data.teams_summary);
+      updatePerTeamLiveProgressStrips(data);
+      renderDashboardApprovalCenter(data);
+      renderDashboardAgentsAndStats(false);
+      renderDashboardDeliverablesSummary(data.missions || [], false);
       const usageObj = data.usage?.today || data.usage?.mission || null;
       updatePipelinePhaseDOM(data.phase || 'IDLE', data.events || [], usageObj);
 
@@ -6249,17 +8561,117 @@
                   body: JSON.stringify({ reason: '한도 일시중지 상태에서 사용자 종료' })
                 });
                 pollOrchestrator();
-              } catch (_) {}
+              } catch (_) { }
+            });
+          }
+        } else if (latestMission.status === 'AWAITING_APPROVAL' || data.phase === 'AWAITING_APPROVAL') {
+          const genFiles = Array.isArray(latestMission.generated_files) ? latestMission.generated_files : [];
+          const absProjDir = latestMission.project_dir_abs || latestMission.output_root || '';
+          const leadName = latestMission.lead_agent_name || '프로젝트 총괄팀장';
+          const renderStamp = `${latestMission.mission_id}:${latestMission.updated_at || ''}`;
+          if (replyRole) replyRole.textContent = `[📋 ${leadName} 통합보고 도착 · 대표님 최종 승인 대기 (${latestMission.mission_id})]`;
+          if (replyMeta) replyMeta.textContent = `⏳ 최종 승인 대기 · ${latestMission.mission_id}`;
+
+          if (replyText && replyText.dataset.approvalStamp !== renderStamp && !replyText.contains(document.activeElement)) {
+            replyText.dataset.approvalStamp = renderStamp;
+            const reportTxt = latestMission.consolidated_report || latestMission.deliverable_preview || '전 파트 수행 및 상호검토가 완료되었습니다.';
+            const filesLinksHtml = genFiles.length
+              ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${genFiles.map(f => `<a href="${escHtml(f)}" target="_blank" style="background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;padding:4px 9px;border-radius:6px;font-size:10.5px;font-weight:800">📁 ${escHtml(f)} 미리보기 ↗</a>`).join('')}${latestMission.deliverable_file ? `<a href="${escHtml(latestMission.deliverable_file)}" target="_blank" style="background:#f0fdf4;border:1px solid #86efac;color:#0f6848;padding:4px 9px;border-radius:6px;font-size:10.5px;font-weight:800">📄 통합보고서 전문(${escHtml(latestMission.deliverable_file)}) 열기 ↗</a>` : ''}</div>`
+              : '';
+            const dirBtnHtml = absProjDir
+              ? `<button type="button" class="btn small btn-open-approval-dir" data-dir="${escHtml(absProjDir)}" style="height:30px;padding:0 10px;font-size:10.5px">🗂️ 로컬 산출물 폴더 열기</button>`
+              : '';
+            replyText.innerHTML = `
+              <div style="margin-top:6px;padding:13px 15px;border-radius:11px;background:linear-gradient(180deg,#fffbeb 0%,#ffffff 100%);border:1.5px solid #f59e0b;box-shadow:0 6px 18px rgba(245,158,11,0.12)">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+                  <strong style="color:#92400e;font-size:12.5px">👑 ${escHtml(leadName)} 통합보고 브리핑 — 파트 상호검토 완료 (${genFiles.length}개 파일)</strong>
+                  <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800">최종 결재 대기 중</span>
+                </div>
+                <div style="white-space:pre-wrap;padding:10px 12px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:11.5px;line-height:1.6;color:#1e293b;max-height:240px;overflow-y:auto">${escHtml(reportTxt)}</div>
+                ${filesLinksHtml}
+                <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #fcd34d;display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+                  <button type="button" id="btnApproveMissionFinal" class="btn small primary" style="height:34px;padding:0 15px;font-size:11.5px;background:#0f6848;border-color:#0f6848;font-weight:800">✅ 최종 승인 및 납품 확정 (폴더·Google Drive 반영)</button>
+                  ${dirBtnHtml}
+                  <input type="text" id="missionRevisionFeedbackInput" class="triad-goal-input" style="height:34px;font-size:11px;min-width:220px;flex:1;background:#fff" placeholder="보완/수정 지시할 사항이 있으면 입력 후 [🔄 보완 재지시]를 누르세요 (승인 시 메모로도 활용 가능)">
+                  <button type="button" id="btnReviseMissionFinal" class="btn small" style="height:34px;padding:0 13px;font-size:11px;background:#fff7ed;color:#c2410c;border-color:#fdba74;font-weight:800">🔄 총괄팀장에게 보완 재지시</button>
+                </div>
+              </div>
+            `;
+            replyText.querySelectorAll('.btn-open-approval-dir').forEach(b => {
+              b.addEventListener('click', () => openLocalFolderExplorer(b.dataset.dir || '', '결재 대기 산출물 폴더'));
+            });
+            replyText.querySelector('#btnApproveMissionFinal')?.addEventListener('click', async (ev) => {
+              const btn = ev.currentTarget;
+              const memo = (replyText.querySelector('#missionRevisionFeedbackInput')?.value || '').trim();
+              btn.disabled = true;
+              btn.textContent = '⏳ 최종 승인 및 납품 반영 중...';
+              try {
+                await apiFetch('/ops/missions/decision', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mission_id: latestMission.mission_id, decision: 'approve', feedback: memo })
+                });
+                delete replyText.dataset.approvalStamp;
+                lastRenderedMissionId = null;
+                pollOrchestrator();
+              } catch (_) {
+                btn.disabled = false;
+              }
+            });
+            replyText.querySelector('#btnReviseMissionFinal')?.addEventListener('click', async (ev) => {
+              const btn = ev.currentTarget;
+              const inp = replyText.querySelector('#missionRevisionFeedbackInput');
+              let fbTxt = (inp?.value || '').trim();
+              if (!fbTxt) {
+                fbTxt = (prompt('총괄팀장 및 파트 담당에게 전달할 구체적 보완 재지시 내용을 입력하세요:', '') || '').trim();
+                if (!fbTxt) return;
+              }
+              btn.disabled = true;
+              btn.textContent = '⏳ 파트 보완 재지시 전달 중...';
+              try {
+                await apiFetch('/ops/missions/decision', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mission_id: latestMission.mission_id, decision: 'revise', feedback: fbTxt })
+                });
+                delete replyText.dataset.approvalStamp;
+                pollOrchestrator();
+              } catch (_) {
+                btn.disabled = false;
+              }
             });
           }
         } else if (latestMission.live || latestMission.status === 'RUNNING') {
+          if (replyText) delete replyText.dataset.approvalStamp;
           const curStep = (latestMission.steps || [])[latestMission.steps.length - 1];
           const typeTag = latestMission.deliverable_type_label ? ` · ${latestMission.deliverable_type_label}` : '';
-          if (replyRole) replyRole.textContent = `[1-Cycle 미션 진행 중 · ${data.phase || 'RUNNING'} (${latestMission.passed_steps || 0}/5)${typeTag}]`;
+          const ls = data.live_agent_stream || null;
+          const totalSteps = latestMission.max_steps || (currentPartRoles?.pipeline_stages?.length) || 7;
+          if (replyRole) replyRole.textContent = `[총괄팀장·파트 협업 진행 중 · ${data.phase || 'RUNNING'} (${latestMission.passed_steps || 0}/${totalSteps})${typeTag}]`;
           if (replyText) {
-            replyText.textContent = curStep
+            const baseTxt = curStep
               ? `[${curStep.stage}] ${curStep.summary}`
-              : `'${latestMission.goal}' 업무 문장을 자동 분석하여 5단계 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)을 실행 중입니다...`;
+              : `'${latestMission.goal}' 업무 문장을 자동 분석하여 파이프라인(PLANNING → BUILDING → VERIFYING → REVIEWING → DECIDING)을 실행 중입니다...`;
+            if (ls && ls.active) {
+              const subs = Array.isArray(ls.subagents) ? ls.subagents : [];
+              const subHtml = subs.length
+                ? `<div style="margin-top:5px;font-size:10px;color:#0369a1">🤝 <b>SDK SubagentConfig 로스터 (${subs.length}명)</b>: ${subs.map(s => `<span style="display:inline-block;background:#e0f2fe;color:#0c4a6e;padding:1px 6px;border-radius:4px;margin-right:4px;font-weight:700">#${escHtml(s.id || '')} ${escHtml(s.name || '')} (${escHtml(s.role || '')})</span>`).join('')}</div>`
+                : '';
+              const toolHtml = ls.tool
+                ? `<div style="margin-top:4px;color:#1d4ed8;font-weight:800;font-family:var(--font-mono,monospace);font-size:10.5px">🔧 실시간 도구 호출: ${escHtml(ls.tool)}</div>`
+                : '';
+              replyText.innerHTML = `
+                <div>${escHtml(baseTxt)}</div>
+                <div style="margin-top:7px;padding:9px 11px;border-radius:9px;background:linear-gradient(135deg,#f0f9ff,#ecfdf5);border:1px solid #86efac;font-size:11px;line-height:1.5">
+                  <div style="font-weight:800;color:#0f6848">⚡ 실시간 에이전트 스트림 · #${escHtml(ls.agent_id || '01')} ${escHtml(ls.agent_name || ls.role || 'AI')} (${ls.provider === 'antigravity_sdk' ? '📦 Antigravity SDK · $0' : escHtml(ls.provider || '')})</div>
+                  <div style="margin-top:3px;color:#1e293b">💭 ${escHtml(ls.thought || '추론 진행 중...')}</div>
+                  ${toolHtml}
+                  ${subHtml}
+                </div>
+              `;
+            } else {
+              replyText.textContent = baseTxt;
+            }
           }
           if (replyMeta) replyMeta.textContent = `${data.phase || 'RUNNING'} · ${latestMission.mission_id}`;
         } else if (latestMission.status === 'DONE' && latestMission.deliverable_file && lastRenderedMissionId !== latestMission.mission_id) {
@@ -6294,52 +8706,228 @@
         }
       }
 
-      // 대시보드(index.html)의 '생성된 프로젝트 폴더 & 미션 산출물 리포트'(#deliverablesListBox) 실시간 동기화
-      const delivBox = document.getElementById('deliverablesListBox');
-      if (delivBox && Array.isArray(data.missions)) {
-        const doneMissions = data.missions.filter(m => m && m.status === 'DONE' && m.deliverable_file);
-        [...doneMissions].reverse().forEach(mItem => {
-          if (delivBox.querySelector(`[data-mission-id="${mItem.mission_id}"]`)) return;
-          const genFiles = Array.isArray(mItem.generated_files) ? mItem.generated_files : [];
-          const repCnt = Number(mItem.repair_count || 0);
-          const profTag = (mItem.profile || 'standard').toUpperCase();
-          const typeBadgeHtml = mItem.deliverable_type_label
-            ? `<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800;margin-right:4px">${escHtml(mItem.deliverable_type_label)}</span>`
-            : '';
-          const absProjDir = mItem.project_dir_abs || mItem.output_root || '';
-          const isGdMission = Boolean(mItem.is_google_drive);
-          const gdCloudUrl = mItem.gdrive_project_url || mItem.gdrive_report_url || '';
-
-          const cardEl = document.createElement('div');
-          cardEl.setAttribute('data-mission-id', mItem.mission_id);
-          cardEl.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px';
-          const teamBadgeHtml = mItem.team_name
-            ? `<span style="background:${escHtml(mItem.team_color || '#0f6848')}18;color:${escHtml(mItem.team_color || '#0f6848')};border:1px solid ${escHtml(mItem.team_color || '#0f6848')}44;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800;margin-right:4px">🏢 ${escHtml(mItem.team_floor || '1F')} ${escHtml(mItem.team_name)}</span>`
-            : '';
-          cardEl.innerHTML = `
-            <a href="${mItem.deliverable_file}" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800;gap:8px">
-              <span>${teamBadgeHtml}${typeBadgeHtml}${isGdMission ? '☁️' : '📄'} ${mItem.deliverable_file} — ${(mItem.goal || '').replace(/</g, '&lt;')} (${profTag}${repCnt > 0 ? ` · 자동수정 ${repCnt}회` : ''})</span>
-              <span style="white-space:nowrap">리포트 열기 ↗</span>
-            </a>
-            ${(absProjDir || gdCloudUrl) ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;color:#475569;font-family:var(--font-mono,monospace)">${absProjDir ? `<span>저장 경로: ${absProjDir.replace(/</g, '&lt;')}</span><button type="button" class="btn small btn-open-deliv-dir" data-dir="${absProjDir.replace(/"/g, '&quot;')}" style="height:22px;padding:0 7px;font-size:9.5px">🗂️ 열기</button>` : ''}${gdCloudUrl ? `<a href="${gdCloudUrl}" target="_blank" class="btn small" style="height:22px;padding:0 8px;font-size:9.5px;background:#0284c7;color:#fff;border-color:#0284c7">☁️ Google Drive ↗</a>` : ''}</div>` : ''}
-            ${genFiles.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${genFiles.map(f => `<a href="${f}" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 ${f}</a>`).join('')}</div>` : ''}
-          `;
-          cardEl.querySelectorAll('.btn-open-deliv-dir').forEach(b => {
-            b.addEventListener('click', () => {
-              openLocalFolderExplorer(b.dataset.dir || '', '프로젝트 산출물 폴더');
-            });
-          });
-          delivBox.prepend(cardEl);
-        });
-      }
-    } catch (_) {}
+      // 대시보드(index.html)의 산출물 요약보기는 renderDashboardDeliverablesSummary(data.missions)에서 일괄 동기화됨
+    } catch (_) { }
   }
 
+  function renderAntigravitySdkCard(sdkSt) {
+    if (!sdkSt || typeof sdkSt !== 'object') return;
+    const badgeEl = document.getElementById('sdkStatusMainBadge');
+    const uvValEl = document.getElementById('sdkUvStatusVal');
+    const uvSubEl = document.getElementById('sdkUvPathSub');
+    const pkgValEl = document.getElementById('sdkPkgStatusVal');
+    const venvSubEl = document.getElementById('sdkVenvPathSub');
+    const accValEl = document.getElementById('sdkSharedAccVal');
+    const planSubEl = document.getElementById('sdkSharedPlanSub');
+    const btnInst = document.getElementById('btnAutoInstallSdkUv');
+    if (!badgeEl && !uvValEl) return;
+
+    if (badgeEl) {
+      if (sdkSt.ready) {
+        badgeEl.className = 'status running';
+        badgeEl.textContent = `✓ SDK v${sdkSt.sdk_version} & 구독 공유 활성`;
+      } else if (sdkSt.sdk_installed && !sdkSt.shared_auth_ready) {
+        badgeEl.className = 'status review';
+        badgeEl.textContent = `🔑 SDK 설치됨 · 로컬 구독 로그인 필요`;
+      } else {
+        badgeEl.className = 'status review';
+        badgeEl.textContent = '⚡ SDK 미설치 (원클릭 설치 대기)';
+      }
+    }
+
+    if (uvValEl) {
+      uvValEl.textContent = sdkSt.uv_installed
+        ? `✓ ${sdkSt.uv_version || 'uv 설치 확인됨'}`
+        : '⏳ 미설치 (설치 버튼 클릭 시 자동 설치)';
+      uvValEl.style.color = sdkSt.uv_installed ? '#0f6848' : '#b45309';
+    }
+    if (uvSubEl) {
+      uvSubEl.textContent = sdkSt.uv_executable || '공식 Astral uv 스크립트 자동 연결';
+      uvSubEl.title = sdkSt.uv_executable || '';
+    }
+
+    if (pkgValEl) {
+      pkgValEl.textContent = sdkSt.sdk_installed
+        ? `✓ google-antigravity v${sdkSt.sdk_version}`
+        : '미설치 (.venv 자동 구성 대기)';
+      pkgValEl.style.color = sdkSt.sdk_installed ? '#0f6848' : '#b45309';
+    }
+    if (venvSubEl) {
+      venvSubEl.textContent = sdkSt.venv_dir || '.venv/';
+      venvSubEl.title = sdkSt.venv_python || sdkSt.venv_dir || '';
+    }
+
+    const sharedAcc = sdkSt.shared_account;
+    if (accValEl) {
+      if (sharedAcc) {
+        accValEl.textContent = `✓ ${sharedAcc.email}`;
+        accValEl.style.color = '#14532d';
+      } else {
+        accValEl.textContent = '미로그인 (로컬 로그인 시 자동 공유)';
+        accValEl.style.color = '#b45309';
+      }
+    }
+    if (planSubEl) {
+      planSubEl.textContent = sharedAcc
+        ? `${sharedAcc.plan_label} · ${sharedAcc.label}${sdkSt.shared_accounts_count > 1 ? ` 외 ${sdkSt.shared_accounts_count - 1}개` : ''}`
+        : 'Antigravity App 또는 CLI 로그인 시 즉시 공유됨';
+    }
+
+    if (btnInst && !btnInst.disabled) {
+      btnInst.textContent = sdkSt.sdk_installed
+        ? `🔄 uv로 SDK 최신 업데이트 (v${sdkSt.sdk_version})`
+        : '⚡ uv + Antigravity SDK 원클릭 자동설치';
+    }
+  }
+
+  function bindAntigravitySdkControls() {
+    const btnInst = document.getElementById('btnAutoInstallSdkUv');
+    const btnTest = document.getElementById('btnTestSdkSharedAuth');
+    const btnLogin = document.getElementById('btnLoginForSdkShare');
+    const btnRefresh = document.getElementById('btnRefreshSdkStatus');
+    const fbEl = document.getElementById('sdkActionFeedbackText');
+    const logEl = document.getElementById('sdkInstallLogBox');
+    if (!btnInst && !btnRefresh) return;
+
+    const showSdkLog = (txt, isErr = false) => {
+      if (!logEl) return;
+      logEl.style.display = 'block';
+      logEl.style.borderLeft = isErr ? '4px solid #ef4444' : '4px solid #10b981';
+      logEl.textContent = txt;
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+
+    btnInst?.addEventListener('click', async () => {
+      btnInst.disabled = true;
+      const origTxt = btnInst.textContent;
+      btnInst.textContent = '⏳ uv · .venv · SDK 자동 설치 진행 중...';
+      if (fbEl) {
+        fbEl.style.color = '#0369a1';
+        fbEl.textContent = '⏳ uv 감지 → .venv 생성 → google-antigravity 휠 설치 및 로컬 구독 공유 확인 중입니다...';
+      }
+      showSdkLog('[실행 중] uv 패키지 매니저 및 google-antigravity SDK 자동 설치를 진행하고 있습니다. 잠시만 기다려 주세요...');
+      try {
+        const res = await apiFetch('/ops/sdk-install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'install' })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (d.sdk_status) renderAntigravitySdkCard(d.sdk_status);
+        showSdkLog(d.log || d.message || '설치 응답 수신 완료', !d.ok);
+        if (fbEl) {
+          fbEl.style.color = d.ok ? '#0f6848' : '#dc2626';
+          fbEl.textContent = d.ok ? `✅ ${d.message}` : `⚠️ ${d.message || '설치 실패'}`;
+        }
+      } catch (err) {
+        showSdkLog(`네트워크 또는 서버 오류: ${err}`, true);
+        if (fbEl) {
+          fbEl.style.color = '#dc2626';
+          fbEl.textContent = '⚠️ 서버와 통신할 수 없습니다. server.py 실행 상태를 확인해 주세요.';
+        }
+      } finally {
+        btnInst.disabled = false;
+        if (btnInst.textContent.startsWith('⏳')) btnInst.textContent = origTxt;
+        apiFetch('/ops/sdk-status?refresh=1', { cache: 'no-store' })
+          .then(r => (r.ok ? r.json() : null))
+          .then(st => { if (st) renderAntigravitySdkCard(st); })
+          .catch(() => { });
+      }
+    });
+
+    btnTest?.addEventListener('click', async () => {
+      btnTest.disabled = true;
+      const origTxt = btnTest.textContent;
+      btnTest.textContent = '⏳ 구독 공유 테스트 중...';
+      if (fbEl) {
+        fbEl.style.color = '#0369a1';
+        fbEl.textContent = '⏳ 종량제 API 키 없이 로컬 구독 세션만으로 google.antigravity.Agent 응답을 확인 중입니다...';
+      }
+      showSdkLog('[테스트 실행 중] .venv 내부에서 google.antigravity.Agent(LocalAgentConfig()) 로컬 구독 공유 호출 중...');
+      try {
+        const res = await apiFetch('/ops/sdk-install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'test' })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (d.sdk_status) renderAntigravitySdkCard(d.sdk_status);
+        showSdkLog(`${d.ok ? '✅ [테스트 통과]' : '⚠️ [테스트 확인 필요]'} ${d.message || ''}\n\n${d.output || ''}`.trim(), !d.ok);
+        if (fbEl) {
+          fbEl.style.color = d.ok ? '#0f6848' : '#b45309';
+          fbEl.textContent = d.ok ? `✅ ${d.message}` : `⚠️ ${d.message || '응답 확인 필요'}`;
+        }
+      } catch (err) {
+        showSdkLog(`테스트 호출 오류: ${err}`, true);
+      } finally {
+        btnTest.disabled = false;
+        btnTest.textContent = origTxt;
+      }
+    });
+
+    btnLogin?.addEventListener('click', async () => {
+      if (fbEl) {
+        fbEl.style.color = '#0369a1';
+        fbEl.textContent = '🔑 로컬 Antigravity 구독 로그인 터미널을 열고 있습니다...';
+      }
+      try {
+        const res = await apiFetch('/ops/cli-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cli: 'antigravity' })
+        });
+        const d = await res.json().catch(() => ({}));
+        showSdkLog(d.message || d.error || '로그인 창 실행 요청 완료', !d.ok);
+        if (fbEl) {
+          fbEl.style.color = d.ok ? '#0f6848' : '#dc2626';
+          fbEl.textContent = d.ok
+            ? '🔑 로그인 창에서 Google 계정 로그인을 마치면 SDK에도 자동 공유됩니다.'
+            : `⚠️ ${d.error || '로그인 실행 실패'}`;
+        }
+      } catch (_) { }
+    });
+
+    btnRefresh?.addEventListener('click', () => {
+      apiFetch('/ops/sdk-status?refresh=1', { cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(st => {
+          if (st) {
+            renderAntigravitySdkCard(st);
+            if (fbEl) {
+              fbEl.style.color = '#0f6848';
+              fbEl.textContent = '🔄 SDK 설치 및 로컬 구독 계정 공유 상태를 최신으로 갱신했습니다.';
+            }
+          }
+        })
+        .catch(() => { });
+    });
+
+    apiFetch('/ops/sdk-status', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(st => { if (st) renderAntigravitySdkCard(st); })
+      .catch(() => { });
+  }
+
+  syncAllCliDropdowns(getActiveCliProvidersMap());
   ensureCliSettingsModal();
   bindOrchestratorModeControls();
   bindProjectOutputDirControls();
   bindTeamsAndWorkspacesControls();
+  bindAntigravitySdkControls();
   applyRolesToDOM(currentRoles);
+  if (page === 'dashboard') {
+    renderDashboardAgentsAndStats(true);
+  }
+  if (page === 'agents' || page === 'dashboard') {
+    apiFetch('/ops/part-roles', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d?.part_roles) syncPartRolesToDOM(d.part_roles, true); })
+      .catch(() => { });
+    apiFetch('/ops/cli-check?deep=0', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(diag => { if (diag) renderCliDiagnosticsModal(diag, true); })
+      .catch(() => { });
+  }
   pollOrchestrator();
   setInterval(pollOrchestrator, 3000);
 

@@ -26,15 +26,18 @@ GDRIVE_OAUTH_CLIENT_SAMPLE_FILE = CLI_CONFIG_DIR / "gdrive_oauth_client.sample.j
 GDRIVE_TOKEN_FILE = CLI_CONFIG_DIR / "gdrive_token.json"
 TEAMS_CONFIG_FILE = CLI_CONFIG_DIR / "teams.json"
 TEAMS_CONFIG_SAMPLE_FILE = CLI_CONFIG_DIR / "teams.sample.json"
+PART_ROLES_FILE = CLI_CONFIG_DIR / "part_roles.json"
 
 # [2] 캐릭터 시뮬레이터 코디 · 페르소나 · 스킬 전용 폴더 (config/characters/)
 CHAR_CONFIG_DIR = ROOT / "config" / "characters"
 CHARACTER_CONFIGS_FILE = CHAR_CONFIG_DIR / "character_configs.json"
 CHARACTER_CONFIGS_SAMPLE_FILE = CHAR_CONFIG_DIR / "character_configs.sample.json"
 
-# [3] 아바타 파츠 및 산출물 폴더
+# [3] 아바타 파츠, 런타임 체크포인트 및 산출물 폴더
 PARTS_DIR = ROOT / "avatar" / "data" / "parts"
 DELIVERABLES_DIR = ROOT / "deliverables"
+RUNTIME_STATE_DIR = ROOT / "config" / "runtime"
+ORCHESTRATOR_STATE_FILE = RUNTIME_STATE_DIR / "orchestrator_state.json"
 
 
 def ensure_config_directories() -> None:
@@ -44,6 +47,7 @@ def ensure_config_directories() -> None:
     LOGIN_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     CHAR_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
+    RUNTIME_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
     for target, sample in (
         (ROLE_SETTINGS_PATH, ROLE_SETTINGS_SAMPLE_PATH),

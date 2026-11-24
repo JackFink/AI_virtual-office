@@ -27,6 +27,7 @@ desktop.ini
 *.sublime-workspace
 
 # Python & Local Runtime State
+.venv/
 __pycache__/
 *.pyc
 data/login_helper_*.cmd
@@ -34,7 +35,12 @@ config/cli/login_scripts/*.cmd
 config/cli/gdrive_token.json
 config/cli/gdrive_oauth_client.json
 config/cli/workspace_settings.json
-deliverables/nexus_gdrive_connection_test.md
+config/runtime/
+deliverables/*
+!deliverables/mission-20558.md
+!deliverables/mission-90909.md
+!deliverables/mission-90909_project/
+!deliverables/mission-90909_project/**
 
 # Trash (Unused / Legacy Archive Folder)
 trash/

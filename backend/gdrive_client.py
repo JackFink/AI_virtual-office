@@ -862,10 +862,18 @@ def upload_mission_bundle(
 
     # Map relative subdir -> created Drive folder ID
     subdir_map: Dict[str, str] = {"": proj_folder_id}
+    ignored_dirs = {"__pycache__", ".git", ".venv", "venv", "node_modules", ".pytest_cache", ".mypy_cache", "build"}
+    report_resolved = report_file.resolve() if (report_file and report_file.is_file()) else None
+    report_res = None
 
     if project_dir.exists() and project_dir.is_dir():
         for item in sorted(project_dir.rglob("*")):
-            if not item.is_file():
+            if not item.is_file() or item.name.startswith("."):
+                continue
+            rel_parts = item.relative_to(project_dir).parts
+            if any(pt in ignored_dirs for pt in rel_parts[:-1]):
+                continue
+            if item.suffix.lower() in {".pyc", ".pyo", ".spec"}:
                 continue
             rel_parent = item.parent.relative_to(project_dir).as_posix()
             if rel_parent == ".":
@@ -882,9 +890,10 @@ def upload_mission_bundle(
                     cur_parent_id = subdir_map[key]
             up_res = upload_file_to_folder(item, parent_id=subdir_map[rel_parent], remote_name=item.name)
             uploaded_files.append(up_res)
+            if report_resolved and item.resolve() == report_resolved:
+                report_res = up_res
 
-    report_res = None
-    if report_file and report_file.is_file():
+    if report_res is None and report_file and report_file.is_file():
         report_res = upload_file_to_folder(report_file, parent_id=pid, remote_name=report_file.name)
         uploaded_files.append(report_res)
 

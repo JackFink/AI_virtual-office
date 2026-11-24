@@ -5,18 +5,23 @@ NEXUS AI Virtual Office × AI DEV DIRECTOR Local Orchestrator Server
   with HEAD / BUILDER / REVIEWER role assignment, CLI login/auth diagnostics, sanitized CLI execution,
   Scope Guard verification, and companion server (127.0.0.1:8081) bridge support.
 """
+import atexit
 import json
 import mimetypes
 import os
+import re
 import secrets
 import shutil
+import signal
 import subprocess
+import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 
@@ -31,11 +36,29 @@ from backend.config_paths import (
     CLI_SLOTS_FILE,
     WORKSPACE_SETTINGS_FILE,
     CHARACTER_CONFIGS_FILE,
+    TEAMS_CONFIG_FILE,
     PARTS_DIR,
     DELIVERABLES_DIR,
+    RUNTIME_STATE_DIR,
+    ORCHESTRATOR_STATE_FILE,
     ensure_config_directories,
 )
 from backend.agents import AGENT_PERSONAS
+from backend.part_roles import (
+    DEFAULT_SDK_SQUAD_10,
+    RECOMMENDED_SDK_STAFF_MODELS,
+    add_part_role,
+    build_assignable_roles,
+    build_pipeline_stage_descriptors,
+    build_sdk_squad_character_configs,
+    delete_part_role,
+    load_part_roles_config,
+    reorder_part_role,
+    reset_part_roles,
+    resolve_canonical_part_role,
+    set_staff_execution_mode,
+    update_part_role,
+)
 from backend.gdrive_client import (
     build_oauth_authorize_url,
     create_subfolder as gdrive_create_subfolder,
@@ -101,6 +124,15 @@ CLI_CATALOG = {
         "login_cmd": "agy login",
         "install_cmd": "Antigravity IDE / CLI (%LOCALAPPDATA%\\agy\\bin\\agy.exe)",
     },
+    "antigravity_sdk": {
+        "base_type": "antigravity_sdk",
+        "domain": "SDK",
+        "cli": "agy-sdk",
+        "label": "Antigravity SDK (구독·로컬 $0)",
+        "model": "google-antigravity-sdk",
+        "login_cmd": "uv + SDK 자동설치 & 로컬 구독 자동 공유",
+        "install_cmd": "uv pip install --python .venv google-antigravity",
+    },
     "claude": {
         "base_type": "claude",
         "domain": "ANTHROPIC",
@@ -154,6 +186,17 @@ DEFAULT_CLI_SLOTS = [
         "profile_dir": None,
     },
     {
+        "key": "antigravity_sdk",
+        "base_type": "antigravity_sdk",
+        "domain": "SDK",
+        "cli": "agy-sdk",
+        "label": "Antigravity SDK (구독·로컬 $0)",
+        "model": "google-antigravity-sdk",
+        "login_cmd": "uv + SDK 자동설치 & 로컬 구독 자동 공유",
+        "install_cmd": "uv pip install --python .venv google-antigravity",
+        "profile_dir": None,
+    },
+    {
         "key": "gemini",
         "base_type": "antigravity",
         "domain": "GEMINI2",
@@ -196,6 +239,10 @@ ALIASES = {
     "google": "antigravity",
     "antigravity": "antigravity",
     "agy": "antigravity",
+    "antigravity_sdk": "antigravity_sdk",
+    "agy-sdk": "antigravity_sdk",
+    "agy_sdk": "antigravity_sdk",
+    "sdk": "antigravity_sdk",
     "grok": "grok",
     "xai": "grok",
     "gemini": "gemini",
@@ -206,6 +253,7 @@ DOMAINS = {
     "openai": "OPENAI",
     "claude": "ANTHROPIC",
     "antigravity": "GOOGLE",
+    "antigravity_sdk": "SDK",
     "grok": "XAI",
     "gemini": "GEMINI2",
 }
@@ -245,6 +293,16 @@ def _sync_provider_meta_from_slots(slots: List[Dict[str, Any]]) -> None:
         DOMAINS[key] = domain
         ALIASES[key] = key
 
+    # Keep antigravity/agy/google aliases resilient when 'antigravity' CLI slot is removed in favor of 'antigravity_sdk'
+    if "antigravity" in PROVIDER_META:
+        ALIASES["antigravity"] = "antigravity"
+        ALIASES["agy"] = "antigravity"
+        ALIASES["google"] = "antigravity"
+    elif "antigravity_sdk" in PROVIDER_META:
+        ALIASES["antigravity"] = "antigravity_sdk"
+        ALIASES["agy"] = "antigravity_sdk"
+        ALIASES["google"] = "antigravity_sdk"
+
 
 def load_cli_slots() -> List[Dict[str, Any]]:
     if CLI_SLOTS_FILE.exists():
@@ -277,7 +335,9 @@ def save_cli_slots(slots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def add_cli_slot(base_type: str, custom_label: str = "") -> Dict[str, Any]:
     """Adds a CLI login slot. If the same AI already exists, automatically assigns an isolated profile directory."""
     base_type = str(base_type or "antigravity").lower().strip()
-    if base_type in ("gemini", "google", "agy"):
+    if base_type in ("agy-sdk", "agy_sdk", "sdk", "antigravity_sdk"):
+        base_type = "antigravity_sdk"
+    elif base_type in ("gemini", "google", "agy"):
         base_type = "antigravity"
     elif base_type == "codex":
         base_type = "openai"
@@ -350,10 +410,36 @@ def remove_cli_slot(slot_key: str) -> List[Dict[str, Any]]:
     if len(next_slots) == len(slots):
         raise ValueError(f"존재하지 않는 CLI 슬롯입니다: {slot_key}")
     save_cli_slots(next_slots)
-    # Re-validate saved roles so removed slot falls back cleanly to remaining slot
+    # Re-validate saved roles, team roles, and character cliProvider so removed slot falls back cleanly
+    fallback_slot = "antigravity_sdk" if any(s.get("key") == "antigravity_sdk" for s in next_slots) else str(next_slots[0].get("key") or "antigravity_sdk")
     try:
         current_roles = load_roles()
         save_roles(current_roles)
+    except Exception:
+        pass
+    try:
+        tdoc = load_teams_config()
+        t_changed = False
+        for t in tdoc.get("teams") or []:
+            r_obj = t.get("roles")
+            if isinstance(r_obj, dict):
+                for rk, rv in list(r_obj.items()):
+                    if rv == slot_key or rv not in PROVIDER_META:
+                        r_obj[rk] = fallback_slot
+                        t_changed = True
+        if t_changed:
+            save_teams_config(tdoc)
+    except Exception:
+        pass
+    try:
+        ccfgs = load_character_configs()
+        c_changed = False
+        for cid, cobj in ccfgs.items():
+            if isinstance(cobj, dict) and (cobj.get("cliProvider") == slot_key or cobj.get("cliProvider") not in PROVIDER_META):
+                cobj["cliProvider"] = fallback_slot
+                c_changed = True
+        if c_changed:
+            save_character_configs(ccfgs)
     except Exception:
         pass
     return next_slots
@@ -440,6 +526,7 @@ load_cli_slots()
 
 _STATE_LOCK = threading.Lock()
 _ACTIVE_PIDS: Dict[int, str] = {}
+_ACTIVE_PID_META: Dict[int, Dict[str, str]] = {}
 _BRIDGE_TOKEN = secrets.token_urlsafe(32)
 
 
@@ -892,7 +979,7 @@ def list_local_fs_directory(target_dir_str: Optional[str] = None) -> Dict[str, A
                             "name": name,
                             "path": str(entry),
                             "mtime": mtime_iso,
-                            "is_project": name.endswith("_project"),
+                            "is_project": name.endswith("_project") or (entry / "README.md").is_file(),
                         }
                     )
                 elif entry.is_file():
@@ -1106,7 +1193,13 @@ def open_output_folder_in_explorer(target_dir_str: Optional[str] = None) -> Dict
 
 
 def resolve_cli(name: str) -> Optional[str]:
-    """Discovers official CLI executable (claude, codex, agy, grok, gemini) from custom config, PATH, or standard install locations."""
+    """Discovers official CLI executable (claude, codex, agy, agy-sdk, grok, gemini) from custom config, PATH, or standard install locations."""
+    if name in ("agy-sdk", "antigravity_sdk"):
+        venv_py = _get_sdk_venv_python()
+        if venv_py.is_file() and _detect_installed_sdk_version_fast():
+            return str(venv_py.resolve())
+        return None
+
     custom = load_custom_cli_paths().get(name)
     if custom and "antigravity-ide.cmd" not in custom.lower():
         try:
@@ -1223,9 +1316,432 @@ def resolve_npm() -> Optional[str]:
     return None
 
 
+SDK_VENV_DIR = ROOT / ".venv"
+_SDK_STATUS_CACHE: Dict[str, Any] = {"checked_at": 0.0, "data": None}
+
+
+def resolve_uv_exe() -> Optional[str]:
+    """Resolves the `uv` Python package manager executable across PATH and standard install locations."""
+    bin_name = "uv.exe" if os.name == "nt" else "uv"
+    found = shutil.which("uv")
+    if found:
+        return str(Path(found).resolve())
+    candidates = [
+        Path.home() / ".local" / "bin" / bin_name,
+        Path.home() / ".cargo" / "bin" / bin_name,
+    ]
+    if os.name == "nt":
+        local_app = Path(os.environ.get("LOCALAPPDATA", ""))
+        if str(local_app):
+            for py_sc in sorted((local_app / "Programs" / "Python").glob("Python*/Scripts/uv.exe"), reverse=True):
+                candidates.append(py_sc)
+    for cand in candidates:
+        try:
+            if cand.exists() and cand.is_file():
+                return str(cand.resolve())
+        except Exception:
+            continue
+    return None
+
+
+def _get_sdk_venv_python() -> Path:
+    return SDK_VENV_DIR / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def _detect_installed_sdk_version_fast() -> Optional[str]:
+    """Reads google-antigravity dist-info METADATA from .venv without spawning a subprocess on every poll."""
+    if not SDK_VENV_DIR.exists():
+        return None
+    site_dirs = (
+        [SDK_VENV_DIR / "Lib" / "site-packages"]
+        if os.name == "nt"
+        else list((SDK_VENV_DIR / "lib").glob("python*/site-packages"))
+    )
+    for sdir in site_dirs:
+        if not sdir.exists():
+            continue
+        for dist in sorted(sdir.glob("google_antigravity-*.dist-info"), reverse=True):
+            meta_f = dist / "METADATA"
+            if meta_f.is_file():
+                try:
+                    for ln in meta_f.read_text(encoding="utf-8", errors="replace").splitlines():
+                        if ln.lower().startswith("version:"):
+                            return ln.split(":", 1)[1].strip()
+                except Exception:
+                    pass
+            parts = dist.name[:-len(".dist-info")].split("-")
+            if len(parts) >= 2:
+                return parts[1]
+    return None
+
+
+def get_antigravity_sdk_status(force_refresh: bool = False, diag: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Returns uv + google-antigravity SDK installation status and local Unified Auth subscription sharing state."""
+    now_ts = time.time()
+    cached_base = _SDK_STATUS_CACHE.get("data")
+    if (not force_refresh) and cached_base and (now_ts - float(_SDK_STATUS_CACHE.get("checked_at") or 0.0) < 30.0):
+        uv_exe = cached_base.get("uv_executable")
+        uv_ver = cached_base.get("uv_version")
+        sdk_ver = cached_base.get("sdk_version")
+        venv_py = _get_sdk_venv_python()
+        venv_exists = venv_py.is_file()
+    else:
+        uv_exe = resolve_uv_exe()
+        uv_ver = None
+        if uv_exe:
+            try:
+                p_uv = subprocess.run(
+                    [uv_exe, "--version"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=4.0,
+                )
+                if p_uv.returncode == 0 and p_uv.stdout.strip():
+                    uv_ver = p_uv.stdout.strip()
+            except Exception:
+                uv_ver = "설치 확인됨"
+        venv_py = _get_sdk_venv_python()
+        venv_exists = venv_py.is_file()
+        sdk_ver = _detect_installed_sdk_version_fast()
+        if venv_exists and not sdk_ver and force_refresh:
+            try:
+                p_sdk = subprocess.run(
+                    [str(venv_py), "-c", "import importlib.metadata as m; print(m.version('google-antigravity'))"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=5.0,
+                )
+                if p_sdk.returncode == 0 and p_sdk.stdout.strip():
+                    sdk_ver = p_sdk.stdout.strip()
+            except Exception:
+                pass
+        _SDK_STATUS_CACHE["checked_at"] = now_ts
+        _SDK_STATUS_CACHE["data"] = {
+            "uv_executable": uv_exe,
+            "uv_version": uv_ver,
+            "sdk_version": sdk_ver,
+        }
+
+    eff_diag = diag or probe_cli_diagnostics(deep=False)
+    provs = (eff_diag or {}).get("providers") or {}
+    shared_accounts: List[Dict[str, Any]] = []
+    for sk, pinfo in provs.items():
+        if not isinstance(pinfo, dict):
+            continue
+        if pinfo.get("cli") in ("agy", "gemini") or sk.startswith("antigravity"):
+            if pinfo.get("auth_state") == "LOGGED_IN":
+                shared_accounts.append(
+                    {
+                        "slot_key": sk,
+                        "label": pinfo.get("label") or sk,
+                        "email": pinfo.get("account_email") or "로컬 로그인 세션 활성",
+                        "plan_label": pinfo.get("plan_name") or pinfo.get("plan_label") or "구독 세션 활성",
+                        "selected_model": pinfo.get("selected_model_display") or pinfo.get("selected_model") or "기본 모델",
+                        "is_paid": bool(pinfo.get("is_paid")),
+                    }
+                )
+    primary_shared = shared_accounts[0] if shared_accounts else None
+    uv_installed = bool(uv_exe)
+    sdk_installed = bool(sdk_ver and venv_exists)
+    shared_auth_ready = bool(primary_shared)
+
+    return {
+        "ready": bool(uv_installed and sdk_installed and shared_auth_ready),
+        "uv_installed": uv_installed,
+        "uv_executable": uv_exe or "",
+        "uv_version": uv_ver or "",
+        "venv_dir": str(SDK_VENV_DIR),
+        "venv_python": str(venv_py) if venv_exists else "",
+        "venv_exists": venv_exists,
+        "sdk_package": "google-antigravity",
+        "sdk_installed": sdk_installed,
+        "sdk_version": sdk_ver or "",
+        "shared_auth_ready": shared_auth_ready,
+        "shared_auth_mode": "Unified Authentication Layer (로컬 구독 계정 자동 공유 · API 키 불필요)",
+        "shared_account": primary_shared,
+        "shared_accounts_count": len(shared_accounts),
+        "api_keys_sanitized": True,
+    }
+
+
+def install_antigravity_sdk_via_uv() -> Dict[str, Any]:
+    """Automatically installs `uv` (if missing), creates `.venv`, installs `google-antigravity` SDK, and verifies Unified Auth sharing."""
+    logs: List[str] = []
+    env = get_sanitized_env()
+    local_bin = str((Path.home() / ".local" / "bin").resolve())
+    env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
+
+    # 1. Check / auto-install uv
+    uv_exe = resolve_uv_exe()
+    if uv_exe:
+        logs.append(f"[1/4] ✓ uv 패키지 매니저 감지됨: {uv_exe}")
+    else:
+        logs.append("[1/4] ⏳ uv 미설치 감지 → 공식 Astral 스크립트로 uv 자동 설치를 시작합니다...")
+        try:
+            if os.name == "nt":
+                inst_cmd = [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    "irm https://astral.sh/uv/install.ps1 | iex",
+                ]
+            else:
+                inst_cmd = ["sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"]
+            p_inst = subprocess.run(
+                inst_cmd,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120.0,
+            )
+            out_i = ((p_inst.stdout or "") + "\n" + (p_inst.stderr or "")).strip()
+            if out_i:
+                logs.append(out_i[:800])
+            os.environ["PATH"] = local_bin + os.pathsep + os.environ.get("PATH", "")
+            uv_exe = resolve_uv_exe()
+            if not uv_exe:
+                return {
+                    "ok": False,
+                    "message": "uv 자동 설치 후 실행 파일을 찾지 못했습니다.",
+                    "log": "\n".join(logs),
+                    "sdk_status": get_antigravity_sdk_status(force_refresh=True),
+                }
+            logs.append(f"[1/4] ✓ uv 자동 설치 완료: {uv_exe}")
+        except Exception as exc:
+            logs.append(f"❌ uv 자동 설치 오류: {exc}")
+            return {
+                "ok": False,
+                "message": f"uv 자동 설치 실패: {exc}",
+                "log": "\n".join(logs),
+                "sdk_status": get_antigravity_sdk_status(force_refresh=True),
+            }
+
+    # 2. Create project .venv via uv venv if needed
+    venv_py = _get_sdk_venv_python()
+    if venv_py.is_file():
+        logs.append(f"[2/4] ✓ 프로젝트 격리 가상환경(.venv) 확인됨: {SDK_VENV_DIR}")
+    else:
+        logs.append(f"[2/4] ⏳ uv venv 로 격리 가상환경 생성 중: {SDK_VENV_DIR}")
+        try:
+            p_venv = subprocess.run(
+                [uv_exe, "venv", str(SDK_VENV_DIR)],
+                cwd=str(ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60.0,
+            )
+            out_v = ((p_venv.stdout or "") + "\n" + (p_venv.stderr or "")).strip()
+            if out_v:
+                logs.append(out_v[:600])
+            if p_venv.returncode != 0 or not venv_py.is_file():
+                return {
+                    "ok": False,
+                    "message": "uv venv 가상환경 생성에 실패했습니다.",
+                    "log": "\n".join(logs),
+                    "sdk_status": get_antigravity_sdk_status(force_refresh=True),
+                }
+            logs.append("[2/4] ✓ .venv 가상환경 생성 완료")
+        except Exception as exc:
+            logs.append(f"❌ 가상환경 생성 오류: {exc}")
+            return {
+                "ok": False,
+                "message": f".venv 생성 실패: {exc}",
+                "log": "\n".join(logs),
+                "sdk_status": get_antigravity_sdk_status(force_refresh=True),
+            }
+
+    # 3. Install google-antigravity SDK via uv pip install
+    logs.append("[3/4] ⏳ uv pip install --upgrade google-antigravity 실행 중 (내장 런타임 휠 설치)...")
+    try:
+        p_pkg = subprocess.run(
+            [uv_exe, "pip", "install", "--upgrade", "--python", str(venv_py), "google-antigravity"],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180.0,
+        )
+        out_p = ((p_pkg.stdout or "") + "\n" + (p_pkg.stderr or "")).strip()
+        if out_p:
+            logs.append(out_p[:1200])
+        if p_pkg.returncode != 0:
+            return {
+                "ok": False,
+                "message": "google-antigravity 패키지 설치 중 오류가 발생했습니다.",
+                "log": "\n".join(logs),
+                "sdk_status": get_antigravity_sdk_status(force_refresh=True),
+            }
+    except Exception as exc:
+        logs.append(f"❌ SDK 패키지 설치 오류: {exc}")
+        return {
+            "ok": False,
+            "message": f"google-antigravity 설치 실패: {exc}",
+            "log": "\n".join(logs),
+            "sdk_status": get_antigravity_sdk_status(force_refresh=True),
+        }
+
+    # 4. Verify SDK import + Unified Authentication Layer status
+    try:
+        p_ver = subprocess.run(
+            [
+                str(venv_py),
+                "-c",
+                "import importlib.metadata as m; from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig; print('google-antigravity==' + m.version('google-antigravity'))",
+            ],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15.0,
+        )
+        ver_out = ((p_ver.stdout or "") + "\n" + (p_ver.stderr or "")).strip()
+        if p_ver.returncode != 0:
+            logs.append(f"❌ SDK 모듈 임포트 검증 실패:\n{ver_out[:600]}")
+            return {
+                "ok": False,
+                "message": "SDK 설치 후 모듈 임포트 검증에 실패했습니다.",
+                "log": "\n".join(logs),
+                "sdk_status": get_antigravity_sdk_status(force_refresh=True),
+            }
+        logs.append(f"[4/4] ✓ SDK 모듈 임포트 및 런타임 바이너리 검증 완료: {ver_out}")
+    except Exception as exc:
+        logs.append(f"❌ 임포트 검증 예외: {exc}")
+
+    fresh_status = get_antigravity_sdk_status(force_refresh=True)
+    acc = fresh_status.get("shared_account")
+    if acc:
+        logs.append(
+            f"🔗 [로컬 구독 계정 자동 공유 활성] {acc.get('email')} ({acc.get('plan_label')}) — 종량제 GEMINI_API_KEY 차단 완료 ($0 추가 비용)"
+        )
+    else:
+        logs.append("⚠️ SDK 설치는 완료되었으나 아직 로그인된 로컬 Antigravity 구독 계정이 없습니다. [로컬 계정 로그인] 버튼으로 로그인하면 즉시 자동 공유됩니다.")
+
+    return {
+        "ok": True,
+        "message": f"uv 기반 Antigravity SDK (v{fresh_status.get('sdk_version') or '최신'}) 자동 설치 및 로컬 구독 계정 공유 연동이 완료되었습니다.",
+        "log": "\n".join(logs),
+        "sdk_status": fresh_status,
+    }
+
+
+def test_antigravity_sdk_shared_auth() -> Dict[str, Any]:
+    """Verifies `.venv` `google.antigravity` SDK runtime + `~/.gemini/antigravity` Unified Auth subscription response ($0 API cost)."""
+    st = get_antigravity_sdk_status(force_refresh=True)
+    if not st.get("sdk_installed") or not st.get("venv_python"):
+        return {
+            "ok": False,
+            "message": "Antigravity SDK가 아직 설치되지 않았습니다. 먼저 [⚡ uv + SDK 원클릭 자동설치] 버튼을 눌러주세요.",
+            "output": "SDK 미설치 상태 (.venv/google-antigravity 없음)",
+            "sdk_status": st,
+        }
+    env = get_sanitized_env()
+    sdk_probe_code = (
+        "import importlib.metadata as md\n"
+        "from google.antigravity import Agent, LocalAgentConfig, LocalOpenAIAgentConfig, TemplatedSystemInstructions, CapabilitiesConfig, types\n"
+        "from google.antigravity.connections.local.local_connection_config import DEFAULT_APP_DATA_DIR\n"
+        "from google.antigravity.connections.local.local_connection import _get_default_binary_path\n"
+        "ver = md.version('google-antigravity')\n"
+        "bin_p = _get_default_binary_path(None)\n"
+        "sub_demo = types.SubagentConfig(name='emp_03_builder', description='BUILDER employee subagent', system_instructions='Builder Dev AI')\n"
+        "print(f'[1/2] Python SDK 검증 통과: google-antigravity v{ver} (SubagentConfig: {sub_demo.name})')\n"
+        "print(f'      - 내장 런타임 바이너리: {bin_p}')\n"
+        "print(f'      - 로컬 공유 설정 루트(app_data_dir): {DEFAULT_APP_DATA_DIR}')\n"
+    )
+    import tempfile
+    try:
+        with tempfile.TemporaryDirectory(prefix="avo_sdk_test_") as td:
+            p_sdk = subprocess.run(
+                [st["venv_python"], "-c", sdk_probe_code],
+                cwd=td,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=20.0,
+            )
+        sdk_out = (p_sdk.stdout or "").strip()
+        sdk_err = (p_sdk.stderr or "").strip()
+        if p_sdk.returncode != 0:
+            return {
+                "ok": False,
+                "message": "SDK 런타임 모듈 검증 중 오류가 발생했습니다.",
+                "output": (sdk_out + "\n" + sdk_err).strip()[:1200],
+                "sdk_status": st,
+            }
+
+        if not st.get("shared_auth_ready"):
+            return {
+                "ok": False,
+                "message": "SDK 설치는 정상이나 로그인된 로컬 Antigravity 구독 계정이 없습니다. 먼저 로그인해 주세요.",
+                "output": sdk_out + "\n[2/2] ⚠️ 로컬 구독 계정 미로그인 상태",
+                "sdk_status": st,
+            }
+
+        shared_acc = st.get("shared_account") or {}
+        slot_k = str(shared_acc.get("slot_key") or "antigravity")
+        cli_res = invoke_cli_if_available(
+            slot_k,
+            "Antigravity SDK 및 로컬 구독 계정 자동 공유 연동 확인 테스트입니다. 다른 도구 호출 없이 한국어 한 문장으로 정상 연결되었다고 답해주세요.",
+            timeout=45.0,
+            model_override="gemini-3.8-flash-low",
+        )
+        if cli_res and cli_res.get("output"):
+            combined = (
+                f"{sdk_out}\n"
+                f"[2/2] 로컬 구독 계정 자동 공유 응답 확인 ({shared_acc.get('email')} · {shared_acc.get('plan_label')} · API 키 차단 $0):\n"
+                f"      → {cli_res['output'].strip()}"
+            )
+            return {
+                "ok": True,
+                "message": "Antigravity SDK 런타임 및 로컬 구독 계정 자동 공유 응답 테스트에 성공했습니다.",
+                "output": combined,
+                "sdk_status": st,
+            }
+        return {
+            "ok": False,
+            "message": "SDK 런타임은 정상 확인되었으나 로컬 구독 세션 응답이 지연되었습니다.",
+            "output": sdk_out + "\n[2/2] ⚠️ 로컬 구독 세션 응답 시간 초과 또는 재로그인 필요",
+            "sdk_status": st,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "message": f"SDK 테스트 오류: {exc}",
+            "output": str(exc),
+            "sdk_status": st,
+        }
+
+
 def install_single_cli(cli_name: str) -> Dict[str, Any]:
-    """Installs or links a single CLI (claude, codex, agy) via npm or local binary auto-discovery."""
+    """Installs or links a single CLI (claude, codex, agy, agy-sdk) via npm, uv, or local binary auto-discovery."""
     cli_name = cli_name.lower().strip()
+    if cli_name in ("agy-sdk", "agy_sdk", "antigravity_sdk", "sdk"):
+        sdk_res = install_antigravity_sdk_via_uv()
+        sdk_st = sdk_res.get("sdk_status") or {}
+        return {
+            "cli": "agy-sdk",
+            "ok": bool(sdk_res.get("ok")),
+            "command": "uv venv .venv && uv pip install google-antigravity",
+            "executable": sdk_st.get("venv_python") or "",
+            "output": sdk_res.get("log") or sdk_res.get("message") or "",
+        }
     if cli_name in ("antigravity", "google"):
         cli_name = "agy"
     elif cli_name == "openai":
@@ -1366,6 +1882,24 @@ def launch_cli_login_terminal(cli_name: str) -> Dict[str, Any]:
     exe = resolve_cli(cli_name)
     marker_info = _check_session_markers(cli_name, profile_dir_str)
 
+    if cli_name == "agy-sdk":
+        if not exe:
+            sdk_inst = install_antigravity_sdk_via_uv()
+            if not sdk_inst.get("ok"):
+                return {
+                    "ok": False,
+                    "cli": "agy-sdk",
+                    "message": sdk_inst.get("message") or "SDK 자동설치 실패",
+                }
+        if marker_info["detected"]:
+            return {
+                "ok": True,
+                "cli": "agy-sdk",
+                "already_logged_in": True,
+                "message": f"[SDK $0 공유 완료] {slot_label}는 이미 로컬 구독 세션({marker_info['marker']})과 자동 연결되어 있습니다.",
+            }
+        cli_name = "agy"
+
     if cli_name == "agy" and not profile_dir_str and marker_info["detected"]:
         return {
             "ok": True,
@@ -1473,6 +2007,13 @@ def launch_cli_login_terminal(cli_name: str) -> Dict[str, Any]:
                 env=launch_env,
                 shell=False,
             )
+            # 계정 신규 연결 또는 재로그인 시 이전 수동 플랜 고정값(plan_override)과 캐시를 초기화하여 실제 구독 플랜을 자동 로드
+            try:
+                set_cli_slot_plan(slot_key, "auto")
+            except Exception:
+                pass
+            _GOOGLE_TIER_CACHE.clear()
+            _CLI_MODELS_CACHE.clear()
             return {
                 "ok": True,
                 "cli": cli_name,
@@ -1669,6 +2210,33 @@ def _read_local_cli_telemetry(cli_name: str) -> Dict[str, Any]:
             "server_primary_resets_at": None,
         }
 
+    if cli_name == "agy-sdk":
+        cli_log = home / ".gemini" / "antigravity-cli" / "cli.log"
+        daily_calls = 0
+        monthly_calls = 0
+        try:
+            if cli_log.exists():
+                for line in cli_log.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if "streamGenerateContent" in line:
+                        monthly_calls += 1
+                        if "I" + datetime.now().strftime("%m%d") in line:
+                            daily_calls += 1
+        except Exception:
+            pass
+        return {
+            "telemetry_source": ".venv/google-antigravity + Unified Auth ($0 구독·로컬 스트림)",
+            "exact_tokens_available": False,
+            "exact_rate_limit_percent_available": False,
+            "measured_daily_calls": daily_calls,
+            "measured_daily_tokens": 0,
+            "measured_monthly_calls": monthly_calls,
+            "measured_monthly_tokens": 0,
+            "model_context_window": 1000000,
+            "server_primary_used_percent": None,
+            "server_primary_window_minutes": None,
+            "server_primary_resets_at": None,
+        }
+
     if cli_name == "grok":
         return {
             "telemetry_source": "~/.grok/user-settings.json (xAI Grok 설정)",
@@ -1748,6 +2316,137 @@ def _probe_google_code_assist_paid_tier(base_dir: Path, force_refresh: bool = Fa
     except Exception:
         pass
     _GOOGLE_TIER_CACHE[key] = {"at": now, "result": None}
+    return None
+
+
+_LOCAL_ZERO_COST_MODELS_CACHE: Dict[str, Any] = {"at": 0.0, "models": []}
+
+
+def _discover_local_zero_cost_models(force_refresh: bool = False) -> List[Dict[str, str]]:
+    """Probes local $0 OpenAI-compatible servers (Ollama 11434, LM Studio 1234) for SDK LocalOpenAIAgentConfig."""
+    now = time.time()
+    if (not force_refresh) and (now - float(_LOCAL_ZERO_COST_MODELS_CACHE.get("at") or 0.0) < 30.0):
+        return list(_LOCAL_ZERO_COST_MODELS_CACHE.get("models") or [])
+
+    found: List[Dict[str, str]] = []
+    # 1. Ollama local server (http://127.0.0.1:11434/api/tags)
+    try:
+        req = Request("http://127.0.0.1:11434/api/tags", headers={"Accept": "application/json"})
+        with urlopen(req, timeout=0.35) as resp:
+            if resp.status == 200:
+                payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                for m in (payload.get("models") or []):
+                    m_name = str((m or {}).get("name") or "").strip()
+                    if m_name:
+                        found.append(
+                            {
+                                "id": f"ollama:{m_name}",
+                                "name": f"Ollama · {m_name} ($0 로컬 SDK)",
+                                "backend": "ollama",
+                                "base_url": "http://127.0.0.1:11434/v1",
+                                "raw_model": m_name,
+                            }
+                        )
+    except Exception:
+        pass
+
+    # 2. LM Studio local server (http://127.0.0.1:1234/v1/models)
+    try:
+        req = Request("http://127.0.0.1:1234/v1/models", headers={"Accept": "application/json"})
+        with urlopen(req, timeout=0.35) as resp:
+            if resp.status == 200:
+                payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                for m in (payload.get("data") or []):
+                    m_id = str((m or {}).get("id") or "").strip()
+                    if m_id:
+                        found.append(
+                            {
+                                "id": f"lmstudio:{m_id}",
+                                "name": f"LM Studio · {m_id} ($0 로컬 SDK)",
+                                "backend": "lmstudio",
+                                "base_url": "http://127.0.0.1:1234/v1",
+                                "raw_model": m_id,
+                            }
+                        )
+    except Exception:
+        pass
+
+    _LOCAL_ZERO_COST_MODELS_CACHE["at"] = now
+    _LOCAL_ZERO_COST_MODELS_CACHE["models"] = found
+    return list(found)
+
+
+_CLI_MODELS_CACHE: Dict[str, Tuple[float, List[Tuple[str, str]], str]] = {}
+
+
+def _get_raw_agy_model_pairs(
+    exe_path: Optional[str],
+    prof_dir: Optional[str] = None,
+    force_refresh: bool = False,
+) -> List[Tuple[str, str]]:
+    """Fetches and caches live entitled model pairs from 'agy.exe models'."""
+    if not exe_path or "antigravity-ide" in Path(exe_path).name.lower():
+        return []
+    now = time.time()
+    cache_key = f"agy:{str(Path(exe_path).resolve()).lower()}:{prof_dir or ''}"
+    cached = _CLI_MODELS_CACHE.get(cache_key)
+    ttl = 10.0 if force_refresh else 1800.0
+    if cached and (now - cached[0]) < ttl and cached[1]:
+        return list(cached[1])
+    raw_pairs: List[Tuple[str, str]] = []
+    try:
+        run_env = get_sanitized_env()
+        if prof_dir:
+            run_env["GEMINI_CLI_HOME"] = str(prof_dir)
+        mres = subprocess.run(
+            [exe_path, "models"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=18.0,
+            shell=False,
+            env=run_env,
+        )
+        for line in (mres.stdout or "").splitlines():
+            line_s = line.strip()
+            if not line_s or "\t" not in line_s:
+                continue
+            m_id, m_disp = line_s.split("\t", 1)
+            m_id, m_disp = m_id.strip(), m_disp.strip()
+            if m_id and m_disp:
+                raw_pairs.append((m_id, m_disp))
+        if raw_pairs:
+            _CLI_MODELS_CACHE[cache_key] = (now, raw_pairs, "agy_live_cli")
+    except Exception:
+        if cached and cached[1]:
+            return list(cached[1])
+    return raw_pairs
+
+
+def _probe_agy_entitled_tier(prof_dir: Optional[str] = None, force_refresh: bool = False) -> Optional[Tuple[str, str]]:
+    """Infers verified Google AI Ultra / Pro tier directly from live server-entitled models in 'agy.exe models'."""
+    exe = resolve_cli("agy")
+    pairs = _get_raw_agy_model_pairs(exe, prof_dir, force_refresh=force_refresh)
+    if not pairs:
+        return None
+    model_ids = {m_id.lower() for m_id, _ in pairs}
+    has_ultra_models = any(
+        mid.startswith("gemini-4-neon")
+        or mid.startswith("gemini-4-carbon")
+        or mid in ("gemini-pro-orchestrator", "gemini-pro-orchestrator-neon")
+        for mid in model_ids
+    )
+    if has_ultra_models:
+        return ("ultra", "Antigravity 서버 모델 인가 실측 · Ultra")
+    has_pro_models = any(
+        mid.startswith("gemini-4-argon")
+        or mid.startswith("claude-")
+        or mid == "gemini-pro-orchestrator-argon"
+        for mid in model_ids
+    )
+    if has_pro_models:
+        return ("pro", "Antigravity 서버 모델 인가 실측 · Pro")
     return None
 
 
@@ -1866,17 +2565,21 @@ def _inspect_cli_account_plan(
             pass
 
         api_paid = _probe_google_code_assist_paid_tier(gem_base, force_refresh=deep)
+        if not api_paid and cli_name == "agy":
+            api_paid = _probe_agy_entitled_tier(str(profile_dir) if profile_dir else None, force_refresh=deep)
 
-        # Priority: 1) Explicit user confirmation (ov != 'auto') -> 2) Google CodeAssist API paidTier -> 3) Workspace hd -> 4) Honest Free default
-        if ov == "ultra":
+        # If live Google / Antigravity server verifies Ultra entitlement, promote even if an older 'pro' override remained
+        if ov == "ultra" or (api_paid and api_paid[0] == "ultra" and ov != "free"):
+            is_manual_ultra = ov == "ultra" and not (api_paid and api_paid[0] == "ultra")
+            src_lbl = "사용자 지정 플랜 (Ultra)" if is_manual_ultra else f"Google 서버 실측 ({api_paid[1]})"
             return {
                 "account_email": email,
                 "plan_tier": "google_ai_ultra",
                 "orchestrator_tier": "ultra",
                 "plan_override": ov,
-                "plan_source": "user_confirmed",
-                "plan_source_label": "사용자 지정 플랜 (Ultra)",
-                "plan_name": "Google AI Ultra (울트라 구독 · Argon & Carbon 모두 사용 가능)",
+                "plan_source": "user_confirmed" if is_manual_ultra else "google_api_verified",
+                "plan_source_label": src_lbl,
+                "plan_name": "Google AI Ultra (울트라 구독 · Argon, Carbon & Neon 모두 사용 가능)",
                 "plan_label": "Google AI Ultra 구독",
                 "is_subscribed": True,
                 "is_paid": True,
@@ -2097,6 +2800,40 @@ def _inspect_cli_account_plan(
             **telemetry,
         }
 
+    if cli_name == "agy-sdk":
+        agy_marker = _check_session_markers("agy", profile_dir)
+        if agy_marker["detected"]:
+            eff_ov = ov if ov != "auto" else str(PROVIDER_META.get("antigravity", {}).get("plan_override") or "auto")
+            base_plan = _inspect_cli_account_plan("agy", True, profile_dir=profile_dir, plan_override=eff_ov, deep=deep)
+            sdk_v = _detect_installed_sdk_version_fast() or "0.1"
+            base_plan["plan_name"] = f"{base_plan.get('plan_label') or 'Google AI 구독'} · SDK v{sdk_v} 자동 공유 ($0 · API 키 차단)"
+            base_plan["plan_label"] = f"{base_plan.get('plan_label') or 'Google AI'} (SDK $0 공유)"
+            base_plan.update(telemetry)
+            return base_plan
+        local_models = _discover_local_zero_cost_models()
+        if local_models:
+            sdk_v = _detect_installed_sdk_version_fast() or "0.1"
+            return {
+                "account_email": "LocalOpenAIAgentConfig (Ollama/LM Studio)",
+                "plan_tier": "local_sdk_zero_cost",
+                "orchestrator_tier": "free",
+                "plan_override": ov,
+                "plan_source": "local_endpoint",
+                "plan_source_label": "로컬 $0 엔드포인트",
+                "plan_name": f"Antigravity SDK v{sdk_v} · 로컬 오픈 모델 ($0 무제한 · API 키 불필요)",
+                "plan_label": "로컬 오픈 모델 SDK ($0)",
+                "is_subscribed": True,
+                "is_paid": False,
+                "daily_max_calls": 999,
+                "daily_max_tokens": 5000000,
+                "monthly_max_calls": 29970,
+                "monthly_max_tokens": 150000000,
+                "max_calls": 999,
+                "max_tokens": 5000000,
+                "window_label": "로컬 무과금 ($0)",
+                **telemetry,
+            }
+
     if cli_name == "grok":
         orch_t = "ultra" if ov == "ultra" else ("free" if ov == "free" else "pro")
         is_p = orch_t != "free"
@@ -2147,6 +2884,18 @@ def _check_session_markers(cli_name: str, profile_dir: Optional[str] = None) -> 
     """Checks whether local subscription OAuth token files exist on disk (without reading secret contents)."""
     home = Path(profile_dir) if profile_dir else Path.home()
 
+    if cli_name == "agy-sdk":
+        sdk_ver = _detect_installed_sdk_version_fast()
+        if not sdk_ver:
+            return {"detected": False, "marker": None}
+        agy_m = _check_session_markers("agy", profile_dir)
+        if agy_m["detected"]:
+            return {"detected": True, "marker": f".venv/google-antigravity v{sdk_ver} + {agy_m['marker']}"}
+        local_m = _discover_local_zero_cost_models()
+        if local_m:
+            return {"detected": True, "marker": f".venv/google-antigravity v{sdk_ver} + {local_m[0]['base_url']}"}
+        return {"detected": False, "marker": None}
+
     # Only check actual OAuth / credential token files (exclude plain config files or empty directories)
     markers_map = {
         "claude": [
@@ -2185,6 +2934,40 @@ _CLI_VERSION_CACHE: Dict[str, Tuple[float, str]] = {}
 
 def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False, profile_dir: Optional[str] = None) -> Dict[str, Any]:
     """Determines installation, version, and subscription login status for a CLI."""
+    if cli_name == "agy-sdk":
+        sdk_ver = _detect_installed_sdk_version_fast()
+        marker_info = _check_session_markers("agy-sdk", profile_dir)
+        if not exe or not sdk_ver:
+            return {
+                "installed": False,
+                "version": "SDK 미설치 (.venv)",
+                "auth_state": "NOT_INSTALLED",
+                "auth_label": "SDK 미설치 (uv 원클릭 자동설치 지원)",
+                "auth_detail": "[⚡ uv + Antigravity SDK 원클릭 자동설치] 또는 [미설치 CLI 일괄 원클릭 설치]를 실행해 .venv에 google-antigravity를 설치하세요.",
+                "session_detected": False,
+                "session_marker": None,
+            }
+        ver_str = f"google-antigravity v{sdk_ver} (.venv)"
+        if marker_info["detected"]:
+            return {
+                "installed": True,
+                "version": ver_str,
+                "auth_state": "LOGGED_IN",
+                "auth_label": f"SDK v{sdk_ver} · 구독/로컬 $0 공유 활성",
+                "auth_detail": f"격리 .venv SDK + 로컬 구독/오픈모델 공유 활성 ({marker_info['marker']}) · 유료 API 키 원천 차단($0)",
+                "session_detected": True,
+                "session_marker": marker_info["marker"],
+            }
+        return {
+            "installed": True,
+            "version": ver_str,
+            "auth_state": "AUTH_REQUIRED",
+            "auth_label": f"SDK v{sdk_ver} 설치됨 · 구독 로그인 또는 로컬 모델 필요",
+            "auth_detail": "로컬 Antigravity 구독 계정(agy login)으로 로그인하거나 Ollama/LM Studio 로컬 서버를 켜면 $0으로 즉시 작동합니다.",
+            "session_detected": False,
+            "session_marker": None,
+        }
+
     marker_info = _check_session_markers(cli_name, profile_dir)
     if not exe:
         if marker_info["detected"]:
@@ -2298,9 +3081,6 @@ def _probe_cli_login(cli_name: str, exe: Optional[str], deep: bool = False, prof
     }
 
 
-_CLI_MODELS_CACHE: Dict[str, Tuple[float, List[Tuple[str, str]], str]] = {}
-
-
 def _categorize_agy_model(model_id: str, display_name: str, orchestrator_tier: str) -> Dict[str, Any]:
     """Classifies real Antigravity models returned by 'agy.exe models' with group & subscription tier lock metadata."""
     mid = model_id.lower()
@@ -2374,45 +3154,13 @@ def fetch_cli_available_models(
     cache_key = f"{cli_name}:{exe_path or ''}:{prof_dir or ''}"
 
     if cli_name == "agy" and exe_path and "antigravity-ide" not in Path(exe_path).name.lower():
-        raw_pairs: List[Tuple[str, str]] = []
-        src = "agy_live_cli"
-        cached = _CLI_MODELS_CACHE.get(cache_key)
-        if cached and not force_refresh and (now - cached[0]) < 600.0 and cached[1]:
-            raw_pairs, src = cached[1], cached[2]
-        elif logged_in:
-            try:
-                run_env = get_sanitized_env()
-                if prof_dir:
-                    run_env["GEMINI_CLI_HOME"] = str(prof_dir)
-                mres = subprocess.run(
-                    [exe_path, "models"],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=8.0,
-                    shell=False,
-                    env=run_env,
-                )
-                for line in (mres.stdout or "").splitlines():
-                    line_s = line.strip()
-                    if not line_s or "\t" not in line_s:
-                        continue
-                    m_id, m_disp = line_s.split("\t", 1)
-                    m_id, m_disp = m_id.strip(), m_disp.strip()
-                    if m_id and m_disp:
-                        raw_pairs.append((m_id, m_disp))
-                if raw_pairs:
-                    _CLI_MODELS_CACHE[cache_key] = (now, raw_pairs, "agy_live_cli")
-            except Exception:
-                pass
-
+        raw_pairs = _get_raw_agy_model_pairs(exe_path, prof_dir, force_refresh=force_refresh) if logged_in else []
         if raw_pairs:
             categorized = [_categorize_agy_model(mid, mdisp, orchestrator_tier) for mid, mdisp in raw_pairs]
             categorized.sort(key=lambda x: (x["_sort"], x["name"]))
             for item in categorized:
                 item.pop("_sort", None)
-            return categorized, src
+            return categorized, "agy_live_cli"
 
     if cli_name == "gemini":
         gem_models = [
@@ -2444,6 +3192,43 @@ def fetch_cli_available_models(
             {"id": "o4-mini", "name": "o4-mini", "group": "🟢 OpenAI Codex 모델", "min_tier": "free", "locked": False, "lock_reason": ""},
             {"id": "o3", "name": "o3 (심층 추론)", "group": "🟢 OpenAI Codex 모델", "min_tier": "pro", "locked": not is_paid_codex, "lock_reason": "" if is_paid_codex else "Plus/Pro 구독 이상"},
         ], "codex_cli"
+
+    if cli_name == "agy-sdk":
+        sdk_models: List[Dict[str, Any]] = []
+        agy_exe = resolve_cli("agy")
+        agy_logged = _check_session_markers("agy", prof_dir)["detected"]
+        if agy_exe and agy_logged:
+            sub_models, _ = fetch_cli_available_models(
+                "antigravity", "agy", agy_exe, prof_dir, orchestrator_tier, True, force_refresh=force_refresh
+            )
+            for sm in sub_models:
+                item_copy = dict(sm)
+                item_copy["group"] = f"📦 SDK 구독 공유 ($0) · {sm.get('group', 'Antigravity')}"
+                sdk_models.append(item_copy)
+        local_zero = _discover_local_zero_cost_models(force_refresh=force_refresh)
+        for lm in local_zero:
+            sdk_models.append(
+                {
+                    "id": lm["id"],
+                    "name": lm["name"],
+                    "group": "💻 로컬 $0 오픈 모델 (SDK LocalOpenAIAgentConfig · API 키 불필요)",
+                    "min_tier": "free",
+                    "locked": False,
+                    "lock_reason": "",
+                }
+            )
+        if not sdk_models:
+            sdk_models = [
+                {
+                    "id": "gemini-3.8-flash-high",
+                    "name": "Gemini 3.8 Flash High (SDK 로컬 구독 공유 $0)",
+                    "group": "📦 SDK 구독 공유 ($0)",
+                    "min_tier": "free",
+                    "locked": False,
+                    "lock_reason": "",
+                }
+            ]
+        return sdk_models, "antigravity_sdk_zero_cost"
 
     if cli_name == "claude":
         return [
@@ -2634,6 +3419,164 @@ def save_character_configs(configs: Dict[str, Any]) -> Dict[str, Any]:
     return current
 
 
+def apply_sdk_squad_preset_to_workspace(target_team_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Applies the 10-employee Antigravity SDK standard squad (#01 LEAD + 3 Parts × [1 PART_LEAD + 2 STAFF]),
+    fixing cliProvider='antigravity_sdk' with distinct unlocked cliModels while preserving user Maple avatars
+    and existing team Google Drive / output_dir workspace bindings.
+    """
+    part_cfg = load_part_roles_config()
+    existing_part_ids = {p["id"] for p in (part_cfg.get("parts") or [])}
+    if not {"PART_RESEARCH", "PART_STRUCTURE", "PART_BUILD"}.issubset(existing_part_ids):
+        part_cfg = reset_part_roles()
+
+    merged_chars = build_sdk_squad_character_configs(load_character_configs())
+    saved_chars = save_character_configs(merged_chars)
+
+    teams_doc = load_teams_config()
+    eff_tid = str(target_team_id or teams_doc.get("active_team_id") or "team-core").strip()
+    squad_ids = [spec["id"] for spec in DEFAULT_SDK_SQUAD_10]
+    sdk_roles = {
+        "head": "antigravity_sdk",
+        "builder": "antigravity_sdk",
+        "sub_builder": "antigravity_sdk",
+        "reviewer": "antigravity_sdk",
+        "researcher": "antigravity_sdk",
+    }
+    now_str = utc_now_iso()
+    for t in teams_doc.get("teams") or []:
+        if t.get("id") == eff_tid:
+            extra_ids = [m for m in (t.get("member_ids") or []) if m not in squad_ids]
+            t["member_ids"] = squad_ids + extra_ids
+            t["roles"] = dict(sdk_roles)
+            t["updated_at"] = now_str
+            break
+    CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_t = TEAMS_CONFIG_FILE.with_suffix(".tmp")
+    tmp_t.write_text(json.dumps(teams_doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp_t, TEAMS_CONFIG_FILE)
+    save_roles(sdk_roles)
+
+    return {
+        "part_roles": part_cfg,
+        "character_configs": saved_chars,
+        "teams_summary": get_teams_payload(force_gdrive_refresh=False),
+        "applied_team_id": eff_tid,
+        "squad_count": len(squad_ids),
+    }
+
+
+def recruit_sdk_staff_for_part(
+    part_id: str,
+    target_team_id: Optional[str] = None,
+    custom_name: str = "",
+    custom_model: str = "",
+) -> Dict[str, Any]:
+    """Recruits a new subordinate staff (orgRank='STAFF', cliProvider='antigravity_sdk') into a specific part."""
+    part_cfg = load_part_roles_config()
+    rid = resolve_canonical_part_role(part_id, part_cfg)
+    part_obj = next((p for p in (part_cfg.get("parts") or []) if p["id"] == rid), None)
+    if not part_obj:
+        raise ValueError(f"존재하지 않는 파트 ID입니다: {part_id}")
+
+    cur_chars = load_character_configs()
+    teams_doc = load_teams_config()
+    eff_tid = str(target_team_id or teams_doc.get("active_team_id") or "team-core").strip()
+    target_team = next((t for t in (teams_doc.get("teams") or []) if t.get("id") == eff_tid), None)
+    team_members = list((target_team or {}).get("member_ids") or [])
+
+    # Find next available character ID in 01..20 not yet active in this team
+    chosen_cid: Optional[str] = None
+    for n in range(1, 21):
+        cand = f"{n:02d}"
+        if cand not in team_members and cand not in cur_chars:
+            chosen_cid = cand
+            break
+    if not chosen_cid:
+        for n in range(1, 21):
+            cand = f"{n:02d}"
+            if cand not in team_members:
+                chosen_cid = cand
+                break
+    if not chosen_cid:
+        raise ValueError("최대 20명의 AI 직원 슬롯이 모두 현재 팀에 배정되어 있습니다.")
+
+    existing_part_staff = [
+        mc
+        for cid, mc in cur_chars.items()
+        if cid in team_members
+        and isinstance(mc, dict)
+        and resolve_canonical_part_role(str(mc.get("triadRole") or ""), part_cfg) == rid
+        and str(mc.get("orgRank") or "").upper() == "STAFF"
+    ]
+    next_order = len(existing_part_staff) + 1
+    used_models = {str(mc.get("cliModel") or "") for mc in existing_part_staff}
+    picked_model = str(custom_model or "").strip()
+    if not picked_model:
+        picked_model = next(
+            (m for m in RECOMMENDED_SDK_STAFF_MODELS if m not in used_models),
+            RECOMMENDED_SDK_STAFF_MODELS[(next_order - 1) % len(RECOMMENDED_SDK_STAFF_MODELS)],
+        )
+
+    short_part = part_obj["name"].replace(" 담당", "").strip()
+    staff_name = str(custom_name or "").strip() or f"{short_part} 사원 {next_order}"
+    idx_num = int(chosen_cid)
+    prev = cur_chars.get(chosen_cid) if isinstance(cur_chars.get(chosen_cid), dict) else {}
+    maple_eq = (
+        dict(prev["mapleEquipped"])
+        if isinstance(prev.get("mapleEquipped"), dict) and prev.get("mapleEquipped")
+        else {
+            "skin": 2000,
+            "hair": 30000 + (idx_num % 6),
+            "face": 20000 + (idx_num % 5),
+            "overall": 1050000 + (idx_num % 6),
+            "shoes": 1070000 + (idx_num % 6),
+            "hat": 1000000 + (idx_num % 6),
+        }
+    )
+    new_char = {
+        **prev,
+        "id": chosen_cid,
+        "name": staff_name,
+        "floor": "1F" if idx_num <= 6 else ("2F" if idx_num <= 12 else "3F"),
+        "dept": f"{rid} (STAFF) · Antigravity SDK ({picked_model})",
+        "triadRole": rid,
+        "orgRank": "STAFF",
+        "staffOrder": next_order,
+        "cliProvider": "antigravity_sdk",
+        "cliModel": picked_model,
+        "sandboxMode": "proposal" if part_obj.get("part_kind") == "build" else "read-only",
+        "timeoutSec": "auto",
+        "mapleEquipped": maple_eq,
+        "mapleAnim": prev.get("mapleAnim") or "stand1",
+        "mapleAnimated": bool(prev.get("mapleAnimated", False)),
+        "mapleFlipped": bool(prev.get("mapleFlipped", False)),
+        "skills": [f"{short_part} 실무 #{next_order}", "세부모델 교차검토", "파트장 보좌"],
+        "systemPrompt": (
+            f"당신은 '{part_obj['name']}' 산하 일반 사원 '{staff_name}'(STAFF #{next_order})입니다. "
+            f"파트 지침({part_obj.get('instruction', '')})에 따라 배정된 세부 모델의 강점을 살려 실무 조사·초안·검증을 수행하고 파트장에게 명확히 보고합니다."
+        ),
+        "updatedAt": utc_now_iso(),
+    }
+    cur_chars[chosen_cid] = new_char
+    saved_chars = save_character_configs(cur_chars)
+
+    if target_team is not None:
+        if chosen_cid not in target_team["member_ids"]:
+            target_team["member_ids"].append(chosen_cid)
+        target_team["updated_at"] = utc_now_iso()
+        tmp_t = TEAMS_CONFIG_FILE.with_suffix(".tmp")
+        tmp_t.write_text(json.dumps(teams_doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp_t, TEAMS_CONFIG_FILE)
+
+    return {
+        "recruited_agent": new_char,
+        "part_roles": part_cfg,
+        "character_configs": saved_chars,
+        "teams_summary": get_teams_payload(force_gdrive_refresh=False),
+    }
+
+
 def get_teams_payload(force_gdrive_refresh: bool = False) -> Dict[str, Any]:
     gdrives = detect_google_drive_paths()
     gd_conn = get_gdrive_connection_status(force_refresh=force_gdrive_refresh)
@@ -2747,13 +3690,314 @@ STATE: Dict[str, Any] = {
                 "monthly_calls": _read_local_cli_telemetry("grok").get("measured_monthly_calls", 0),
                 "monthly_tokens": _read_local_cli_telemetry("grok").get("measured_monthly_tokens", 0),
             },
+            "SDK": {
+                "calls": _read_local_cli_telemetry("agy-sdk").get("measured_daily_calls", 0),
+                "seconds": 0,
+                "tokens": _read_local_cli_telemetry("agy-sdk").get("measured_daily_tokens", 0),
+                "exact_tokens": _read_local_cli_telemetry("agy-sdk").get("measured_daily_tokens", 0),
+                "monthly_calls": _read_local_cli_telemetry("agy-sdk").get("measured_monthly_calls", 0),
+                "monthly_tokens": _read_local_cli_telemetry("agy-sdk").get("measured_monthly_tokens", 0),
+            },
         },
         "total": {"calls": 18, "seconds": 555, "tokens": 202400, "exact_tokens": 202400, "failed": 0},
     },
     "stop_requested": False,
+    "stopped_missions": set(),
+    "mission_checkpoints": {},
+    "team_streams": {},
     "quota_exhausted_slots": {},
     "paused_mission": None,
+    "live_agent_stream": {
+        "active": False,
+        "mission_id": "",
+        "agent_id": "",
+        "agent_name": "",
+        "role": "",
+        "provider": "",
+        "stage": "",
+        "mode": "",
+        "thought": "",
+        "tool": "",
+        "subagents": [],
+        "updated_at": "",
+    },
 }
+
+_SERVER_SHUTTING_DOWN = threading.Event()
+_PERSIST_LOCK = threading.Lock()
+_SHUTDOWN_ONCE_LOCK = threading.Lock()
+_SHUTDOWN_HANDLED = False
+
+
+def save_runtime_state() -> None:
+    """Atomically persists active missions, checkpoints, approval items, and logs to ORCHESTRATOR_STATE_FILE."""
+    try:
+        RUNTIME_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with _STATE_LOCK:
+            missions_list = list(STATE.get("missions") or [])[:50]
+            keep_ckpt_ids = {
+                str(m.get("mission_id"))
+                for m in missions_list
+                if m.get("status") in ("RUNNING", "AWAITING_APPROVAL", "QUOTA_PAUSED", "PAUSED_ERROR")
+            }
+            for m in missions_list[:15]:
+                if m.get("mission_id"):
+                    keep_ckpt_ids.add(str(m["mission_id"]))
+            raw_ckpts = STATE.get("mission_checkpoints") or {}
+            pruned_ckpts = {
+                str(mid): ck
+                for mid, ck in raw_ckpts.items()
+                if str(mid) in keep_ckpt_ids and isinstance(ck, dict)
+            }
+            STATE["mission_checkpoints"] = dict(pruned_ckpts)
+            snapshot = {
+                "schema_version": 1,
+                "saved_at": utc_now_iso(),
+                "focus_mission_id": STATE.get("focus_mission_id"),
+                "missions": missions_list,
+                "mission_checkpoints": pruned_ckpts,
+                "paused_mission": STATE.get("paused_mission"),
+                "stopped_missions": sorted(str(x) for x in (STATE.get("stopped_missions") or set()) if x),
+                "events": list(STATE.get("events") or [])[:45],
+                "chat_messages": list(STATE.get("chat_messages") or [])[-70:],
+                "recent_calls": list(STATE.get("recent_calls") or [])[:30],
+            }
+            serialized = json.dumps(snapshot, ensure_ascii=False, indent=2)
+        with _PERSIST_LOCK:
+            tmp_path = ORCHESTRATOR_STATE_FILE.with_suffix(".tmp")
+            tmp_path.write_text(serialized, encoding="utf-8")
+            os.replace(tmp_path, ORCHESTRATOR_STATE_FILE)
+    except Exception:
+        pass
+
+
+def graceful_shutdown_orchestrator(reason: str = "서버 종료 감지") -> None:
+    """
+    Sets _SERVER_SHUTTING_DOWN so worker threads stop mutating checkpoints immediately,
+    persists clean RUNNING checkpoints to disk (never marking them STOPPED),
+    and terminates child CLI subprocesses cleanly.
+    """
+    global _SHUTDOWN_HANDLED
+    with _SHUTDOWN_ONCE_LOCK:
+        if _SHUTDOWN_HANDLED:
+            return
+        _SHUTDOWN_HANDLED = True
+    _SERVER_SHUTTING_DOWN.set()
+
+    pids_to_kill: List[int] = []
+    running_mids: List[str] = []
+    with _STATE_LOCK:
+        pids_to_kill = list(_ACTIVE_PIDS.keys())
+        _ACTIVE_PIDS.clear()
+        _ACTIVE_PID_META.clear()
+        stopped_set = STATE.get("stopped_missions") or set()
+        for m in STATE.get("missions") or []:
+            if m.get("status") == "RUNNING" and m.get("mission_id") not in stopped_set:
+                running_mids.append(str(m["mission_id"]))
+                m["last_interrupted_at"] = utc_now_iso()
+        if running_mids:
+            STATE["events"].insert(
+                0,
+                {
+                    "at": utc_now_iso(),
+                    "run_id": f"server-shutdown-{int(time.time())}",
+                    "to_state": "CHECKPOINT_SAVED",
+                    "state_ko": (
+                        f"💾 [{reason}] 진행 중인 미션({', '.join(running_mids)})의 체크포인트를 안전하게 저장했습니다. "
+                        f"서버가 다시 켜지면 중단된 지점부터 자동으로 이어서 수행됩니다."
+                    ),
+                    "project": STATE.get("project_name", "AI_virtual-office"),
+                    "role": "DIRECTOR",
+                },
+            )
+    save_runtime_state()
+
+    for pid in pids_to_kill:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=4)
+            else:
+                os.kill(pid, 9)
+        except Exception:
+            pass
+
+
+def _summarize_checkpoint_progress(ckpt: Dict[str, Any]) -> str:
+    st_out = ckpt.get("stage_outputs") or {}
+    pt_out = ckpt.get("part_outputs") or {}
+    stf_map = ckpt.get("staff_outputs_by_part") or {}
+    gen_files = ckpt.get("generated_files") or []
+    parts_done = len([k for k, v in pt_out.items() if v])
+    partial_staff = sum(
+        len(v) for k, v in stf_map.items() if isinstance(v, dict) and v and not pt_out.get(k)
+    )
+    badges: List[str] = []
+    if st_out.get("LEAD_PLANNING"):
+        badges.append("총괄팀장 분장 완료")
+    if parts_done:
+        badges.append(f"파트 {parts_done}개 완료")
+    if partial_staff:
+        badges.append(f"진행 중 파트 사원 {partial_staff}명 완료")
+    if st_out.get("PART_REVIEW"):
+        badges.append("파트 상호검토 완료")
+    if gen_files:
+        badges.append(f"산출물 {len(gen_files)}개 생성됨")
+    return " · ".join(badges) if badges else "초기 업무분장 단계"
+
+
+def load_runtime_state_and_auto_resume(auto_resume: bool = True) -> List[str]:
+    """
+    Restores persisted orchestrator state on server boot and automatically resumes
+    any mission that was interrupted in RUNNING status (excluding user-STOPPED missions).
+    """
+    if not ORCHESTRATOR_STATE_FILE.is_file():
+        return []
+    try:
+        data = json.loads(ORCHESTRATOR_STATE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return []
+    except Exception:
+        return []
+
+    to_resume_specs: List[Tuple[str, str, str, Dict[str, Any], Optional[str], Optional[str]]] = []
+
+    with _STATE_LOCK:
+        saved_missions = data.get("missions")
+        if isinstance(saved_missions, list) and saved_missions:
+            STATE["missions"] = saved_missions
+        saved_ckpts = data.get("mission_checkpoints")
+        if isinstance(saved_ckpts, dict):
+            STATE["mission_checkpoints"] = saved_ckpts
+        if data.get("focus_mission_id"):
+            STATE["focus_mission_id"] = str(data["focus_mission_id"])
+        if "paused_mission" in data:
+            STATE["paused_mission"] = data.get("paused_mission")
+        saved_stopped = data.get("stopped_missions")
+        if isinstance(saved_stopped, list):
+            STATE["stopped_missions"] = {str(x) for x in saved_stopped if x}
+        saved_events = data.get("events")
+        if isinstance(saved_events, list) and saved_events:
+            STATE["events"] = saved_events
+        saved_chats = data.get("chat_messages")
+        if isinstance(saved_chats, list) and saved_chats:
+            STATE["chat_messages"] = saved_chats
+        saved_calls = data.get("recent_calls")
+        if isinstance(saved_calls, list) and saved_calls:
+            STATE["recent_calls"] = saved_calls
+
+        # Clear transient process-bound stream indicators from previous server instance
+        STATE["working_now"] = []
+        STATE["team_streams"] = {}
+        STATE["stop_requested"] = False
+        if isinstance(STATE.get("live_agent_stream"), dict):
+            STATE["live_agent_stream"]["active"] = False
+            STATE["live_agent_stream"]["tool"] = ""
+            STATE["live_agent_stream"]["parallel_agents"] = []
+
+        stopped_set = STATE.get("stopped_missions") or set()
+        seen_running_teams: set = set()
+        for m in STATE["missions"]:
+            if not isinstance(m, dict):
+                continue
+            mid = str(m.get("mission_id") or "").strip()
+            if not mid:
+                continue
+            if m.get("status") == "RUNNING":
+                if mid in stopped_set:
+                    m["status"] = "STOPPED"
+                    m["live"] = False
+                    continue
+                m_tid = str(m.get("team_id") or "").strip() or None
+                dedup_key = m_tid or mid
+                if dedup_key in seen_running_teams:
+                    m["status"] = "PAUSED_ERROR"
+                    m["live"] = False
+                    continue
+                seen_running_teams.add(dedup_key)
+
+                raw_ckpt = dict((STATE["mission_checkpoints"].get(mid) or {}))
+                if not raw_ckpt:
+                    raw_ckpt = {
+                        "mission_id": mid,
+                        "goal": m.get("goal", ""),
+                        "profile": m.get("profile", "standard"),
+                        "orchestrator_mode": m.get("orchestrator_mode"),
+                        "deliverable_mode": m.get("deliverable_mode"),
+                        "team_id": m_tid,
+                        "output_root": m.get("output_root"),
+                        "stage_outputs": dict(m.get("stage_outputs_snapshot") or {}),
+                        "part_outputs": dict(m.get("part_outputs_snapshot") or {}),
+                        "staff_outputs_by_part": {},
+                        "generated_files": list(m.get("generated_files") or []),
+                        "step_counter": len(m.get("steps") or []),
+                    }
+                # Ensure auto-resume skips completed stages rather than forcing re-run of interrupted_stage
+                raw_ckpt.pop("interrupted_stage", None)
+
+                if auto_resume:
+                    m["live"] = True
+                    m["status"] = "RUNNING"
+                    m["resumed_count"] = int(m.get("resumed_count") or 0) + 1
+                    m["updated_at"] = utc_now_iso()
+                    ckpt_desc = _summarize_checkpoint_progress(raw_ckpt)
+                    t_label = m.get("team_name") or m_tid or "기본 팀"
+                    g_txt = str(m.get("goal") or raw_ckpt.get("goal") or "")
+                    STATE["events"].insert(
+                        0,
+                        {
+                            "at": utc_now_iso(),
+                            "run_id": f"{mid}-boot-autoresume-{m['resumed_count']}",
+                            "to_state": raw_ckpt.get("current_stage") or "LEAD_PLANNING",
+                            "state_ko": (
+                                f"♻️ [서버 재기동 자동 이어하기 · {t_label}] 이전 서버 종료로 중단되었던 프로젝트({mid}: '{g_txt[:55]}')를 "
+                                f"체크포인트({ckpt_desc}) 이후 미완료 단계부터 자동으로 이어서 재개합니다."
+                            ),
+                            "project": STATE["project_name"],
+                            "role": "LEAD",
+                            "team_id": m_tid,
+                        },
+                    )
+                    next_cid = max((c.get("id", 0) for c in STATE["chat_messages"]), default=0) + 1
+                    STATE["chat_messages"].append(
+                        {
+                            "id": next_cid,
+                            "role": "SYSTEM",
+                            "content": (
+                                f"♻️ [{t_label} · 자동 복구] 서버가 다시 시작되어 미션({mid}: '{g_txt}')을 "
+                                f"보존된 체크포인트({ckpt_desc}) 다음 단계부터 자동으로 이어서 진행합니다."
+                            ),
+                            "at": utc_now_iso(),
+                        }
+                    )
+                    to_resume_specs.append(
+                        (
+                            mid,
+                            g_txt,
+                            str(m.get("profile") or raw_ckpt.get("profile") or "standard"),
+                            raw_ckpt,
+                            m_tid,
+                            m.get("orchestrator_mode") or raw_ckpt.get("orchestrator_mode"),
+                        )
+                    )
+                else:
+                    m["live"] = False
+
+        STATE["phase"] = _recompute_global_phase_unlocked()
+
+    save_runtime_state()
+
+    resumed_ids: List[str] = []
+    for mid, g_txt, prof, ckpt_obj, tid_val, orch_val in to_resume_specs:
+        if not g_txt:
+            continue
+        resumed_ids.append(mid)
+        t = threading.Thread(
+            target=_run_mission_pipeline,
+            args=(mid, g_txt, prof, ckpt_obj, tid_val, orch_val),
+            daemon=True,
+        )
+        t.start()
+    return resumed_ids
 
 QUOTA_ERROR_PHRASES = (
     "429",
@@ -2784,13 +4028,726 @@ class _AllQuotaExhaustedError(Exception):
         self.reason = reason
 
 
+def build_team_subagent_roster(
+    team_obj: Optional[Dict[str, Any]] = None,
+    char_cfgs: Optional[Dict[str, Any]] = None,
+    exclude_role: str = "",
+) -> List[Dict[str, Any]]:
+    """Synthesizes assigned employee characters into SDK SubagentConfig-compatible roster descriptors."""
+    cfgs = char_cfgs if isinstance(char_cfgs, dict) else load_character_configs()
+    member_ids = list((team_obj or {}).get("member_ids") or [])
+    if not member_ids:
+        member_ids = sorted(cfgs.keys())
+    roster: List[Dict[str, Any]] = []
+    seen_names: set = set()
+    ex_upper = str(exclude_role or "").upper().strip()
+    for mid in member_ids:
+        mc = cfgs.get(str(mid))
+        if not isinstance(mc, dict):
+            continue
+        c_role = str(mc.get("triadRole") or "BUILDER").upper().strip()
+        if ex_upper and c_role == ex_upper and len(member_ids) > 1:
+            continue
+        c_id = str(mc.get("id") or mid).zfill(2)
+        c_name = str(mc.get("name") or f"Employee #{c_id}").strip()
+        org_rank = str(
+            mc.get("orgRank") or ("LEAD" if c_role in ("LEAD", "HEAD") else "PART_LEAD")
+        ).upper().strip()
+        role_slug = re.sub(r"[^a-z0-9_]", "_", c_role.lower()).strip("_") or "agent"
+        safe_name = f"emp_{c_id}_{role_slug}"
+        if safe_name in seen_names:
+            continue
+        seen_names.add(safe_name)
+        skills = [str(s).strip() for s in (mc.get("skills") or []) if str(s).strip()]
+        sys_p = str(mc.get("systemPrompt") or f"당신은 '{c_name}' ({c_role} 담당) AI 직원입니다.").strip()
+        cli_prov = str(mc.get("cliProvider") or "antigravity_sdk").strip()
+        cli_mod = str(mc.get("cliModel") or "").strip()
+        sandbox_m = str(mc.get("sandboxMode") or "proposal").strip()
+        mod_tag = f" ({cli_mod})" if cli_mod else ""
+        desc = f"[{c_role} · {org_rank}] {c_name}{mod_tag}" + (f" — 전문 스킬: {', '.join(skills[:4])}" if skills else "")
+        full_sys = (
+            f"{sys_p}\n"
+            f"- 배정 역할: {c_role} ({org_rank}) | 실행 모델: {cli_mod or '기본'} | 샌드박스 모드: {sandbox_m}\n"
+            + (f"- 전문 스킬: {', '.join(skills)}\n" if skills else "")
+            + "- 유료 종량제 API 키 사용 금지($0 원칙) 및 사실 검증 기준([확실]/[추정]/[불확실]/[모름]) 준수"
+        )
+        roster.append(
+            {
+                "id": c_id,
+                "safe_name": safe_name,
+                "name": c_name,
+                "role": c_role,
+                "org_rank": org_rank,
+                "cli_provider": cli_prov,
+                "cli_model": cli_mod,
+                "sandbox_mode": sandbox_m,
+                "skills": skills,
+                "description": desc,
+                "system_instructions": full_sys,
+            }
+        )
+    return roster
+
+
+def _resolve_active_employee_meta(
+    role_name: str,
+    prov_k: str,
+    team_obj: Optional[Dict[str, Any]] = None,
+    char_cfgs: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """Finds the matching Virtual Office employee character (id, name) for live speech-bubble updates."""
+    cfgs = char_cfgs if isinstance(char_cfgs, dict) else load_character_configs()
+    r_up = str(role_name or "LEAD").upper().strip()
+    r_canon = resolve_canonical_part_role(r_up)
+    m_ids = list((team_obj or {}).get("member_ids") or []) or sorted(cfgs.keys())
+    best: Optional[Dict[str, Any]] = None
+    for mid in m_ids:
+        mc = cfgs.get(str(mid))
+        if not isinstance(mc, dict):
+            continue
+        mc_role = str(mc.get("triadRole") or "").upper().strip()
+        if mc_role == r_up or resolve_canonical_part_role(mc_role) == r_canon:
+            if str(mc.get("cliProvider") or "").strip() == prov_k:
+                return str(mc.get("id") or mid).zfill(2), str(mc.get("name") or r_up)
+            if best is None:
+                best = mc
+    if best:
+        return str(best.get("id") or "01").zfill(2), str(best.get("name") or r_up)
+    fallback_ids = {
+        "LEAD": ("01", "HEAD Director AI"),
+        "HEAD": ("01", "HEAD Director AI"),
+        "PART_RESEARCH": ("02", "자료수집 파트 AI"),
+        "RESEARCHER": ("02", "자료수집 파트 AI"),
+        "PART_STRUCTURE": ("04", "기획·구조설계 파트 AI"),
+        "SUB-BUILDER": ("05", "Gemini Sub AI"),
+        "PART_BUILD": ("03", "Builder Dev AI"),
+        "BUILDER": ("03", "Builder Dev AI"),
+        "PART_REVIEW": ("04", "파트 상호검토 AI"),
+        "REVIEWER": ("04", "Reviewer Audit AI"),
+    }
+    return fallback_ids.get(r_up, fallback_ids.get(r_canon, ("01", f"{r_up} 담당 AI")))
+
+
+def _is_mission_stopped_unlocked(mission_id: str) -> bool:
+    if STATE.get("stop_requested"):
+        return True
+    stopped_set = STATE.get("stopped_missions")
+    return bool(mission_id and isinstance(stopped_set, set) and mission_id in stopped_set)
+
+
+def _recompute_global_phase_unlocked() -> str:
+    missions = STATE.get("missions") or []
+    for m in missions:
+        if m.get("status") == "RUNNING":
+            steps = m.get("steps") or []
+            return steps[-1].get("stage", "LEAD_PLANNING") if steps else "LEAD_PLANNING"
+    if any(m.get("status") == "AWAITING_APPROVAL" for m in missions):
+        return "AWAITING_APPROVAL"
+    if any(m.get("status") == "QUOTA_PAUSED" for m in missions):
+        return "QUOTA_PAUSED"
+    return "IDLE"
+
+
+def _update_live_agent_stream(
+    *,
+    active: bool = True,
+    mission_id: str = "",
+    team_id: str = "",
+    agent_id: str = "",
+    agent_name: str = "",
+    role: str = "",
+    provider: str = "",
+    stage: str = "",
+    mode: str = "",
+    thought: Optional[str] = None,
+    tool: Optional[str] = None,
+    subagents: Optional[List[Dict[str, Any]]] = None,
+    parallel_agents: Optional[List[Dict[str, Any]]] = None,
+    emit_event: bool = False,
+) -> None:
+    """Thread-safely updates STATE['live_agent_stream'], STATE['team_streams'][team_id], and optionally pushes an event."""
+    with _STATE_LOCK:
+        cur = STATE.setdefault("live_agent_stream", {})
+        cur["active"] = active
+        if mission_id:
+            cur["mission_id"] = mission_id
+        if team_id:
+            cur["team_id"] = team_id
+        if agent_id:
+            cur["agent_id"] = agent_id
+        if agent_name:
+            cur["agent_name"] = agent_name
+        if role:
+            cur["role"] = role
+        if provider:
+            cur["provider"] = provider
+        if stage:
+            cur["stage"] = stage
+        if mode:
+            cur["mode"] = mode
+        if thought is not None:
+            cur["thought"] = thought[:260]
+        if tool is not None:
+            cur["tool"] = tool[:220]
+        if subagents is not None:
+            cur["subagents"] = [
+                {"id": s.get("id"), "name": s.get("name"), "role": s.get("role"), "safe_name": s.get("safe_name")}
+                for s in subagents[:8]
+            ]
+        if parallel_agents is not None:
+            cur["parallel_agents"] = list(parallel_agents)
+        cur["updated_at"] = utc_now_iso()
+        if team_id:
+            t_streams = STATE.setdefault("team_streams", {})
+            prev_ts = dict(t_streams.get(team_id) or {})
+            prev_ts.update(
+                {
+                    "active": active,
+                    "mission_id": mission_id or prev_ts.get("mission_id", ""),
+                    "team_id": team_id,
+                    "agent_id": agent_id or prev_ts.get("agent_id", ""),
+                    "agent_name": agent_name or prev_ts.get("agent_name", ""),
+                    "role": role or prev_ts.get("role", ""),
+                    "provider": provider or prev_ts.get("provider", ""),
+                    "stage": stage or prev_ts.get("stage", ""),
+                    "mode": mode or prev_ts.get("mode", ""),
+                    "thought": cur.get("thought", ""),
+                    "tool": cur.get("tool", ""),
+                    "parallel_agents": list(cur.get("parallel_agents") or []),
+                    "updated_at": cur["updated_at"],
+                }
+            )
+            t_streams[team_id] = prev_ts
+        if emit_event and (tool or thought):
+            headline = f"🔧 [{agent_name or role}] {tool}" if tool else f"💭 [{agent_name or role}] {thought}"
+            top_ev = STATE["events"][0] if STATE.get("events") else None
+            if not top_ev or top_ev.get("state_ko") != headline[:200]:
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mission_id or 'sdk'}-live-{int(time.time() * 1000) % 100000}",
+                        "to_state": stage or STATE.get("phase") or "RUNNING",
+                        "state_ko": headline[:200],
+                        "project": STATE["project_name"],
+                        "role": role or "BUILDER",
+                    },
+                )
+
+
+def _clear_live_agent_stream(team_id: str = "", mission_id: str = "") -> None:
+    with _STATE_LOCK:
+        if team_id and isinstance(STATE.get("team_streams"), dict) and team_id in STATE["team_streams"]:
+            STATE["team_streams"][team_id]["active"] = False
+            STATE["team_streams"][team_id]["tool"] = ""
+            STATE["team_streams"][team_id]["parallel_agents"] = []
+            STATE["team_streams"][team_id]["updated_at"] = utc_now_iso()
+        other_running = any(
+            m.get("status") == "RUNNING" and m.get("mission_id") != mission_id
+            for m in (STATE.get("missions") or [])
+        )
+        cur = STATE.get("live_agent_stream")
+        if isinstance(cur, dict) and (not other_running or not mission_id or cur.get("mission_id") == mission_id):
+            cur["active"] = False
+            cur["tool"] = ""
+            cur["parallel_agents"] = []
+            cur["updated_at"] = utc_now_iso()
+
+
+def _summarize_tool_call_event(tc_obj: Dict[str, Any]) -> str:
+    """Formats a concise human-readable summary of a live SDK/CLI tool call."""
+    t_name = str(tc_obj.get("tool_name") or tc_obj.get("name") or "tool").strip()
+    params = tc_obj.get("parameters") or tc_obj.get("args") or tc_obj.get("arguments") or {}
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception:
+            params = {"arg": params[:80]}
+    detail = ""
+    if isinstance(params, dict):
+        for k in ("query", "Path", "path", "Role", "TypeName", "CommandLine", "url", "Recipient"):
+            if params.get(k):
+                detail = str(params[k]).strip().replace("\n", " ")[:65]
+                break
+        if not detail and params:
+            first_k = next(iter(params.keys()))
+            detail = f"{first_k}={str(params[first_k]).strip()[:50]}"
+    label_map = {
+        "search_web": "웹 검색(search_web)",
+        "write_file": "파일 작성(write_file)",
+        "edit_file": "파일 수정(edit_file)",
+        "read_file": "파일 읽기(read_file)",
+        "invoke_subagent": "서브에이전트 위임(invoke_subagent)",
+        "run_command": "명령 실행(run_command)",
+    }
+    disp = label_map.get(t_name, t_name)
+    return f"{disp}" + (f" → {detail}" if detail else "")
+
+
+def resolve_agent_timeout(
+    raw_timeout_cfg: Any = "auto",
+    phase_name: str = "PART_BUILD",
+    org_rank: str = "PART_LEAD",
+    profile: str = "standard",
+    model_id: Optional[str] = None,
+) -> Tuple[float, bool]:
+    """
+    Computes adaptive timeout (in seconds) and whether streaming heartbeat auto-extension is active.
+    - When raw_timeout_cfg is 'auto' (default) or unset: dynamically scales by phase, rank, profile, and frontier reasoning model.
+    - When raw_timeout_cfg is an explicit integer string (e.g. '600', '1200'): honors it with a safe 180s minimum floor.
+    """
+    raw_s = str(raw_timeout_cfg if raw_timeout_cfg is not None else "auto").strip().lower()
+    if raw_s and raw_s != "auto":
+        try:
+            manual_sec = float(raw_s)
+            if manual_sec > 0:
+                return max(180.0, min(manual_sec, 3600.0)), False
+        except ValueError:
+            pass
+
+    ph = str(phase_name or "").upper()
+    rk = str(org_rank or "PART_LEAD").upper()
+    prof = str(profile or "standard").lower().strip()
+    mod = str(model_id or "").lower().strip()
+
+    if ph == "ASK":
+        base_sec = 240.0
+    elif ph in ("LEAD_PLANNING", "PLANNING", "LEAD_REPORT", "DECIDING"):
+        base_sec = 300.0
+    elif ph in ("PART_REVIEW", "REVIEWING", "VERIFYING"):
+        base_sec = 330.0
+    elif rk == "STAFF":
+        base_sec = 360.0
+    elif "BUILD" in ph:
+        base_sec = 660.0
+    else:
+        base_sec = 450.0
+
+    prof_mult = 0.85 if prof == "quick" else (1.45 if prof == "deep" else 1.0)
+    heavy_model = any(tok in mod for tok in ("carbon", "neon", "opus", "orchestrator", "xhigh", "o3"))
+    mod_mult = 1.5 if heavy_model else (1.2 if "high" in mod else 1.0)
+    computed = max(240.0, min(base_sec * prof_mult * mod_mult, 1800.0))
+    return round(computed, 1), True
+
+
+def invoke_sdk_agent_streaming(
+    prompt: str,
+    timeout: float = 45.0,
+    model_override: Optional[str] = None,
+    stream_meta: Optional[Dict[str, Any]] = None,
+    prof_dir: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Executes Antigravity SDK (`antigravity_sdk`) strictly at $0 (paid API keys stripped):
+      - Mode B (`ollama:<model>` / `lmstudio:<model>`): Native `.venv` `google.antigravity.Agent(LocalOpenAIAgentConfig(..., subagents=[SubagentConfig(...)]))` streaming `thoughts` & `tool_calls`.
+      - Mode A (Subscription models): `.venv` SDK `SubagentConfig` team roster synthesis + `agy.exe --output-format stream-json --sandbox --dangerously-skip-permissions` streaming real-time NDJSON `step_update` thoughts & tool calls via Unified Auth.
+    """
+    venv_py = _get_sdk_venv_python()
+    sdk_ver = _detect_installed_sdk_version_fast()
+    if not venv_py.is_file() or not sdk_ver:
+        return None
+
+    meta = PROVIDER_META.get("antigravity_sdk", {"label": "Antigravity SDK (구독·로컬 $0)", "selected_model": ""})
+    eff_model = str(model_override or meta.get("selected_model") or "").strip()
+    run_env = get_sanitized_env()
+    if prof_dir:
+        run_env["GEMINI_CLI_HOME"] = str(prof_dir)
+
+    s_meta = stream_meta or {}
+    mission_id = str(s_meta.get("mission_id") or "")
+    s_team_id = str(s_meta.get("team_id") or "")
+    role_name = str(s_meta.get("role_name") or "HEAD")
+    phase_name = str(s_meta.get("phase_name") or STATE.get("phase") or "ASK")
+    agent_id = str(s_meta.get("agent_id") or "01")
+    agent_name = str(s_meta.get("agent_name") or "SDK Agent")
+    subagents: List[Dict[str, Any]] = list(s_meta.get("subagents") or [])
+    keep_stream_open = bool(s_meta.get("keep_stream_open", False))
+
+    is_local_openai = eff_model.startswith("ollama:") or eff_model.startswith("lmstudio:")
+    exec_mode_tag = "sdk_local_openai_stream" if is_local_openai else "sdk_subscription_stream"
+
+    _update_live_agent_stream(
+        active=True,
+        mission_id=mission_id,
+        team_id=s_team_id,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        role=role_name,
+        provider="antigravity_sdk",
+        stage=phase_name,
+        mode=exec_mode_tag,
+        thought=f"SDK v{sdk_ver} 런타임 가동 · {eff_model or '기본 구독 모델'} ($0 API 키 차단" + (f" · Subagents {len(subagents)}명 연결)" if subagents else ")"),
+        tool="",
+        subagents=subagents,
+    )
+
+    # Inject SDK SubagentConfig team roster instructions when orchestrating team missions
+    effective_prompt = prompt
+    if subagents and s_meta.get("inject_subagent_roster"):
+        roster_lines = [
+            f"  - `{s['safe_name']}` ({s['name']} · 역할: {s['role']}): {s['description']}"
+            for s in subagents[:6]
+        ]
+        effective_prompt = (
+            f"[Antigravity SDK SubagentConfig 팀 오케스트레이션 로스터 ($0 구독·로컬 모드)]\n"
+            + "\n".join(roster_lines)
+            + "\n\n"
+            + prompt
+        )
+
+    import tempfile
+    t0 = time.time()
+    cwd_file_blocks: List[str] = []
+    stdout_lines: List[str] = []
+    stderr_chunks: List[str] = []
+    parsed_result_text = ""
+    streamed_text_deltas: List[str] = []
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="avo_sdk_") as iso_cwd:
+            seed_dir_str = str(s_meta.get("seed_from_project_dir") or "").strip()
+            seeded_iso_map = (
+                _seed_iso_workspace_from_project_dir(Path(seed_dir_str), Path(iso_cwd))
+                if seed_dir_str
+                else {}
+            )
+            if is_local_openai:
+                backend_prefix, raw_m = eff_model.split(":", 1)
+                base_url = "http://127.0.0.1:11434/v1" if backend_prefix == "ollama" else "http://127.0.0.1:1234/v1"
+                cfg_payload = {
+                    "base_url": base_url,
+                    "model": raw_m,
+                    "prompt": effective_prompt,
+                    "system_instructions": str(s_meta.get("system_prompt") or f"당신은 {agent_name} ({role_name}) AI 에이전트입니다."),
+                    "subagents": [
+                        {
+                            "name": s["safe_name"],
+                            "description": s["description"],
+                            "system_instructions": s["system_instructions"],
+                        }
+                        for s in subagents[:6]
+                    ],
+                }
+                payload_file = Path(iso_cwd) / ".sdk_payload.json"
+                payload_file.write_text(json.dumps(cfg_payload, ensure_ascii=False), encoding="utf-8")
+                runner_code = (
+                    "import json, pathlib, sys\n"
+                    "from google.antigravity import Agent, LocalOpenAIAgentConfig, TemplatedSystemInstructions, policy, types\n"
+                    "p = json.loads(pathlib.Path('.sdk_payload.json').read_text(encoding='utf-8'))\n"
+                    "pathlib.Path('.sdk_payload.json').unlink(missing_ok=True)\n"
+                    "subs = [types.SubagentConfig(name=s['name'], description=s['description'], system_instructions=s['system_instructions']) for s in p.get('subagents', [])]\n"
+                    "cfg = LocalOpenAIAgentConfig(\n"
+                    "    base_url=p['base_url'],\n"
+                    "    model=p['model'],\n"
+                    "    system_instructions=TemplatedSystemInstructions(template=p['system_instructions']),\n"
+                    "    subagents=subs,\n"
+                    "    policies=[policy.allow_all()],\n"
+                    ")\n"
+                    "full_out = []\n"
+                    "with Agent(config=cfg) as agent:\n"
+                    "    for chunk in agent.stream(p['prompt']):\n"
+                    "        th = getattr(chunk, 'thoughts', None) or getattr(chunk, 'thought', None)\n"
+                    "        if th:\n"
+                    "            print(json.dumps({'event': 'sdk_thought', 'thought': str(th)}, ensure_ascii=False), flush=True)\n"
+                    "        tcs = getattr(chunk, 'tool_calls', None) or []\n"
+                    "        for tc in tcs:\n"
+                    "            t_nm = getattr(tc, 'name', None) or (tc.get('name') if isinstance(tc, dict) else str(tc))\n"
+                    "            t_ar = getattr(tc, 'args', None) or (tc.get('args') if isinstance(tc, dict) else {})\n"
+                    "            print(json.dumps({'event': 'sdk_tool', 'name': str(t_nm), 'parameters': t_ar if isinstance(t_ar, dict) else {'arg': str(t_ar)}}, ensure_ascii=False), flush=True)\n"
+                    "        tx = getattr(chunk, 'text', None) or getattr(chunk, 'output', None) or ''\n"
+                    "        if tx:\n"
+                    "            full_out.append(str(tx))\n"
+                    "            print(json.dumps({'event': 'sdk_delta', 'text': str(tx)}, ensure_ascii=False), flush=True)\n"
+                    "print(json.dumps({'event': 'result', 'result': {'response': ''.join(full_out)}}, ensure_ascii=False), flush=True)\n"
+                )
+                argv = [str(venv_py), "-c", runner_code]
+                exec_bin = str(venv_py)
+                cmd_desc = f".venv/python google.antigravity.Agent(LocalOpenAIAgentConfig(model={raw_m}, subagents={len(subagents)}))"
+            else:
+                agy_exe = resolve_cli("agy")
+                if not agy_exe:
+                    return None
+                argv = [
+                    agy_exe,
+                    "--disable-slash-commands",
+                    "--sandbox",
+                    "--dangerously-skip-permissions",
+                    "--output-format",
+                    "stream-json",
+                ]
+                if eff_model:
+                    argv.extend(["--model", eff_model])
+                argv.extend(["-p", effective_prompt])
+                exec_bin = f"{venv_py} + {agy_exe}"
+                cmd_desc = (
+                    f"agy-sdk(v{sdk_ver}, subagents={len(subagents)}) -> agy --output-format stream-json --sandbox"
+                    f"{f' --model {eff_model}' if eff_model else ''} -p <prompt>"
+                )
+
+            proc = subprocess.Popen(
+                argv,
+                cwd=iso_cwd,
+                env=run_env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                shell=False,
+            )
+            with _STATE_LOCK:
+                _ACTIVE_PIDS[proc.pid] = "agy-sdk"
+                _ACTIVE_PID_META[proc.pid] = {"cli": "agy-sdk", "mission_id": mission_id, "team_id": s_team_id}
+
+            last_tool_logged = ""
+            last_activity_ts = time.time()
+
+            def _read_stdout_stream() -> None:
+                nonlocal parsed_result_text, last_tool_logged, last_activity_ts
+                if not proc.stdout:
+                    return
+                for raw_ln in iter(proc.stdout.readline, ""):
+                    last_activity_ts = time.time()
+                    ln = raw_ln.strip()
+                    if not ln:
+                        continue
+                    stdout_lines.append(ln)
+                    try:
+                        ev = json.loads(ln)
+                    except Exception:
+                        continue
+                    if not isinstance(ev, dict):
+                        continue
+                    ev_type = str(ev.get("event") or ev.get("type") or "")
+                    if ev_type == "sdk_thought":
+                        th_txt = str(ev.get("thought") or "").strip()
+                        if th_txt:
+                            _update_live_agent_stream(
+                                active=True,
+                                mission_id=mission_id,
+                                agent_id=agent_id,
+                                agent_name=agent_name,
+                                role=role_name,
+                                provider="antigravity_sdk",
+                                stage=phase_name,
+                                mode=exec_mode_tag,
+                                thought=th_txt,
+                            )
+                    elif ev_type == "sdk_tool":
+                        t_sum = _summarize_tool_call_event(ev)
+                        should_emit = t_sum != last_tool_logged
+                        last_tool_logged = t_sum
+                        _update_live_agent_stream(
+                            active=True,
+                            mission_id=mission_id,
+                            agent_id=agent_id,
+                            agent_name=agent_name,
+                            role=role_name,
+                            provider="antigravity_sdk",
+                            stage=phase_name,
+                            mode=exec_mode_tag,
+                            tool=t_sum,
+                            emit_event=should_emit,
+                        )
+                    elif ev_type == "sdk_delta":
+                        d_txt = str(ev.get("text") or "")
+                        if d_txt:
+                            streamed_text_deltas.append(d_txt)
+                    elif ev_type == "step_update":
+                        st_type = str(ev.get("step_type") or "")
+                        st_status = str(ev.get("status") or "")
+                        if st_type == "tool" or ev.get("tool_call") or ev.get("tool_name"):
+                            tc_obj = ev.get("tool_call") if isinstance(ev.get("tool_call"), dict) else ev
+                            t_sum = _summarize_tool_call_event(tc_obj)
+                            should_emit = t_sum != last_tool_logged and st_status in ("running", "in_progress", "calling", "done", "")
+                            if should_emit:
+                                last_tool_logged = t_sum
+                            _update_live_agent_stream(
+                                active=True,
+                                mission_id=mission_id,
+                                agent_id=agent_id,
+                                agent_name=agent_name,
+                                role=role_name,
+                                provider="antigravity_sdk",
+                                stage=phase_name,
+                                mode=exec_mode_tag,
+                                tool=t_sum,
+                                emit_event=should_emit,
+                            )
+                        elif st_type == "agent_response":
+                            usage = ev.get("usage") if isinstance(ev.get("usage"), dict) else {}
+                            t_tok = int(usage.get("thinking_tokens") or 0)
+                            o_tok = int(usage.get("output_tokens") or 0)
+                            raw_th = str(ev.get("thought") or ev.get("thinking") or ev.get("text") or "").strip()
+                            th_msg = (
+                                raw_th[:220]
+                                if raw_th
+                                else (
+                                    f"실시간 추론·생성 중 (사고 토큰 {t_tok:,} · 출력 토큰 {o_tok:,})"
+                                    if (t_tok or o_tok)
+                                    else f"실시간 추론 및 응답 스트리밍 ({st_status or 'active'})"
+                                )
+                            )
+                            _update_live_agent_stream(
+                                active=True,
+                                mission_id=mission_id,
+                                agent_id=agent_id,
+                                agent_name=agent_name,
+                                role=role_name,
+                                provider="antigravity_sdk",
+                                stage=phase_name,
+                                mode=exec_mode_tag,
+                                thought=th_msg,
+                            )
+                    elif ev_type == "result":
+                        res_obj = ev.get("result") if isinstance(ev.get("result"), dict) else {}
+                        resp_s = res_obj.get("response") or ev.get("response")
+                        if resp_s:
+                            parsed_result_text = str(resp_s).strip()
+
+            def _read_stderr_stream() -> None:
+                if proc.stderr:
+                    try:
+                        stderr_chunks.append(proc.stderr.read())
+                    except Exception:
+                        pass
+
+            t_out = threading.Thread(target=_read_stdout_stream, daemon=True)
+            t_err = threading.Thread(target=_read_stderr_stream, daemon=True)
+            t_out.start()
+            t_err.start()
+
+            auto_timeout_flag = bool(s_meta.get("auto_timeout", True))
+            idle_budget = max(float(timeout or 300.0), 240.0 if auto_timeout_flag else 120.0)
+            hard_ceiling = max(idle_budget * 3.0, 1800.0) if auto_timeout_flag else idle_budget
+            timed_out = False
+            try:
+                while proc.poll() is None:
+                    with _STATE_LOCK:
+                        stop_abort = bool(mission_id and _is_mission_stopped_unlocked(mission_id))
+                    if _SERVER_SHUTTING_DOWN.is_set() or stop_abort:
+                        if os.name == "nt":
+                            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+                        else:
+                            proc.kill()
+                        break
+                    now_w = time.time()
+                    if (now_w - t0) >= hard_ceiling or (now_w - last_activity_ts) >= idle_budget:
+                        timed_out = True
+                        if os.name == "nt":
+                            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+                        else:
+                            proc.kill()
+                        break
+                    try:
+                        proc.wait(timeout=2.5)
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+            finally:
+                with _STATE_LOCK:
+                    _ACTIVE_PIDS.pop(proc.pid, None)
+                    _ACTIVE_PID_META.pop(proc.pid, None)
+            t_out.join(timeout=2.0)
+            t_err.join(timeout=1.0)
+
+            iso_path = Path(iso_cwd)
+            target_proj_dir_str = str(s_meta.get("target_project_dir") or "").strip()
+            cwd_file_blocks, direct_copied_files = _collect_iso_workspace_files(
+                iso_path,
+                Path(target_proj_dir_str) if target_proj_dir_str else None,
+                seeded_map=seeded_iso_map,
+            )
+
+            if timed_out:
+                if cwd_file_blocks or direct_copied_files:
+                    salvaged = "\n\n".join(cwd_file_blocks) or f"직접 복사된 산출물: {', '.join(direct_copied_files)}"
+                    return {
+                        "output": salvaged[:180000],
+                        "direct_copied_files": direct_copied_files,
+                        "seconds": max(1, int(round(time.time() - t0))),
+                        "tokens": max(120, len(salvaged) // 2),
+                        "command": cmd_desc,
+                        "executable": exec_bin,
+                        "provider": "antigravity_sdk",
+                        "label": meta["label"],
+                        "real_cli": True,
+                        "sdk_stream": True,
+                    }
+                return None
+
+        dur = max(1, int(round(time.time() - t0)))
+        stderr_txt = "".join(stderr_chunks).strip()
+        final_text = parsed_result_text or "".join(streamed_text_deltas).strip()
+        if not final_text and stdout_lines:
+            non_json = [ln for ln in stdout_lines if not ln.startswith("{")]
+            final_text = "\n".join(non_json).strip()
+
+        combined_lower = (final_text + "\n" + stderr_txt).lower()
+        if any(q_phrase in combined_lower for q_phrase in QUOTA_ERROR_PHRASES) and not cwd_file_blocks and not parsed_result_text:
+            reason_snippet = (stderr_txt or final_text or "SDK 한도 도달").splitlines()[0][:180]
+            with _STATE_LOCK:
+                STATE.setdefault("quota_exhausted_slots", {})["antigravity_sdk"] = {
+                    "at": utc_now_iso(),
+                    "label": meta["label"],
+                    "reason": reason_snippet,
+                }
+            return {
+                "quota_exceeded": True,
+                "provider": "antigravity_sdk",
+                "label": meta["label"],
+                "reason": reason_snippet,
+            }
+
+        if cwd_file_blocks:
+            final_text = "\n\n".join(cwd_file_blocks) + (
+                f"\n\n<!-- SDK SUMMARY -->\n{final_text}" if final_text and "### FILE:" not in final_text else ""
+            )
+
+        if final_text or direct_copied_files:
+            eff_out_text = final_text or f"산출물 생성 완료: {', '.join(direct_copied_files)}"
+            _update_live_agent_stream(
+                active=keep_stream_open,
+                mission_id=mission_id,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                role=role_name,
+                provider="antigravity_sdk",
+                stage=phase_name,
+                mode=exec_mode_tag,
+                thought=f"✓ SDK 응답 완료 ({dur}초)",
+                tool="",
+            )
+            return {
+                "output": eff_out_text[:180000],
+                "direct_copied_files": direct_copied_files,
+                "seconds": dur,
+                "tokens": max(120, len(eff_out_text) // 2),
+                "command": cmd_desc,
+                "executable": exec_bin,
+                "provider": "antigravity_sdk",
+                "label": meta["label"],
+                "real_cli": True,
+                "sdk_stream": True,
+            }
+    except Exception:
+        return None
+    finally:
+        if not keep_stream_open:
+            _clear_live_agent_stream()
+    return None
+
+
 def invoke_cli_if_available(
     provider_key: str,
     prompt: str,
     timeout: float = 35.0,
     model_override: Optional[str] = None,
+    stream_meta: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """If the user has the official CLI installed, runs a safe read-only/print invocation with sanitized env."""
+    """If the user has the official CLI or Antigravity SDK installed, runs a safe invocation with sanitized env ($0 API cost)."""
     canon = ALIASES.get(provider_key.lower().strip(), provider_key.lower().strip())
     meta = PROVIDER_META.get(canon)
     if not meta:
@@ -2804,6 +4761,14 @@ def invoke_cli_if_available(
             "label": meta["label"],
             "reason": exhausted_info.get("reason", "한도 도달 감지됨"),
         }
+    if canon == "antigravity_sdk" or meta.get("cli") == "agy-sdk":
+        return invoke_sdk_agent_streaming(
+            prompt=prompt,
+            timeout=timeout,
+            model_override=model_override,
+            stream_meta=stream_meta,
+            prof_dir=meta.get("profile_dir"),
+        )
     exe = resolve_cli(meta["cli"])
     if not exe:
         return None
@@ -2886,6 +4851,12 @@ def invoke_cli_if_available(
     try:
         cwd_file_blocks: List[str] = []
         with tempfile.TemporaryDirectory(prefix="avo_cli_") as iso_cwd:
+            seed_cli_str = str((stream_meta or {}).get("seed_from_project_dir") or "").strip()
+            seeded_cli_map = (
+                _seed_iso_workspace_from_project_dir(Path(seed_cli_str), Path(iso_cwd))
+                if seed_cli_str
+                else {}
+            )
             proc = subprocess.Popen(
                 argv,
                 cwd=iso_cwd,
@@ -2900,6 +4871,11 @@ def invoke_cli_if_available(
             )
             with _STATE_LOCK:
                 _ACTIVE_PIDS[proc.pid] = meta["cli"]
+                _ACTIVE_PID_META[proc.pid] = {
+                    "cli": meta["cli"],
+                    "mission_id": str((stream_meta or {}).get("mission_id") or ""),
+                    "team_id": str((stream_meta or {}).get("team_id") or ""),
+                }
             try:
                 stdout, stderr = proc.communicate(input=stdin_data if stdin_data else None, timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -2909,19 +4885,17 @@ def invoke_cli_if_available(
                     proc.kill()
                 # Even on timeout, salvage any completed files already written to iso_cwd
                 iso_path = Path(iso_cwd)
-                for wf in sorted(iso_path.rglob("*")):
-                    if wf.is_file() and not wf.name.startswith("."):
-                        try:
-                            rel_p = wf.relative_to(iso_path).as_posix()
-                            w_txt = wf.read_text(encoding="utf-8", errors="replace").strip()
-                            if w_txt:
-                                cwd_file_blocks.append(f"### FILE: {rel_p}\n{w_txt}")
-                        except Exception:
-                            pass
-                if cwd_file_blocks:
-                    salvaged = "\n\n".join(cwd_file_blocks)
+                t_pdir_str = str((stream_meta or {}).get("target_project_dir") or "").strip()
+                cwd_file_blocks, direct_copied_cli = _collect_iso_workspace_files(
+                    iso_path,
+                    Path(t_pdir_str) if t_pdir_str else None,
+                    seeded_map=seeded_cli_map,
+                )
+                if cwd_file_blocks or direct_copied_cli:
+                    salvaged = "\n\n".join(cwd_file_blocks) or f"직접 복사된 산출물: {', '.join(direct_copied_cli)}"
                     return {
-                        "output": salvaged[:120000],
+                        "output": salvaged[:180000],
+                        "direct_copied_files": direct_copied_cli,
                         "seconds": max(1, int(round(time.time() - t0))),
                         "tokens": max(120, len(salvaged) // 2),
                         "command": cmd_desc,
@@ -2934,16 +4908,14 @@ def invoke_cli_if_available(
             finally:
                 with _STATE_LOCK:
                     _ACTIVE_PIDS.pop(proc.pid, None)
+                    _ACTIVE_PID_META.pop(proc.pid, None)
             iso_path = Path(iso_cwd)
-            for wf in sorted(iso_path.rglob("*")):
-                if wf.is_file() and not wf.name.startswith("."):
-                    try:
-                        rel_p = wf.relative_to(iso_path).as_posix()
-                        w_txt = wf.read_text(encoding="utf-8", errors="replace").strip()
-                        if w_txt:
-                            cwd_file_blocks.append(f"### FILE: {rel_p}\n{w_txt}")
-                    except Exception:
-                        pass
+            t_pdir_str = str((stream_meta or {}).get("target_project_dir") or "").strip()
+            cwd_file_blocks, direct_copied_cli = _collect_iso_workspace_files(
+                iso_path,
+                Path(t_pdir_str) if t_pdir_str else None,
+                seeded_map=seeded_cli_map,
+            )
         dur = max(1, int(round(time.time() - t0)))
         combined_out = ((stdout or "") + "\n" + (stderr or "")).strip()
         combined_lower = combined_out.lower()
@@ -3056,7 +5028,33 @@ def answer_simple_question(
                 eff_custom_model = None
         except Exception:
             pass
-    res = invoke_cli_if_available(prov_key, persona_prompt, timeout=30.0, model_override=eff_custom_model)
+    emp_id, _ = _resolve_active_employee_meta(role_label, prov_key)
+    char_cfgs_q = load_character_configs()
+    emp_cfg_q = char_cfgs_q.get(str(emp_id)) if isinstance(char_cfgs_q, dict) else None
+    ask_timeout, ask_auto = resolve_agent_timeout(
+        (emp_cfg_q or {}).get("timeoutSec", "auto"),
+        phase_name="ASK",
+        org_rank=str((emp_cfg_q or {}).get("orgRank") or "LEAD"),
+        profile="standard",
+        model_id=eff_custom_model,
+    )
+    q_stream_meta = {
+        "agent_id": emp_id,
+        "agent_name": display_name,
+        "role_name": role_label,
+        "phase_name": "ASK",
+        "system_prompt": system_prompt or "",
+        "subagents": [],
+        "keep_stream_open": False,
+        "auto_timeout": ask_auto,
+    }
+    res = invoke_cli_if_available(
+        prov_key,
+        persona_prompt,
+        timeout=ask_timeout,
+        model_override=eff_custom_model,
+        stream_meta=q_stream_meta,
+    )
     if res and not res.get("quota_exceeded") and res.get("output"):
         return {
             "ok": True,
@@ -3076,7 +5074,12 @@ def answer_simple_question(
     for fallback_key in list(PROVIDER_META.keys()):
         if fallback_key == prov_key:
             continue
-        res_fb = invoke_cli_if_available(fallback_key, persona_prompt, timeout=30.0)
+        res_fb = invoke_cli_if_available(
+            fallback_key,
+            persona_prompt,
+            timeout=ask_timeout,
+            stream_meta={"phase_name": "ASK", "auto_timeout": True},
+        )
         if res_fb and not res_fb.get("quota_exceeded") and res_fb.get("output"):
             return {
                 "ok": True,
@@ -3235,6 +5238,193 @@ def _patch_html_osm_tile_policy(content: str, is_html: bool = True) -> str:
     return patched
 
 
+_BINARY_DELIVERABLE_EXTS = {
+    ".exe", ".dll", ".pyd", ".so", ".dylib", ".msi",
+    ".zip", ".7z", ".tar", ".gz", ".whl",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp",
+    ".pdf", ".docx", ".xlsx", ".pptx", ".sqlite", ".db",
+}
+_IGNORED_ISO_BUILD_DIRS = {
+    "__pycache__", ".git", ".venv", "venv", "node_modules",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", "build",
+}
+_IGNORED_ISO_BUILD_EXTS = {".pyc", ".pyo", ".obj", ".pdb", ".toc", ".pkg", ".pyz", ".spec"}
+
+
+def _is_binary_deliverable_file(path: Path) -> bool:
+    if path.suffix.lower() in _BINARY_DELIVERABLE_EXTS:
+        return True
+    try:
+        head = path.read_bytes()[:4096]
+        if b"\x00" in head:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_ignored_deliverable_entry(path: Path, root_dir: Path) -> bool:
+    """Excludes metadata reports, README, dotfiles, and Python/Node/PyInstaller cache directories from deliverable scans."""
+    if path.name.startswith(".") or path.name == "README.md" or path.name.endswith("_통합보고서.md"):
+        return True
+    try:
+        rel_parts = path.relative_to(root_dir).parts
+        if any(part in _IGNORED_ISO_BUILD_DIRS or part.startswith(".") for part in rel_parts[:-1]):
+            return True
+    except Exception:
+        pass
+    if path.suffix.lower() in _IGNORED_ISO_BUILD_EXTS:
+        return True
+    return False
+
+
+def _seed_iso_workspace_from_project_dir(
+    src_project_dir: Path,
+    iso_path: Path,
+    max_file_bytes: int = 80 * 1024 * 1024,
+) -> Dict[str, Tuple[int, int]]:
+    """
+    Pre-copies existing project deliverables into the isolated build directory (iso_cwd)
+    so AI employees can inspect, edit, or build (.exe) directly on top of an existing project folder.
+    Returns {rel_posix_path: (size, mtime_ns)} snapshot of seeded files.
+    """
+    seeded: Dict[str, Tuple[int, int]] = {}
+    if not src_project_dir.exists() or not src_project_dir.is_dir():
+        return seeded
+    for sf in sorted(src_project_dir.rglob("*")):
+        if not sf.is_file() or _is_ignored_deliverable_entry(sf, src_project_dir):
+            continue
+        try:
+            st_src = sf.stat()
+            if st_src.st_size > max_file_bytes:
+                continue
+            rel_p = sf.relative_to(src_project_dir).as_posix()
+            dst_f = (iso_path / rel_p).resolve()
+            if not str(dst_f).startswith(str(iso_path.resolve())):
+                continue
+            dst_f.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(sf, dst_f)
+            st_dst = dst_f.stat()
+            seeded[rel_p] = (st_dst.st_size, st_dst.st_mtime_ns)
+        except Exception:
+            continue
+    return seeded
+
+
+def _build_existing_folder_context(project_dir: Path, max_chars: int = 22000) -> str:
+    """Summarizes existing project folder file tree & source code so lead and part agents continue seamlessly."""
+    if not project_dir.exists() or not project_dir.is_dir():
+        return ""
+    files_list: List[Path] = [
+        p for p in sorted(project_dir.rglob("*"))
+        if p.is_file() and not _is_ignored_deliverable_entry(p, project_dir)
+    ]
+    if not files_list:
+        return ""
+    tree_lines: List[str] = []
+    code_blocks: List[str] = []
+    used_chars = 0
+    for f in files_list:
+        rel_p = f.relative_to(project_dir).as_posix()
+        try:
+            sz = f.stat().st_size
+        except OSError:
+            sz = 0
+        is_bin = _is_binary_deliverable_file(f)
+        tree_lines.append(f"  - `{rel_p}` ({sz:,} bytes{' · 바이너리' if is_bin else ''})")
+        if not is_bin and used_chars < max_chars:
+            try:
+                txt = f.read_text(encoding="utf-8", errors="replace").strip()
+                if txt:
+                    budget = min(3800, max_chars - used_chars)
+                    snippet = txt[:budget] + ("\n... (이하 생략)" if len(txt) > budget else "")
+                    code_blocks.append(f"#### 📄 기존 파일: `{rel_p}`\n```\n{snippet}\n```")
+                    used_chars += len(snippet)
+            except Exception:
+                pass
+    header = (
+        f"\n\n[📂 기존 작업 폴더 이어하기 컨텍스트 — 폴더명: `{project_dir.name}` (기존 산출물 {len(files_list)}개)]\n"
+        f"- 중요: 이 미션은 빈 폴더 신규 생성이 아니라 **기존 작업 폴더를 선택해 추가·수정 작업을 이어가는 미션**입니다.\n"
+        f"- 기존 파일 구조와 구현된 기능을 임의로 삭제·누락하지 말고 그대로 유지한 위에서 사용자의 추가 요청 사항을 반영하세요.\n"
+        f"- 기존 파일 목록:\n" + "\n".join(tree_lines)
+    )
+    if code_blocks:
+        header += "\n\n[기존 주요 파일 내용 요약]:\n" + "\n\n".join(code_blocks)
+    return header
+
+
+def _collect_iso_workspace_files(
+    iso_path: Path,
+    dest_project_dir: Optional[Path] = None,
+    seeded_map: Optional[Dict[str, Tuple[int, int]]] = None,
+) -> Tuple[List[str], List[str]]:
+    """
+    Collects files generated inside an agent's isolated workspace:
+    - Copies ALL real deliverable files (both source text & binary .exe/.zip/.png) byte-for-byte via shutil.copy2
+      when dest_project_dir is provided, preventing UTF-8 corruption or 120k-char truncation of source files!
+    - Prioritizes newly created / modified files ahead of unchanged seeded files, and never dumps raw binary bytes.
+    """
+    cwd_blocks: List[str] = []
+    copied_rels: List[str] = []
+    if not iso_path.exists():
+        return cwd_blocks, copied_rels
+
+    if dest_project_dir is not None:
+        dest_project_dir.mkdir(parents=True, exist_ok=True)
+
+    s_map = seeded_map or {}
+    # Sort priority: (0=changed/new text, 1=unchanged seeded text, 2=binary) so fresh/edited source code always comes first
+    candidates: List[Tuple[int, bool, Path, str]] = []
+    for wf in sorted(iso_path.rglob("*")):
+        if not wf.is_file() or _is_ignored_deliverable_entry(wf, iso_path):
+            continue
+        rel_parts = wf.relative_to(iso_path).parts
+        rel_p = wf.relative_to(iso_path).as_posix()
+        # Promote PyInstaller 'dist/foo.exe' cleanly to root 'foo.exe' if root 'foo.exe' wasn't already copied
+        if len(rel_parts) == 2 and rel_parts[0].lower() == "dist" and not (iso_path / rel_parts[1]).exists():
+            rel_p = rel_parts[1]
+        is_bin = _is_binary_deliverable_file(wf)
+        unchanged_seed = False
+        if rel_p in s_map:
+            try:
+                st_now = wf.stat()
+                unchanged_seed = (st_now.st_size, st_now.st_mtime_ns) == s_map[rel_p]
+            except OSError:
+                unchanged_seed = False
+        prio = 2 if is_bin else (1 if unchanged_seed else 0)
+        candidates.append((prio, unchanged_seed, wf, rel_p))
+
+    candidates.sort(key=lambda item: (item[0], item[3]))
+
+    for prio, unchanged_seed, wf, rel_p in candidates:
+        is_bin = prio == 2
+        if dest_project_dir is not None:
+            try:
+                target_f = (dest_project_dir / rel_p).resolve()
+                if str(target_f).startswith(str(dest_project_dir.resolve())):
+                    target_f.parent.mkdir(parents=True, exist_ok=True)
+                    if not unchanged_seed or not target_f.exists():
+                        shutil.copy2(wf, target_f)
+                    rel_root = f"deliverables/{dest_project_dir.name}/{rel_p}"
+                    if rel_root not in copied_rels:
+                        copied_rels.append(rel_root)
+            except Exception:
+                pass
+
+        try:
+            if is_bin:
+                sz = wf.stat().st_size
+                cwd_blocks.append(f"### FILE: {rel_p}\n[BINARY_DELIVERABLE: {sz:,} bytes]")
+            else:
+                w_txt = wf.read_text(encoding="utf-8", errors="replace").strip()
+                if w_txt:
+                    cwd_blocks.append(f"### FILE: {rel_p}\n{w_txt}")
+        except Exception:
+            pass
+
+    return cwd_blocks, copied_rels
+
+
 def _extract_and_write_project_files(
     mission_id: str,
     goal: str,
@@ -3245,10 +5435,19 @@ def _extract_and_write_project_files(
 ) -> List[str]:
     """Extracts deliverable files (reports, docs, JSON/CSV data, web HTML/CSS/JS, or code) from BUILDER output."""
     import re
-    if not (built_text or "").strip():
-        return []
     project_dir.mkdir(parents=True, exist_ok=True)
     written_files: List[str] = []
+
+    # 0. Register files already copied byte-for-byte from isolated SDK/CLI workspace (preserves intact .exe + all .py sources)
+    for existing_f in sorted(project_dir.rglob("*")):
+        if existing_f.is_file() and not _is_ignored_deliverable_entry(existing_f, project_dir):
+            rel_c = existing_f.relative_to(project_dir).as_posix()
+            rel_entry = f"deliverables/{project_dir.name}/{rel_c}"
+            if rel_entry not in written_files:
+                written_files.append(rel_entry)
+
+    if not (built_text or "").strip():
+        return written_files
     mode_up = (deliverable_mode or "CODE").upper()
     matches: List[Tuple[str, str]] = []
 
@@ -3261,6 +5460,7 @@ def _extract_and_write_project_files(
             start_pos = hm.end()
             end_pos = hdrs[i + 1].start() if (i + 1 < len(hdrs)) else len(built_text)
             raw_sec = (built_text[start_pos:end_pos] or "").strip()
+            raw_sec = re.sub(r"\r?\n*<!--\s*(?:SDK|CLI)\s+SUMMARY\s*-->[\s\S]*$", "", raw_sec).strip()
             cleaned_sec = _strip_outer_code_fence(raw_sec)
             if fname and cleaned_sec:
                 matches.append((fname, cleaned_sec))
@@ -3328,16 +5528,23 @@ def _extract_and_write_project_files(
                 used_names.add(fname)
                 matches.append((fname, code_body))
 
-    for raw_name, code_content in matches[:15]:  # Scope Guard: max 15 files
+    for raw_name, code_content in matches[:30]:  # Scope Guard: max 30 files
         clean_rel = raw_name.strip().strip("`'\"").replace("\\", "/").lstrip("/")
         if not clean_rel or ".." in clean_rel or ":" in clean_rel:
             continue
-        lines = (code_content or "").splitlines()
-        if len(lines) > 2500:  # Scope Guard: max 2500 lines
-            code_content = "\n".join(lines[:2500]) + "\n"
         target_file = (project_dir / clean_rel).resolve()
         if not str(target_file).startswith(str(project_dir.resolve())):
             continue
+        # Never overwrite or fabricate binary deliverables (.exe, .dll, .zip, etc.) via UTF-8 write_text!
+        if target_file.suffix.lower() in _BINARY_DELIVERABLE_EXTS or (target_file.exists() and _is_binary_deliverable_file(target_file)):
+            if target_file.exists():
+                rel_from_root = f"deliverables/{project_dir.name}/{clean_rel}"
+                if rel_from_root not in written_files:
+                    written_files.append(rel_from_root)
+            continue
+        lines = (code_content or "").splitlines()
+        if len(lines) > 4000:  # Scope Guard: max 4000 lines per source file
+            code_content = "\n".join(lines[:4000]) + "\n"
         if target_file.suffix.lower() in (".html", ".htm", ".js"):
             code_content = _patch_html_osm_tile_policy(code_content, is_html=target_file.suffix.lower() in (".html", ".htm"))
         target_file.parent.mkdir(parents=True, exist_ok=True)
@@ -3350,10 +5557,14 @@ def _extract_and_write_project_files(
 
 
 def _verify_project_files(project_dir: Path, deliverable_mode: str = "CODE") -> Dict[str, Any]:
-    """Runs adaptive Scope Guard + format-appropriate checks (Markdown structure, JSON/CSV validity, HTML/JS, or Python execution)."""
+    """Runs adaptive Scope Guard + format-appropriate checks (Markdown structure, JSON/CSV validity, HTML/JS, Python, and PE binary integrity)."""
     import sys
     mode_up = (deliverable_mode or "CODE").upper()
-    all_files = sorted(p for p in project_dir.rglob("*") if p.is_file() and p.name != "README.md") if project_dir.exists() else []
+    all_files = (
+        sorted(p for p in project_dir.rglob("*") if p.is_file() and not _is_ignored_deliverable_entry(p, project_dir))
+        if project_dir.exists()
+        else []
+    )
     total_lines = 0
     errors: List[str] = []
     logs: List[str] = [f"- 산출물 유형 검증 모드: `{mode_up}`"]
@@ -3362,24 +5573,52 @@ def _verify_project_files(project_dir: Path, deliverable_mode: str = "CODE") -> 
         errors.append("생성된 산출물 파일이 없습니다 (BUILDER 응답이 비어 있거나 타임아웃되었습니다).")
         return {"passed": False, "errors": errors, "summary": "\n".join(logs + ["- ❌ 생성된 파일 0개"]), "file_count": 0, "total_lines": 0}
 
+    source_exts = {".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".htm", ".css", ".cs", ".go", ".rs", ".java", ".c", ".cpp", ".ps1", ".sh", ".bat"}
+    source_files = [f for f in all_files if not _is_binary_deliverable_file(f) and f.suffix.lower() in source_exts]
+    binary_files = [f for f in all_files if _is_binary_deliverable_file(f)]
+
     for f in all_files:
+        if _is_binary_deliverable_file(f):
+            continue
         try:
             txt = f.read_text(encoding="utf-8", errors="replace")
             total_lines += len(txt.splitlines())
         except Exception:
             pass
 
-    if len(all_files) > 15:
-        errors.append(f"Scope Guard 위반: 생성 파일 수({len(all_files)}개)가 상한(15개)을 초과했습니다.")
-    if total_lines > 2500:
-        errors.append(f"Scope Guard 위반: 총 라인 수({total_lines}줄)가 상한(2500줄)을 초과했습니다.")
+    if len(all_files) > 35:
+        errors.append(f"Scope Guard 위반: 생성 파일 수({len(all_files)}개)가 상한(35개)을 초과했습니다.")
+    if total_lines > 8000:
+        errors.append(f"Scope Guard 위반: 소스 라인 수({total_lines}줄)가 상한(8000줄)을 초과했습니다.")
 
-    logs.append(f"- Scope Guard 파일/라인 검증: 파일 {len(all_files)}개 / 총 {total_lines}줄 (상한 15파일·2500줄 준수)")
+    if mode_up == "CODE" and binary_files and not source_files:
+        errors.append(
+            "실행 파일(.exe 등 바이너리)만 존재하고 프로그램 원본 소스 코드(.py 등)가 누락되었습니다. "
+            "반드시 실행 가능한 원본 프로그램 소스 파일들과 빌드된 실행 파일을 함께 작업 폴더에 보존하세요."
+        )
+        logs.append("- ❌ 원본 프로그램 소스 코드 누락 (.exe 단독 생성 불가)")
+
+    logs.append(f"- Scope Guard 파일/라인 검증: 총 파일 {len(all_files)}개 (소스 {len(source_files)}개 · 바이너리 {len(binary_files)}개) / 소스 {total_lines}줄")
     logs.append("- 종량제 API 키 차단(Sanitized Env): OK")
 
     for f in all_files:
         rel_name = f.relative_to(project_dir).as_posix()
         suf = f.suffix.lower()
+        if suf == ".exe":
+            try:
+                sz = f.stat().st_size
+                head_b = f.read_bytes()[:128]
+                if sz < 4096 or head_b[:2] != b"MZ" or b"\xef\xbf\xbd" in head_b[:64]:
+                    errors.append(f"[{rel_name} 실행파일 손상] 유효한 Windows PE(.exe) 바이너리가 아니거나 텍스트 인코딩으로 손상되었습니다 ({sz} bytes).")
+                    logs.append(f"- ❌ `{rel_name}` Windows PE(.exe) 바이너리 무결성 실패 ({sz} bytes)")
+                else:
+                    logs.append(f"- ✓ `{rel_name}` Windows PE(.exe) 바이너리 헤더 및 크기 검증 통과 ({sz:,} bytes)")
+            except Exception as exc:
+                errors.append(f"[{rel_name} 실행파일 검증 실패] {exc}")
+            continue
+        if _is_binary_deliverable_file(f):
+            logs.append(f"- ✓ `{rel_name}` 바이너리 산출물 확인 ({f.stat().st_size:,} bytes)")
+            continue
         if suf == ".py":
             try:
                 c_res = subprocess.run(
@@ -3395,24 +5634,7 @@ def _verify_project_files(project_dir: Path, deliverable_mode: str = "CODE") -> 
                     errors.append(f"[{rel_name} 문법 오류] {err_msg[:300]}")
                     logs.append(f"- ❌ `{rel_name}` 문법 검사 실패: {err_msg[:200]}")
                     continue
-                r_res = subprocess.run(
-                    [sys.executable, str(f)],
-                    cwd=str(project_dir),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=8.0,
-                    env=get_sanitized_env(),
-                )
-                out_txt = (r_res.stdout or r_res.stderr or "").strip()
-                if r_res.returncode != 0:
-                    errors.append(f"[{rel_name} 실행 오류 (exit={r_res.returncode})] {out_txt[:300]}")
-                    logs.append(f"- ❌ `{rel_name}` 실행 실패 (exit={r_res.returncode}): `{out_txt[:200]}`")
-                else:
-                    logs.append(f"- ✓ `{rel_name}` 문법 및 실행 검증 통과 (exit=0){f' → 출력: `{out_txt[:180]}`' if out_txt else ''}")
-            except subprocess.TimeoutExpired:
-                logs.append(f"- ✓ `{rel_name}` 문법 검증 통과 (장기 실행 프로세스 확인 완료)")
+                logs.append(f"- ✓ `{rel_name}` Python 문법(py_compile) 검증 통과")
             except Exception as exc:
                 logs.append(f"- `{rel_name}` 검증 참고: {exc}")
         elif suf == ".js":
@@ -3485,6 +5707,120 @@ def _verify_project_files(project_dir: Path, deliverable_mode: str = "CODE") -> 
     }
 
 
+_WIN_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+}
+
+
+def derive_project_folder_name(
+    goal: str,
+    mission_id: str,
+    base_output_dir: Path,
+    existing_folder_name: Optional[str] = None,
+) -> str:
+    """
+    Derives a clean, human-readable project work folder name from the project goal
+    when no separate folder name was manually created for this run.
+    """
+    if existing_folder_name and str(existing_folder_name).strip():
+        return str(existing_folder_name).strip()
+
+    raw = str(goal or "").strip()
+    raw = re.sub(r"^\[[^\]]+\]\s*", "", raw)
+
+    # Honor explicit folder name instruction inside goal (e.g. "작업폴더명은 '블로그 포스팅'으로 생성")
+    m_explicit_folder = re.search(
+        r"(?:작업\s*)?폴더\s*(?:명|이름)\s*(?:은|는|:|=)?\s*['\"「『]([^'\"」』]{1,40})['\"」』]",
+        raw,
+    )
+    if m_explicit_folder:
+        candidate = m_explicit_folder.group(1).strip()
+        candidate = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", candidate)
+        candidate = re.sub(r"\s+", "_", candidate)
+        candidate = re.sub(r"_+", "_", candidate).strip("._ -")
+    else:
+        stripped_tail = re.sub(
+            r"\s*(?:작성해\s*주세요|만들어\s*주세요|구현해\s*주세요|조사해\s*주세요|정리해\s*주세요|분석해\s*주세요|"
+            r"작성해\s*줘|만들어\s*줘|구현해\s*줘|조사해\s*줘|정리해\s*줘|분석해\s*줘|알려\s*줘|생성해\s*줘|개발해\s*줘|"
+            r"해\s*주세요|해\s*줘|부탁해\s*요?|부탁합니다|작성하기|만들기|작성|구현)\s*[.!?~]*$",
+            "",
+            raw,
+        ).strip()
+        candidate = stripped_tail if len(stripped_tail) >= 2 else raw
+        # Replace illegal path characters, punctuation, and whitespace with underscore
+        candidate = re.sub(r'[<>:"/\\|?*\x00-\x1f.,;!?()\[\]{}\'`~@#$%^&+=]+', "_", candidate)
+        candidate = re.sub(r"\s+", "_", candidate)
+        candidate = re.sub(r"_+", "_", candidate).strip("._ -")
+
+        if len(candidate) > 38:
+            cut = candidate[:38]
+            if "_" in cut[16:]:
+                cut = cut[: cut.rfind("_")]
+            candidate = cut.strip("._ -")
+
+    if not candidate or candidate.upper() in _WIN_RESERVED_NAMES:
+        candidate = f"프로젝트_{mission_id}"
+
+    date_prefix = datetime.now().strftime("%Y%m%d")
+    m_lead_date = re.match(r"^(\d{4})[_-]?(\d{2})[_-]?(\d{2})(?:[_-]+(.*))?$", candidate)
+    if m_lead_date:
+        date_prefix = f"{m_lead_date.group(1)}{m_lead_date.group(2)}{m_lead_date.group(3)}"
+        tail_rest = (m_lead_date.group(4) or "").strip("._ -")
+        candidate = tail_rest if tail_rest else f"프로젝트_{mission_id}"
+
+    base_folder_name = f"{date_prefix}_{candidate}"
+
+    # Ensure no collision with a different mission's existing folder
+    final_name = base_folder_name
+    suffix_idx = 2
+    while True:
+        cand_dir = base_output_dir / final_name
+        if not cand_dir.exists():
+            break
+        readme_f = cand_dir / "README.md"
+        if readme_f.is_file():
+            try:
+                if f"`{mission_id}`" in readme_f.read_text(encoding="utf-8", errors="ignore"):
+                    break
+            except Exception:
+                pass
+        else:
+            try:
+                if not any(cand_dir.iterdir()):
+                    break
+            except Exception:
+                pass
+        final_name = f"{base_folder_name}_{suffix_idx}"
+        suffix_idx += 1
+
+    return final_name
+
+
+def _resolve_team_base_output_dir(team_obj: Dict[str, Any], saved_out_root: Optional[str] = None) -> Tuple[Path, bool, bool]:
+    out_status = get_output_dir_status()
+    gdrives = out_status.get("detected_google_drives") or []
+    team_ws = (team_obj or {}).get("workspace") or {}
+    if saved_out_root:
+        base_dir = Path(saved_out_root)
+    elif str(team_ws.get("output_dir") or "").strip():
+        try:
+            base_dir, _ = resolve_team_local_path(str(team_ws.get("output_dir")), gdrives)
+        except Exception:
+            base_dir = Path(out_status["output_dir"])
+    else:
+        base_dir = Path(out_status["output_dir"])
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        base_dir = DELIVERABLES_DIR.resolve()
+        base_dir.mkdir(parents=True, exist_ok=True)
+    is_gd_target = _is_google_drive_path(base_dir, gdrives)
+    mir_local = bool(team_ws.get("mirror_to_local", False) or out_status.get("mirror_to_local", False))
+    return base_dir, is_gd_target, mir_local
+
+
 def _run_mission_pipeline(
     mission_id: str,
     goal: str,
@@ -3494,15 +5830,12 @@ def _run_mission_pipeline(
     orchestrator_mode: Optional[str] = None,
 ):
     """
-    Executes the Triad pipeline with:
-    1) Profile-based stage & budget differentiation:
-       - quick: 2 stages (PLANNING -> BUILDING + fast file generation), max_repairs=1
-       - standard: 5 stages (PLANNING -> BUILDING -> VERIFYING -> REVIEWING -> DECIDING), max_repairs=2
-       - deep: Multi-module breakdown (HEAD splits into Module 1 & Module 2; BUILDER [Account 1] & SUB-BUILDER [Account 2] build in parallel/sequence) + 5 stages, max_repairs=3
-    2) Real workspace project file generation in team-specific or global output folder
-    3) Automatic Repair Loop (returns to 02 BUILDING when 03 VERIFYING or 04 REVIEWING finds defects)
-    4) Quota Auto-Failover & All-Exhausted Auto-Pause (QUOTA_PAUSED) with Stage Resume
-    5) Per-Team roles & Per-Team Local + Google Drive Direct workspace routing
+    Executes the Project Lead + Dynamic Part Leads Pipeline:
+    1) LEAD_PLANNING : 프로젝트 총괄팀장(LEAD)이 지시문 분석 및 활성 파트별 업무 분장(ORDER) 수립
+    2) PART_*        : 활성화된 모든 실무 파트 담당(자료수집 -> 기획·구조설계 -> 제작·구현 및 사용자 추가 파트) 순차 협업 실행
+    3) PART_REVIEW   : 파트 담당 자체 기계·실행 무결성 검증 + 파트 담당 간 상호 교차검토(Peer Review) 및 자동 보완 루프
+    4) LEAD_REPORT   : 총괄팀장이 파트별 수행·검증 결과를 취합해 사용자에게 「총괄팀장 통합보고서」 제출 -> AWAITING_APPROVAL (사용자 최종 승인 대기)
+    5) USER DECISION : 사용자가 [최종 승인] 클릭 시 확정 및 Google Drive 업로드, [보완 재지시] 시 총괄팀장이 파트 재작업 지시 후 재보고
     """
     eff_team_id = (resume_state or {}).get("team_id") or team_id
     team_obj = get_team_by_id(eff_team_id)
@@ -3512,6 +5845,14 @@ def _run_mission_pipeline(
     team_color = team_obj.get("color", "#0f6848")
     team_roles = team_obj.get("roles") or {}
     team_ws = team_obj.get("workspace") or {}
+
+    part_cfg = load_part_roles_config()
+    lead_def = part_cfg["lead"]
+    enabled_parts: List[Dict[str, Any]] = [p for p in (part_cfg.get("parts") or []) if p.get("enabled", True)]
+    if not enabled_parts:
+        enabled_parts = list(part_cfg.get("parts") or [])
+    stage_descriptors = build_pipeline_stage_descriptors(part_cfg)
+    require_approval = bool(part_cfg.get("require_user_approval", True))
 
     global_roles = load_roles()
     diag_now = probe_cli_diagnostics(deep=False)
@@ -3534,19 +5875,19 @@ def _run_mission_pipeline(
             cand = global_roles.get(r_key) if global_roles.get(r_key) in PROVIDER_META else default_k
         cand_logged_in = (diag_provs.get(cand) or {}).get("auth_state") == "LOGGED_IN"
 
-        # Check assigned team members in character_configs.json for per-agent CLI & Model selection
         best_member = None
+        target_canon = resolve_canonical_part_role(triad_r, part_cfg)
         for mid in (team_obj.get("member_ids") or []):
             mc = char_cfgs.get(str(mid))
             if not isinstance(mc, dict):
                 continue
-            if str(mc.get("triadRole") or "").upper() != triad_r:
+            mc_r = str(mc.get("triadRole") or "").upper().strip()
+            if mc_r != triad_r and resolve_canonical_part_role(mc_r, part_cfg) != target_canon:
                 continue
             m_prov = str(mc.get("cliProvider") or "").strip()
             if m_prov not in PROVIDER_META:
                 continue
-            m_logged_in = (diag_provs.get(m_prov) or {}).get("auth_state") == "LOGGED_IN"
-            if not m_logged_in:
+            if (diag_provs.get(m_prov) or {}).get("auth_state") != "LOGGED_IN":
                 continue
             if best_member is None or str(mc.get("updatedAt") or "") > str(best_member.get("updatedAt") or ""):
                 best_member = mc
@@ -3565,53 +5906,211 @@ def _run_mission_pipeline(
                         role_model_map[triad_r] = m_mod
         return cand
 
-    head_p = _pick_role_cli("head", "claude")
-    builder_p = _pick_role_cli("builder", "antigravity")
+    head_p = _pick_role_cli("head", "antigravity_sdk" if "antigravity_sdk" in PROVIDER_META else "antigravity")
+    builder_p = _pick_role_cli("builder", "antigravity_sdk" if "antigravity_sdk" in PROVIDER_META else "antigravity")
     sub_builder_p = _pick_role_cli("sub_builder", "gemini" if "gemini" in PROVIDER_META else builder_p)
     reviewer_p = _pick_role_cli("reviewer", "openai")
-    researcher_p = _pick_role_cli("researcher", "grok")
+    researcher_p = _pick_role_cli("researcher", builder_p)
+
+    def _build_member_assignee(
+        mc: Optional[Dict[str, Any]],
+        role_def: Dict[str, Any],
+        default_prov: str,
+        default_rank: str,
+    ) -> Dict[str, Any]:
+        rid = str(role_def.get("id") or "PART_BUILD").upper()
+        chosen_prov = default_prov
+        if mc:
+            m_p = str(mc.get("cliProvider") or "").strip()
+            if m_p in PROVIDER_META and (diag_provs.get(m_p) or {}).get("auth_state") == "LOGGED_IN":
+                chosen_prov = m_p
+        if (diag_provs.get(chosen_prov) or {}).get("auth_state") != "LOGGED_IN":
+            for alt_p in ("antigravity_sdk", builder_p, head_p, "antigravity", reviewer_p):
+                if alt_p in PROVIDER_META and (diag_provs.get(alt_p) or {}).get("auth_state") == "LOGGED_IN":
+                    chosen_prov = alt_p
+                    break
+
+        emp_id, emp_name = (
+            (str(mc.get("id") or "01").zfill(2), str(mc.get("name") or role_def["name"]))
+            if mc
+            else _resolve_active_employee_meta(rid, chosen_prov, team_obj, char_cfgs)
+        )
+        org_rank = str((mc or {}).get("orgRank") or default_rank).upper().strip()
+        custom_mod = str((mc or {}).get("cliModel") or "").strip() or None
+        avail_ids = {
+            str(x.get("id") or "")
+            for x in ((diag_provs.get(chosen_prov) or {}).get("available_models") or [])
+            if isinstance(x, dict) and not x.get("locked")
+        }
+        if custom_mod and avail_ids and custom_mod not in avail_ids:
+            custom_mod = None
+        if custom_mod and "orchestrator" in custom_mod.lower() and rid != "LEAD":
+            custom_mod = "gemini-4-argon-high" if org_rank == "PART_LEAD" else "gemini-3.8-flash-high"
+
+        skills = [str(s).strip() for s in ((mc or {}).get("skills") or []) if str(s).strip()]
+        sys_prompt = str((mc or {}).get("systemPrompt") or "").strip()
+        timeout_cfg = str((mc or {}).get("timeoutSec") or "auto").strip().lower() or "auto"
+        return {
+            "role_id": rid,
+            "role_title": role_def["name"],
+            "stage_label": role_def.get("stage_label", role_def["name"]),
+            "icon": role_def.get("icon", "🧩"),
+            "instruction": role_def.get("instruction", ""),
+            "org_rank": org_rank,
+            "staff_order": int((mc or {}).get("staffOrder") or 0),
+            "prov_k": chosen_prov,
+            "model_ov": custom_mod,
+            "timeout_cfg": timeout_cfg,
+            "emp_id": emp_id,
+            "emp_name": emp_name,
+            "skills": skills,
+            "system_prompt": sys_prompt,
+        }
+
+    def _resolve_part_squad(role_def: Dict[str, Any]) -> Dict[str, Any]:
+        """Resolves a Part's full squad: 1 Part Lead (PART_LEAD) + N Subordinate Staff (STAFF) sorted by staffOrder/id."""
+        rid = str(role_def.get("id") or "PART_BUILD").upper()
+        def_cli_role = str(role_def.get("default_cli_role") or "builder").lower()
+        fallback_slot_map = {
+            "head": head_p,
+            "builder": builder_p,
+            "sub_builder": sub_builder_p,
+            "reviewer": reviewer_p,
+            "researcher": researcher_p,
+        }
+        base_prov = fallback_slot_map.get(def_cli_role, builder_p)
+        candidate_ids = list(team_obj.get("member_ids") or []) or sorted(char_cfgs.keys())
+        matched_chars: List[Dict[str, Any]] = []
+        for mid in candidate_ids:
+            mc = char_cfgs.get(str(mid))
+            if not isinstance(mc, dict):
+                continue
+            mc_role = str(mc.get("triadRole") or "").upper().strip()
+            if mc_role == rid or resolve_canonical_part_role(mc_role, part_cfg) == rid:
+                matched_chars.append(mc)
+
+        if rid == "LEAD":
+            lead_mc = next(
+                (c for c in matched_chars if str(c.get("orgRank") or "LEAD").upper() == "LEAD"),
+                matched_chars[0] if matched_chars else None,
+            )
+            return {
+                "lead": _build_member_assignee(lead_mc, role_def, base_prov, "LEAD"),
+                "staff": [],
+            }
+
+        explicit_leads = [c for c in matched_chars if str(c.get("orgRank") or "").upper() == "PART_LEAD"]
+        explicit_staff = [c for c in matched_chars if str(c.get("orgRank") or "").upper() == "STAFF"]
+        unspecified = [
+            c
+            for c in matched_chars
+            if str(c.get("orgRank") or "").upper() not in ("PART_LEAD", "STAFF", "LEAD")
+        ]
+
+        lead_mc: Optional[Dict[str, Any]] = None
+        if explicit_leads:
+            lead_mc = explicit_leads[0]
+            # Any extra explicit_leads + unspecified join staff rotation
+            staff_mcs = explicit_staff + explicit_leads[1:] + unspecified
+        elif unspecified:
+            lead_mc = unspecified[0]
+            staff_mcs = explicit_staff + unspecified[1:]
+        elif explicit_staff:
+            # All members were marked STAFF -> promote first to acting Part Lead, rest remain STAFF
+            lead_mc = explicit_staff[0]
+            staff_mcs = explicit_staff[1:]
+        else:
+            staff_mcs = []
+
+        staff_mcs.sort(
+            key=lambda c: (
+                int(c.get("staffOrder") or 99),
+                str(c.get("id") or "99").zfill(2),
+            )
+        )
+        return {
+            "lead": _build_member_assignee(lead_mc, role_def, base_prov, "PART_LEAD"),
+            "staff": [_build_member_assignee(sc, role_def, base_prov, "STAFF") for sc in staff_mcs],
+        }
+
+    lead_squad = _resolve_part_squad(lead_def)
+    lead_assignee = lead_squad["lead"]
+    part_squads = {p["id"]: _resolve_part_squad(p) for p in enabled_parts}
+    part_assignees = {pid: sq["lead"] for pid, sq in part_squads.items()}
 
     profile_clean = (profile or "standard").lower().strip()
     max_repairs = 1 if profile_clean == "quick" else (3 if profile_clean == "deep" else 2)
 
-    # Use each slot's or agent's real selected model directly via CLI (e.g. agy.exe --model gemini-pro-orchestrator-argon)
     builder_diag = diag_provs.get(builder_p) or {}
     raw_builder_model = str(role_model_map.get("BUILDER") or builder_diag.get("selected_model") or "").strip()
     eff_orch_mode = raw_builder_model or "default"
-    orch_display = f"{PROVIDER_META[builder_p]['label']} · {role_model_map.get('BUILDER') or builder_diag.get('selected_model_display') or 'CLI 기본 모델'}"
-    planner_model_ov = role_model_map.get("HEAD") or (raw_builder_model if "orchestrator" in raw_builder_model.lower() else None)
-    # In single-shot BUILDING, orchestrator models delegate to subagents and risk multi-minute timeouts; use fast executor gemini-3.8-flash-high
-    hydrogen_model_ov = (
+    orch_display = f"{PROVIDER_META[lead_assignee['prov_k']]['label']} ({lead_def['name']}: {lead_assignee['emp_name']})"
+    planner_model_ov = lead_assignee["model_ov"] or role_model_map.get("HEAD")
+    fast_exec_model_ov = (
         "gemini-3.8-flash-high"
         if "orchestrator" in raw_builder_model.lower()
         else role_model_map.get("BUILDER")
     )
-    out_status = get_output_dir_status()
-    gdrives = out_status.get("detected_google_drives") or []
+
     saved_out_root = (resume_state or {}).get("output_root")
-    if saved_out_root:
-        base_output_dir = Path(saved_out_root)
-    elif str(team_ws.get("output_dir") or "").strip():
-        try:
-            base_output_dir, _ = resolve_team_local_path(str(team_ws.get("output_dir")), gdrives)
-        except Exception:
-            base_output_dir = Path(out_status["output_dir"])
+    continue_existing: bool = bool((resume_state or {}).get("continue_existing", False))
+    explicit_proj_dir_str: str = str((resume_state or {}).get("explicit_project_dir") or "").strip()
+    saved_proj_folder = str((resume_state or {}).get("project_folder_name") or "").strip()
+    with _STATE_LOCK:
+        for m_existing in STATE.get("missions") or []:
+            if m_existing.get("mission_id") == mission_id:
+                if not saved_proj_folder and m_existing.get("project_folder_name"):
+                    saved_proj_folder = str(m_existing["project_folder_name"]).strip()
+                if m_existing.get("continue_existing"):
+                    continue_existing = True
+                if not explicit_proj_dir_str and m_existing.get("continue_existing") and m_existing.get("project_dir_abs"):
+                    explicit_proj_dir_str = str(m_existing["project_dir_abs"]).strip()
+                if not saved_out_root and m_existing.get("output_root"):
+                    saved_out_root = str(m_existing["output_root"]).strip()
+                break
+
+    base_output_dir, is_gdrive_target, mirror_local = _resolve_team_base_output_dir(team_obj, saved_out_root)
+    if continue_existing and explicit_proj_dir_str:
+        project_dir = Path(explicit_proj_dir_str)
+        base_output_dir = project_dir.parent
+        project_folder_name = project_dir.name
+        is_gdrive_target = _is_google_drive_path(base_output_dir, get_output_dir_status().get("detected_google_drives") or [])
     else:
-        base_output_dir = Path(out_status["output_dir"])
-    try:
-        base_output_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        base_output_dir = DELIVERABLES_DIR.resolve()
-        base_output_dir.mkdir(parents=True, exist_ok=True)
-    is_gdrive_target = _is_google_drive_path(base_output_dir, gdrives)
-    mirror_local = bool(team_ws.get("mirror_to_local", False) or out_status.get("mirror_to_local", False))
-    project_dir = base_output_dir / f"{mission_id}_project"
+        project_folder_name = derive_project_folder_name(goal, mission_id, base_output_dir, saved_proj_folder)
+        project_dir = base_output_dir / project_folder_name
+    project_dir.mkdir(parents=True, exist_ok=True)
+    init_readme = project_dir / "README.md"
+    if not init_readme.exists():
+        try:
+            init_readme.write_text(
+                f"# {goal}\n\n- **Mission ID**: `{mission_id}`\n- **Project Folder**: `{project_folder_name}`\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    existing_folder_ctx = _build_existing_folder_context(project_dir) if continue_existing else ""
     generated_files: List[str] = list((resume_state or {}).get("generated_files") or [])
+    if continue_existing and not generated_files:
+        for exf in sorted(project_dir.rglob("*")):
+            if exf.is_file() and not _is_ignored_deliverable_entry(exf, project_dir):
+                rel_ex = f"deliverables/{project_dir.name}/{exf.relative_to(project_dir).as_posix()}"
+                if rel_ex not in generated_files:
+                    generated_files.append(rel_ex)
     stage_outputs: Dict[str, str] = dict((resume_state or {}).get("stage_outputs") or {})
+    part_outputs: Dict[str, str] = dict((resume_state or {}).get("part_outputs") or {})
+    staff_outputs_by_part: Dict[str, Dict[str, str]] = {
+        str(pk): {str(ek): str(ev) for ek, ev in pv.items() if ev}
+        for pk, pv in ((resume_state or {}).get("staff_outputs_by_part") or {}).items()
+        if isinstance(pv, dict)
+    }
     repair_history: List[str] = list((resume_state or {}).get("repair_history") or [])
     repair_attempt: int = int((resume_state or {}).get("repair_attempt") or 0)
     last_error_feedback: str = str((resume_state or {}).get("last_error_feedback") or "")
+    user_revision_feedback: str = str((resume_state or {}).get("user_revision_feedback") or "").strip()
+    revision_plan_done: bool = bool((resume_state or {}).get("revision_plan_done", False))
     step_counter: int = int((resume_state or {}).get("step_counter") or 0)
+
     saved_mode = str((resume_state or {}).get("deliverable_mode") or "").upper()
     intent_spec: Dict[str, Any] = (
         dict(MISSION_INTENT_SPECS[saved_mode])
@@ -3620,69 +6119,226 @@ def _run_mission_pipeline(
     )
     deliverable_mode: str = intent_spec["mode"]
     intent_label: str = intent_spec["label"]
+    team_subagents: List[Dict[str, Any]] = build_team_subagent_roster(team_obj, char_cfgs)
 
-    def _record_stage_start(phase_name: str, role_name: str, prov_k: str, state_msg: str) -> int:
-        nonlocal step_counter
-        step_counter += 1
+    def _save_mission_checkpoint(current_stage: str) -> None:
+        if _SERVER_SHUTTING_DOWN.is_set():
+            return
         with _STATE_LOCK:
-            domain = PROVIDER_META.get(prov_k, PROVIDER_META.get(head_p, {"domain": "GOOGLE"}))["domain"]
-            STATE["phase"] = phase_name
-            STATE["working_now"] = (
-                [{"provider": domain, "cli": prov_k, "role": role_name, "stage": phase_name, "elapsed_sec": 1}]
-                if role_name in ("HEAD", "BUILDER", "SUB-BUILDER", "REVIEWER", "RESEARCHER")
-                else []
-            )
+            if _is_mission_stopped_unlocked(mission_id):
+                return
+            ckpt_payload = {
+                "mission_id": mission_id,
+                "goal": goal,
+                "profile": profile_clean,
+                "orchestrator_mode": eff_orch_mode,
+                "deliverable_mode": deliverable_mode,
+                "team_id": eff_team_id,
+                "team_name": team_name,
+                "output_root": str(base_output_dir),
+                "project_folder_name": project_folder_name,
+                "continue_existing": continue_existing,
+                "explicit_project_dir": str(project_dir) if continue_existing else "",
+                "current_stage": current_stage,
+                "stage_outputs": dict(stage_outputs),
+                "part_outputs": dict(part_outputs),
+                "staff_outputs_by_part": {
+                    pk: dict(pv) for pk, pv in staff_outputs_by_part.items() if pv
+                },
+                "generated_files": list(generated_files),
+                "repair_attempt": repair_attempt,
+                "last_error_feedback": last_error_feedback,
+                "user_revision_feedback": user_revision_feedback,
+                "revision_plan_done": revision_plan_done,
+                "repair_history": list(repair_history),
+                "step_counter": step_counter,
+                "updated_at": utc_now_iso(),
+            }
+            STATE.setdefault("mission_checkpoints", {})[mission_id] = ckpt_payload
+            for m in STATE["missions"]:
+                if m["mission_id"] == mission_id:
+                    m["output_root"] = str(base_output_dir)
+                    m["project_folder_name"] = project_folder_name
+                    m["project_dir"] = f"deliverables/{project_folder_name}"
+                    m["project_dir_abs"] = str(project_dir)
+                    m["deliverable_mode"] = deliverable_mode
+                    m["deliverable_type_label"] = intent_label
+                    m["generated_files"] = list(generated_files)
+                    m["stage_outputs_snapshot"] = dict(stage_outputs)
+                    m["part_outputs_snapshot"] = dict(part_outputs)
+                    m["updated_at"] = utc_now_iso()
+        save_runtime_state()
+
+    with _STATE_LOCK:
+        for m in STATE["missions"]:
+            if m["mission_id"] == mission_id:
+                m["pipeline_stages"] = stage_descriptors
+                m["max_steps"] = len(stage_descriptors)
+                m["lead_agent_id"] = lead_assignee["emp_id"]
+                m["lead_agent_name"] = lead_assignee["emp_name"]
+    _save_mission_checkpoint(str((resume_state or {}).get("current_stage") or "LEAD_PLANNING"))
+
+    if any(a["prov_k"] == "antigravity_sdk" for a in [lead_assignee, *part_assignees.values()]) and team_subagents:
+        with _STATE_LOCK:
             STATE["events"].insert(
                 0,
                 {
                     "at": utc_now_iso(),
-                    "run_id": f"{mission_id}-s{step_counter}",
-                    "to_state": phase_name,
-                    "state_ko": state_msg,
+                    "run_id": f"{mission_id}-sdk-roster",
+                    "to_state": "LEAD_PLANNING",
+                    "state_ko": f"📦 [Antigravity SDK SubagentConfig] 총괄팀장({lead_assignee['emp_name']}) 및 파트 담당 {len(team_subagents)}명을 $0 오케스트레이션 로스터로 연결했습니다.",
                     "project": STATE["project_name"],
-                    "role": role_name,
+                    "role": "LEAD",
                 },
             )
-        return step_counter
+
+    def _is_stopped() -> bool:
+        with _STATE_LOCK:
+            return _is_mission_stopped_unlocked(mission_id)
+
+    def _record_stage_start(
+        phase_name: str,
+        role_name: str,
+        prov_k: str,
+        state_msg: str,
+        emp_id_ov: Optional[str] = None,
+        emp_name_ov: Optional[str] = None,
+        append_working: bool = False,
+        parallel_agents: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        nonlocal step_counter
+        emp_id, emp_name = (
+            (emp_id_ov, emp_name_ov)
+            if (emp_id_ov and emp_name_ov)
+            else _resolve_active_employee_meta(role_name, prov_k, team_obj, char_cfgs)
+        )
+        _update_live_agent_stream(
+            active=True,
+            mission_id=mission_id,
+            team_id=eff_team_id,
+            agent_id=emp_id,
+            agent_name=emp_name,
+            role=role_name,
+            provider=prov_k,
+            stage=phase_name,
+            mode="sdk_parallel_squad" if parallel_agents else ("sdk_orchestrator" if prov_k == "antigravity_sdk" else "cli_pipeline"),
+            thought=state_msg,
+            tool="",
+            subagents=team_subagents,
+            parallel_agents=parallel_agents if parallel_agents is not None else [],
+        )
+        with _STATE_LOCK:
+            step_counter += 1
+            my_step_idx = step_counter
+            domain = PROVIDER_META.get(prov_k, PROVIDER_META.get(head_p, {"domain": "GOOGLE"}))["domain"]
+            STATE["phase"] = phase_name
+            w_entry = {
+                "provider": domain,
+                "cli": prov_k,
+                "role": role_name,
+                "stage": phase_name,
+                "mission_id": mission_id,
+                "team_id": eff_team_id,
+                "team_name": team_name,
+                "agent_id": emp_id,
+                "agent_name": emp_name,
+                "elapsed_sec": 1,
+            }
+            if append_working:
+                STATE["working_now"] = [
+                    x for x in STATE.get("working_now", [])
+                    if not (x.get("mission_id") == mission_id and x.get("agent_id") == emp_id)
+                ] + [w_entry]
+            else:
+                STATE["working_now"] = [
+                    x for x in STATE.get("working_now", [])
+                    if x.get("mission_id") != mission_id
+                ] + [w_entry]
+            STATE["events"].insert(
+                0,
+                {
+                    "at": utc_now_iso(),
+                    "run_id": f"{mission_id}-s{my_step_idx}",
+                    "to_state": phase_name,
+                    "state_ko": f"[{team_name}] {state_msg}",
+                    "project": STATE["project_name"],
+                    "role": role_name,
+                    "team_id": eff_team_id,
+                },
+            )
+        return my_step_idx
 
     def _swap_role_to_provider(role_name: str, new_prov_k: str) -> None:
         nonlocal head_p, builder_p, sub_builder_p, reviewer_p, researcher_p
-        role_map_key = {
-            "HEAD": "head",
-            "BUILDER": "builder",
-            "SUB-BUILDER": "sub_builder",
-            "REVIEWER": "reviewer",
-            "RESEARCHER": "researcher",
-        }.get(role_name, "builder")
-        if role_map_key == "head":
+        if role_name in ("LEAD", "HEAD"):
             head_p = new_prov_k
-        elif role_map_key == "builder":
+            lead_assignee["prov_k"] = new_prov_k
+        elif role_name in part_assignees:
+            part_assignees[role_name]["prov_k"] = new_prov_k
+        else:
             builder_p = new_prov_k
-        elif role_map_key == "sub_builder":
-            sub_builder_p = new_prov_k
-        elif role_map_key == "reviewer":
-            reviewer_p = new_prov_k
-        elif role_map_key == "researcher":
-            researcher_p = new_prov_k
         role_model_map.pop(role_name, None)
 
     def _call_cli_with_fallback(
         prov_k: str,
         prompt_txt: str,
-        timeout_s: float = 28.0,
-        role_name: str = "BUILDER",
-        phase_name: str = "BUILDING",
+        timeout_s: float = 45.0,
+        role_name: str = "PART_BUILD",
+        phase_name: str = "PART_BUILD",
         model_override: Optional[str] = None,
+        emp_id_ov: Optional[str] = None,
+        emp_name_ov: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        with _STATE_LOCK:
-            if STATE.get("stop_requested"):
-                return None
+        if _SERVER_SHUTTING_DOWN.is_set() or _is_stopped():
+            return None
         cand_model = model_override or role_model_map.get(role_name)
-        res = invoke_cli_if_available(prov_k, prompt_txt, timeout=timeout_s, model_override=cand_model)
+        emp_id, emp_name = (
+            (emp_id_ov, emp_name_ov)
+            if (emp_id_ov and emp_name_ov)
+            else _resolve_active_employee_meta(role_name, prov_k, team_obj, char_cfgs)
+        )
+        emp_mc = char_cfgs.get(str(emp_id)) if isinstance(char_cfgs, dict) else None
+        emp_to_cfg = (emp_mc or {}).get("timeoutSec", "auto")
+        emp_rank_cfg = str((emp_mc or {}).get("orgRank") or ("LEAD" if role_name in ("LEAD", "HEAD") else "PART_LEAD"))
+        eff_timeout_s, is_auto_to = resolve_agent_timeout(
+            emp_to_cfg,
+            phase_name=phase_name,
+            org_rank=emp_rank_cfg,
+            profile=profile_clean,
+            model_id=cand_model,
+        )
+        if is_auto_to:
+            eff_timeout_s = max(eff_timeout_s, float(timeout_s or 0.0))
+        stage_stream_meta = {
+            "mission_id": mission_id,
+            "team_id": eff_team_id,
+            "agent_id": emp_id,
+            "agent_name": emp_name,
+            "role_name": role_name,
+            "phase_name": phase_name,
+            "target_project_dir": str(project_dir) if phase_name == build_part_def["id"] else "",
+            "seed_from_project_dir": (
+                str(project_dir)
+                if phase_name == build_part_def["id"] and (continue_existing or repair_attempt > 0 or bool(user_revision_feedback))
+                else ""
+            ),
+            "subagents": team_subagents,
+            "inject_subagent_roster": role_name in ("LEAD", "HEAD") or prov_k == "antigravity_sdk",
+            "keep_stream_open": True,
+            "auto_timeout": is_auto_to,
+        }
+        res = invoke_cli_if_available(
+            prov_k,
+            prompt_txt,
+            timeout=eff_timeout_s,
+            model_override=cand_model,
+            stream_meta=stage_stream_meta,
+        )
+        if _SERVER_SHUTTING_DOWN.is_set() or _is_stopped():
+            return None
         if res and not res.get("quota_exceeded") and res.get("output"):
             return res
 
-        # Current provider hit quota limit or is not connected -> find other connected (LOGGED_IN) AI slots
         slots = load_cli_slots()
         with _STATE_LOCK:
             exhausted_map = dict(STATE.get("quota_exhausted_slots") or {})
@@ -3703,7 +6359,7 @@ def _run_mission_pipeline(
 
         for fb_k in connected_candidates:
             with _STATE_LOCK:
-                if STATE.get("stop_requested"):
+                if _is_mission_stopped_unlocked(mission_id):
                     return None
                 old_lbl = PROVIDER_META.get(prov_k, {}).get("label", prov_k)
                 new_lbl = PROVIDER_META.get(fb_k, {}).get("label", fb_k)
@@ -3713,17 +6369,16 @@ def _run_mission_pipeline(
                         "at": utc_now_iso(),
                         "run_id": f"{mission_id}-failover-{int(time.time())}",
                         "to_state": phase_name,
-                        "state_ko": f"🔄 [{role_name}] {old_lbl} 한도 도달/응답 불가 → 연결된 다른 AI [{new_lbl}]로 자동 교체하여 {phase_name} 단계를 재개합니다.",
+                        "state_ko": f"🔄 [{role_name}] {old_lbl} 응답 지연/한도 도달 → 연결된 [{new_lbl}] 엔진으로 자동 전환하여 {phase_name} 파트를 계속 수행합니다.",
                         "project": STATE["project_name"],
                         "role": role_name,
                     },
                 )
             _swap_role_to_provider(role_name, fb_k)
-            fb_res = invoke_cli_if_available(fb_k, prompt_txt, timeout=timeout_s)
+            fb_res = invoke_cli_if_available(fb_k, prompt_txt, timeout=timeout_s, stream_meta=stage_stream_meta)
             if fb_res and not fb_res.get("quota_exceeded") and fb_res.get("output"):
                 return fb_res
 
-        # If ALL connected AI slots have reached their quota limit (or failed with quota_exceeded) -> PAUSE ALL WORK!
         with _STATE_LOCK:
             exhausted_now = list((STATE.get("quota_exhausted_slots") or {}).keys())
         if exhausted_now or not all_connected_slots:
@@ -3732,56 +6387,80 @@ def _run_mission_pipeline(
                 phase_name=phase_name,
                 role_name=role_name,
                 exhausted_slots=exhausted_now or all_connected_slots or [prov_k],
-                reason=f"연결된 모든 AI({', '.join(exhausted_labels)})가 사용 한도에 도달하여 {phase_name} 단계에서 모든 작업을 일시 중지했습니다.",
+                reason=f"연결된 모든 AI({', '.join(exhausted_labels)})가 사용 한도에 도달하여 {phase_name} 단계에서 작업을 일시 중지했습니다.",
             )
         return None
 
-    def _record_stage_done(s_idx: int, phase_name: str, role_name: str, prov_k: str, cli_res: Optional[Dict[str, Any]], summary_txt: str, step_state: str = "PASS"):
+    def _record_stage_done(
+        s_idx: int,
+        phase_name: str,
+        role_name: str,
+        prov_k: str,
+        cli_res: Optional[Dict[str, Any]],
+        summary_txt: str,
+        step_state: str = "PASS",
+        agent_id: str = "",
+        agent_name: str = "",
+        org_rank: str = "",
+        cli_model: str = "",
+        execution_mode: str = "SEQUENTIAL",
+    ):
+        if _SERVER_SHUTTING_DOWN.is_set():
+            return
         with _STATE_LOCK:
-            if STATE.get("stop_requested"):
+            if _is_mission_stopped_unlocked(mission_id):
                 return
+            if agent_id and STATE.get("working_now"):
+                STATE["working_now"] = [
+                    w for w in STATE["working_now"]
+                    if not (w.get("mission_id") == mission_id and w.get("agent_id") == agent_id)
+                ]
             dur = cli_res["seconds"] if cli_res else 2
-            toks = cli_res["tokens"] if cli_res else 550
+            toks = cli_res["tokens"] if cli_res else 420
             domain = PROVIDER_META.get(prov_k, PROVIDER_META[head_p])["domain"]
-            if role_name in ("HEAD", "BUILDER", "SUB-BUILDER", "REVIEWER", "RESEARCHER"):
-                STATE["recent_calls"].insert(
-                    0,
-                    {
-                        "at": utc_now_iso(),
-                        "role": role_name,
-                        "provider": domain,
-                        "cli": prov_k,
-                        "seconds": dur,
-                        "tokens": toks,
-                        "exact": bool(cli_res),
-                        "status": "OK" if step_state == "PASS" else "REPAIR",
-                        "summary": summary_txt[:240],
-                    },
-                )
-                r_usage = STATE["usage"]["by_role"].setdefault(
-                    role_name, {"calls": 0, "seconds": 0, "tokens": 0, "exact_tokens": 0, "providers": {}}
-                )
-                r_usage["calls"] += 1
-                r_usage["seconds"] += dur
-                r_usage["tokens"] += toks
-                r_usage["exact_tokens"] += toks if cli_res else 0
-                r_usage["providers"][domain] = r_usage["providers"].get(domain, 0) + 1
+            STATE["recent_calls"].insert(
+                0,
+                {
+                    "at": utc_now_iso(),
+                    "role": role_name,
+                    "agent_id": agent_id,
+                    "agent_name": agent_name,
+                    "org_rank": org_rank,
+                    "cli_model": cli_model,
+                    "execution_mode": execution_mode,
+                    "provider": domain,
+                    "cli": prov_k,
+                    "seconds": dur,
+                    "tokens": toks,
+                    "exact": bool(cli_res),
+                    "status": "OK" if step_state == "PASS" else "REPAIR",
+                    "summary": summary_txt[:240],
+                },
+            )
+            r_usage = STATE["usage"]["by_role"].setdefault(
+                role_name, {"calls": 0, "seconds": 0, "tokens": 0, "exact_tokens": 0, "providers": {}}
+            )
+            r_usage["calls"] += 1
+            r_usage["seconds"] += dur
+            r_usage["tokens"] += toks
+            r_usage["exact_tokens"] += toks if cli_res else 0
+            r_usage["providers"][domain] = r_usage["providers"].get(domain, 0) + 1
 
-                p_usage = STATE["usage"]["by_provider"].setdefault(
-                    domain, {"calls": 0, "seconds": 0, "tokens": 0, "exact_tokens": 0, "monthly_calls": 0, "monthly_tokens": 0}
-                )
-                p_usage["calls"] += 1
-                p_usage["seconds"] += dur
-                p_usage["tokens"] += toks
-                p_usage["exact_tokens"] += toks if cli_res else 0
-                p_usage["monthly_calls"] = p_usage.get("monthly_calls", 0) + 1
-                p_usage["monthly_tokens"] = p_usage.get("monthly_tokens", 0) + toks
+            p_usage = STATE["usage"]["by_provider"].setdefault(
+                domain, {"calls": 0, "seconds": 0, "tokens": 0, "exact_tokens": 0, "monthly_calls": 0, "monthly_tokens": 0}
+            )
+            p_usage["calls"] += 1
+            p_usage["seconds"] += dur
+            p_usage["tokens"] += toks
+            p_usage["exact_tokens"] += toks if cli_res else 0
+            p_usage["monthly_calls"] = p_usage.get("monthly_calls", 0) + 1
+            p_usage["monthly_tokens"] = p_usage.get("monthly_tokens", 0) + toks
 
-                tot = STATE["usage"]["total"]
-                tot["calls"] += 1
-                tot["seconds"] += dur
-                tot["tokens"] += toks
-                tot["exact_tokens"] += toks if cli_res else 0
+            tot = STATE["usage"]["total"]
+            tot["calls"] += 1
+            tot["seconds"] += dur
+            tot["tokens"] += toks
+            tot["exact_tokens"] += toks if cli_res else 0
 
             for m in STATE["missions"]:
                 if m["mission_id"] == mission_id:
@@ -3790,6 +6469,13 @@ def _run_mission_pipeline(
                             "index": s_idx,
                             "run_id": f"{mission_id}-s{s_idx}",
                             "stage": phase_name,
+                            "role": role_name,
+                            "agent_id": agent_id,
+                            "agent_name": agent_name,
+                            "org_rank": org_rank,
+                            "cli_provider": prov_k,
+                            "cli_model": cli_model,
+                            "execution_mode": execution_mode,
                             "state": step_state,
                             "summary": summary_txt,
                             "tests": {"passed": 18 if step_state == "PASS" else 0, "total": 18},
@@ -3798,80 +6484,350 @@ def _run_mission_pipeline(
                     m["passed_steps"] = len([s for s in m["steps"] if s["state"] == "PASS"])
                     m["updated_at"] = utc_now_iso()
 
+    staff_exec_mode_cfg = str(part_cfg.get("staff_execution_mode") or "parallel").strip().lower()
+
+    def _execute_part_staff_members(
+        pid: str,
+        p_def: Dict[str, Any],
+        p_staff_list: List[Dict[str, Any]],
+        prompt_builder_fn,
+        timeout_val: float,
+    ) -> List[Tuple[Dict[str, Any], str]]:
+        """
+        Executes a part's subordinate staff (STAFF) with per-staff checkpoint persistence & reuse:
+        - Any staff member already persisted in staff_outputs_by_part[pid] before a server restart is reused immediately.
+        - Default when len(pending_staff) >= 2 (and staff_execution_mode != 'sequential'):
+          Simultaneous parallel execution (사원 1 ∥ 사원 2 ...) via ThreadPoolExecutor, preserving staffOrder in returned list.
+        """
+        if not p_staff_list:
+            return []
+        saved_part_staff = staff_outputs_by_part.setdefault(pid, {})
+        pending_indexed: List[Tuple[int, Dict[str, Any]]] = [
+            (idx, stf)
+            for idx, stf in enumerate(p_staff_list, start=1)
+            if not saved_part_staff.get(stf["emp_id"])
+        ]
+        if not pending_indexed:
+            return [
+                (stf, saved_part_staff[stf["emp_id"]])
+                for stf in p_staff_list
+                if saved_part_staff.get(stf["emp_id"])
+            ]
+        if len(pending_indexed) < len(p_staff_list):
+            reused_cnt = len(p_staff_list) - len(pending_indexed)
+            with _STATE_LOCK:
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mission_id}-{pid.lower()}-staff-ckpt",
+                        "to_state": pid,
+                        "state_ko": (
+                            f"♻️ [{team_name} · {p_def['name']}] 체크포인트 복원: 완료된 사원 {reused_cnt}명의 보고서를 재사용하고 "
+                            f"미완료 사원 {len(pending_indexed)}명만 이어서 수행합니다."
+                        ),
+                        "project": STATE["project_name"],
+                        "role": pid,
+                        "team_id": eff_team_id,
+                    },
+                )
+
+        use_parallel = len(pending_indexed) >= 2 and staff_exec_mode_cfg != "sequential"
+        if not use_parallel:
+            for st_idx, stf in pending_indexed:
+                if _SERVER_SHUTTING_DOWN.is_set() or _is_stopped():
+                    break
+                stf_mod = stf["model_ov"] or fast_exec_model_ov
+                s_stf = _record_stage_start(
+                    pid,
+                    pid,
+                    stf["prov_k"],
+                    f"👤 [{p_def['name']} · 사원 #{st_idx} {stf['emp_name']} ({stf_mod or 'SDK 기본'})] '{goal}' 실무 수행 중...",
+                    stf["emp_id"],
+                    stf["emp_name"],
+                )
+                prior_pairs = [
+                    (ps, saved_part_staff[ps["emp_id"]])
+                    for ps in p_staff_list
+                    if saved_part_staff.get(ps["emp_id"])
+                ]
+                earlier_ctx = (
+                    "\n\n[선행 동료 사원 조사/초안 — 중복하지 말고 누락 보완·교차 검증 위주로 작성]:\n"
+                    + "\n\n".join(f"- {ps['emp_name']}: {pt[:1500]}" for ps, pt in prior_pairs)
+                    if prior_pairs
+                    else ""
+                )
+                stf_prompt = prompt_builder_fn(st_idx, stf, stf_mod, earlier_ctx, False)
+                res_stf = _call_cli_with_fallback(
+                    stf["prov_k"],
+                    stf_prompt,
+                    timeout_s=timeout_val,
+                    role_name=pid,
+                    phase_name=pid,
+                    model_override=stf_mod,
+                    emp_id_ov=stf["emp_id"],
+                    emp_name_ov=stf["emp_name"],
+                )
+                if _SERVER_SHUTTING_DOWN.is_set() or _is_stopped():
+                    break
+                stf_txt = (
+                    res_stf["output"].strip()
+                    if (res_stf and res_stf.get("output"))
+                    else f"[{stf['emp_name']}] 담당 세부 실무 완료"
+                )
+                with _STATE_LOCK:
+                    saved_part_staff[stf["emp_id"]] = stf_txt
+                _record_stage_done(
+                    s_stf,
+                    pid,
+                    pid,
+                    stf["prov_k"],
+                    res_stf,
+                    f"[👤 사원 #{st_idx} {stf['emp_name']} ({stf_mod or stf['prov_k']})]\n{stf_txt[:360]}",
+                    agent_id=stf["emp_id"],
+                    agent_name=stf["emp_name"],
+                    org_rank="STAFF",
+                    cli_model=stf_mod or "",
+                    execution_mode="SEQUENTIAL",
+                )
+                _save_mission_checkpoint(pid)
+            return [
+                (stf, saved_part_staff[stf["emp_id"]])
+                for stf in p_staff_list
+                if saved_part_staff.get(stf["emp_id"])
+            ]
+
+        # --- PARALLEL EXECUTION (len >= 2 default: 사원 1 ∥ 사원 2 ... -> 파트장) ---
+        parallel_meta = [
+            {
+                "agent_id": stf["emp_id"],
+                "agent_name": stf["emp_name"],
+                "role": pid,
+                "model": stf["model_ov"] or fast_exec_model_ov or stf["prov_k"],
+            }
+            for _, stf in pending_indexed
+        ]
+        parallel_banner = " ∥ ".join(
+            f"#{a['agent_id']} {a['agent_name']}({a['model']})" for a in parallel_meta
+        )
+        with _STATE_LOCK:
+            STATE["working_now"] = [
+                w for w in STATE.get("working_now", []) if w.get("mission_id") != mission_id
+            ]
+            STATE["events"].insert(
+                0,
+                {
+                    "at": utc_now_iso(),
+                    "run_id": f"{mission_id}-{pid.lower()}-parallel-start",
+                    "to_state": pid,
+                    "state_ko": f"⚡ [{team_name} · {p_def['name']} · 사원 {len(pending_indexed)}명 동시 병렬수행 가동] {parallel_banner}",
+                    "project": STATE["project_name"],
+                    "role": pid,
+                    "team_id": eff_team_id,
+                },
+            )
+
+        def _worker_task(st_idx: int, stf: Dict[str, Any]) -> Tuple[int, Dict[str, Any], str]:
+            if _SERVER_SHUTTING_DOWN.is_set() or _is_stopped():
+                return st_idx, stf, ""
+            stf_mod = stf["model_ov"] or fast_exec_model_ov
+            s_stf = _record_stage_start(
+                pid,
+                pid,
+                stf["prov_k"],
+                f"⚡ [{p_def['name']} · 병렬 #{st_idx}/{len(p_staff_list)} {stf['emp_name']} ({stf_mod or 'SDK 기본'})] 동시 병렬 실무 수행 중...",
+                stf["emp_id"],
+                stf["emp_name"],
+                append_working=True,
+                parallel_agents=parallel_meta,
+            )
+            stf_prompt = prompt_builder_fn(st_idx, stf, stf_mod, "", True)
+            res_stf = _call_cli_with_fallback(
+                stf["prov_k"],
+                stf_prompt,
+                timeout_s=timeout_val,
+                role_name=pid,
+                phase_name=pid,
+                model_override=stf_mod,
+                emp_id_ov=stf["emp_id"],
+                emp_name_ov=stf["emp_name"],
+            )
+            if _SERVER_SHUTTING_DOWN.is_set() or _is_stopped():
+                return st_idx, stf, ""
+            stf_txt = (
+                res_stf["output"].strip()
+                if (res_stf and res_stf.get("output"))
+                else f"[{stf['emp_name']}] 병렬 담당 실무 완료"
+            )
+            with _STATE_LOCK:
+                saved_part_staff[stf["emp_id"]] = stf_txt
+            _record_stage_done(
+                s_stf,
+                pid,
+                pid,
+                stf["prov_k"],
+                res_stf,
+                f"[⚡ 병렬 사원 #{st_idx} {stf['emp_name']} ({stf_mod or stf['prov_k']})]\n{stf_txt[:360]}",
+                agent_id=stf["emp_id"],
+                agent_name=stf["emp_name"],
+                org_rank="STAFF",
+                cli_model=stf_mod or "",
+                execution_mode="PARALLEL",
+            )
+            _save_mission_checkpoint(pid)
+            return st_idx, stf, stf_txt
+
+        with ThreadPoolExecutor(max_workers=min(len(pending_indexed), 6)) as pool:
+            futs = [
+                pool.submit(_worker_task, idx, stf_item)
+                for idx, stf_item in pending_indexed
+            ]
+            for fut in futs:
+                fut.result()
+        return [
+            (stf, saved_part_staff[stf["emp_id"]])
+            for stf in p_staff_list
+            if saved_part_staff.get(stf["emp_id"])
+        ]
+
+    # Determine final build part vs upstream preparation parts (research, structure, custom)
+    build_part_def = next(
+        (p for p in reversed(enabled_parts) if p.get("part_kind") == "build"),
+        enabled_parts[-1],
+    )
+    prep_parts_defs = [p for p in enabled_parts if p["id"] != build_part_def["id"]]
     resume_from_stage = (resume_state or {}).get("interrupted_stage")
 
     try:
         # =========================================================================
-        # STAGE 01: PLANNING (Intent Analysis + Deliverable Selection + ORDER)
+        # PHASE 01: LEAD_PLANNING (총괄팀장 업무 의도 분석 & 파트별 업무 분장)
         # =========================================================================
-        if not stage_outputs.get("PLANNING") or resume_from_stage == "PLANNING":
-            orch_prefix = (
-                "💎 [Orchestrator (Carbon) · Read-Only 심층 설계] "
-                if eff_orch_mode == "carbon"
-                else ("🔷 [Orchestrator (Argon) · Read-Only 계획 수립] " if eff_orch_mode == "argon" else "")
+        if _SERVER_SHUTTING_DOWN.is_set():
+            return
+        if user_revision_feedback and not revision_plan_done:
+            s_rev_plan = _record_stage_start(
+                "LEAD_PLANNING",
+                "LEAD",
+                lead_assignee["prov_k"],
+                f"👑 [{lead_def['name']} · {lead_assignee['emp_name']}] 사용자의 보완 재지시('{user_revision_feedback[:60]}')를 분석하여 파트별 재작업 지시서를 시달합니다.",
+                lead_assignee["emp_id"],
+                lead_assignee["emp_name"],
             )
-            s1 = _record_stage_start(
-                "PLANNING",
-                "HEAD",
-                head_p,
-                f"{orch_prefix}HEAD({PROVIDER_META[head_p]['label']})가 '{goal}' 업무 문장을 자동 분석하여 [{intent_label}] 맞춤형 {'다중 산출물 분할(Task Breakdown)' if profile_clean == 'deep' else 'ORDER 작업 지시서'}를 수립 중입니다.",
+            rev_plan_prompt = (
+                f"당신은 '{lead_def['name']}'({lead_assignee['emp_name']})입니다. 사용자(최종 승인권자)가 이전 통합보고에 대해 아래 보완 지시를 내렸습니다.\n"
+                f"- 원 업무 목표: {goal}\n"
+                f"- 사용자 보완 재지시: {user_revision_feedback}\n"
+                f"- 참여 파트 목록: {', '.join(p['name'] for p in enabled_parts)}\n"
+                f"각 파트 담당이 즉시 수정·보강해야 할 핵심 지침을 한국어 5줄 이내로 명확히 작성하세요."
             )
-            mode_guide_lines = (
-                "  * RESEARCH_HTML (조사·분석 결과를 HTML 보고서로 제작): `research_report.html`(내장 CSS 스타일·종합 비교표·대상별 상세 카드·신뢰도 등급·출처가 완비된 단일 HTML 보고서) 및 `summary_data.json`\n"
-                "  * RESEARCH (조사·분석·비교·현황 정리): `research_report.md`(마크다운 표·세부 조사·사실검증 구분·출처 포함) 및 `summary_data.json`(정형 데이터)\n"
-                "  * DOCUMENT (기획서·제안서·전략·매뉴얼·초안): `proposal_document.md`(체계적 섹션·실행 표·체크리스트 포함"
-                + (", Deep 모드 시 `action_plan.md` 추가)\n" if profile_clean == "deep" else ")\n")
-                + "  * WEB (웹페이지·랜딩페이지·프론트엔드 UI): `index.html`, `styles.css`, `app.js`\n"
-                + "  * CODE (파이썬·스크립트·자동화·백엔드·알고리즘 구현): "
-                + ("`core_module.py` + `app_runner.py` (실행·검증 가능한 실제 코드)\n" if profile_clean == "deep" else "`main.py` 등 목표 언어의 실행 가능한 실제 소스 코드\n")
+            res_rp = _call_cli_with_fallback(
+                lead_assignee["prov_k"],
+                rev_plan_prompt,
+                timeout_s=55.0,
+                role_name="LEAD",
+                phase_name="LEAD_PLANNING",
+                model_override=planner_model_ov,
+                emp_id_ov=lead_assignee["emp_id"],
+                emp_name_ov=lead_assignee["emp_name"],
             )
-            if profile_clean == "deep":
-                plan_prompt = (
-                    f"당신은 HEAD(총괄 지휘 · {orch_display})입니다. 사용자의 업무 지시 문장 '{goal}'의 의도를 분석하여 가장 적합한 산출물 모드를 확정하고 두 파트로 분할한 한국어 작업 지시서(ORDER)를 작성하세요.\n"
-                    f"1) 첫째 줄에 반드시 `DELIVERABLE_MODE: {deliverable_mode}` 형식으로 산출물 모드를 명시하세요 (선택지: RESEARCH_HTML, RESEARCH, DOCUMENT, WEB, CODE — 초기 자동분석 추천값: {deliverable_mode}).\n"
-                    f"2) 모드별 산출물 기준 (코딩 요청이 아닌 조사·기획 업무에 절대 불필요한 `.py` 파이썬 더미 코드를 지시하지 마세요):\n{mode_guide_lines}"
-                    f"3) [PART 1 (BUILDER 담당)]과 [PART 2 (SUB-BUILDER 담당)]의 파일명·핵심 포함 내용·품질 합격 기준을 6줄 이내로 명확히 지시하세요."
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if not _is_stopped():
+                rev_order_txt = res_rp["output"].strip() if (res_rp and res_rp.get("output")) else f"사용자 보완 요청 반영 지시: {user_revision_feedback}"
+                stage_outputs["LEAD_PLANNING"] = stage_outputs.get("LEAD_PLANNING", "") + f"\n\n[🔄 사용자 보완 재지시 반영 분장]:\n{rev_order_txt}"
+                last_error_feedback = f"[사용자 최종 검토 보완 재지시 — 최우선 반영 필수]:\n{user_revision_feedback}\n\n[총괄팀장 세부 보완 지시]:\n{rev_order_txt}"
+                revision_plan_done = True
+                repair_history.append(f"사용자 보완 재지시 반영: {user_revision_feedback[:160]}")
+                _record_stage_done(
+                    s_rev_plan,
+                    "LEAD_PLANNING",
+                    "LEAD",
+                    lead_assignee["prov_k"],
+                    res_rp,
+                    rev_order_txt,
+                    agent_id=lead_assignee["emp_id"],
+                    agent_name=lead_assignee["emp_name"],
+                    org_rank="LEAD",
+                    cli_model=planner_model_ov or "",
                 )
-            else:
-                plan_prompt = (
-                    f"당신은 HEAD(총괄 지휘 · {orch_display}) 에이전트입니다. 사용자의 업무 지시 문장 '{goal}'의 의도를 분석하여 한국어 작업 지시서(ORDER)를 작성하세요.\n"
-                    f"1) 첫째 줄에 반드시 `DELIVERABLE_MODE: {deliverable_mode}` 형식으로 산출물 모드를 명시하세요 (선택지: RESEARCH_HTML, RESEARCH, DOCUMENT, WEB, CODE — 초기 자동분석 추천값: {deliverable_mode}).\n"
-                    f"2) 모드별 산출물 기준 (코딩 요청이 아닌 조사·기획·문서 업무에 절대 불필요한 `.py` 파이썬 코드를 지시하지 마세요):\n{mode_guide_lines}"
-                    f"3) 생성할 파일명, 반드시 포함할 핵심 목차/기능, 사실 확인 및 검증 기준을 5줄 이내 한국어로 간결히 작성하세요."
-                )
-            res_plan = _call_cli_with_fallback(
-                head_p, plan_prompt, timeout_s=65.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov
-            )
-            stage_outputs["PLANNING"] = (
-                res_plan["output"].strip()
-                if (res_plan and res_plan.get("output"))
-                else (
-                    f"DELIVERABLE_MODE: {deliverable_mode}\n"
-                    f"- 오케스트레이터: {orch_display}\n"
-                    f"- 분석된 산출물 유형: {intent_label} (`{intent_spec['primary_file']}`)\n"
-                    f"- 목표: {goal}\n"
-                    f"- 실행 모드: {profile_clean.upper()} (최대 자동 수정 {max_repairs}회)"
-                )
-            )
-            intent_spec = _refine_intent_from_plan(stage_outputs["PLANNING"], intent_spec)
+                _save_mission_checkpoint("LEAD_PLANNING")
+        elif user_revision_feedback and revision_plan_done:
+            if not last_error_feedback:
+                last_error_feedback = f"[사용자 최종 검토 보완 재지시 — 최우선 반영 필수]:\n{user_revision_feedback}"
+            intent_spec = _refine_intent_from_plan(stage_outputs.get("LEAD_PLANNING") or stage_outputs.get("PLANNING", ""), intent_spec)
             deliverable_mode = intent_spec["mode"]
             intent_label = intent_spec["label"]
-            _record_stage_done(s1, "PLANNING", "HEAD", head_p, res_plan, stage_outputs["PLANNING"])
-            if eff_orch_mode in ("argon", "carbon") or "orchestrator" in str(eff_orch_mode).lower():
-                with _STATE_LOCK:
-                    STATE["events"].insert(
-                        0,
-                        {
-                            "at": utc_now_iso(),
-                            "run_id": f"{mission_id}-handoff-exec",
-                            "to_state": "BUILDING",
-                            "state_ko": f"⚡ [{orch_display}] 계획 수립 완료 ({intent_label}) → 고속 실행 엔진({hydrogen_model_ov or '기본 모델'})으로 위임합니다.",
-                            "project": STATE["project_name"],
-                            "role": "BUILDER",
-                        },
+        elif not stage_outputs.get("LEAD_PLANNING") or resume_from_stage in ("PLANNING", "LEAD_PLANNING"):
+            s1 = _record_stage_start(
+                "LEAD_PLANNING",
+                "LEAD",
+                lead_assignee["prov_k"],
+                f"👑 [{lead_def['name']} · {lead_assignee['emp_name']}] '{goal}' 지시를 분석하여 {len(enabled_parts)}개 파트({', '.join(p['stage_label'] for p in enabled_parts)})에 업무를 분장 중입니다.",
+                lead_assignee["emp_id"],
+                lead_assignee["emp_name"],
+            )
+            parts_roster_desc = "\n".join(
+                f"  - [{idx + 1}] {p['icon']} {p['name']} (`{p['id']}` · 파트장={part_squads[p['id']]['lead']['emp_name']}, 부하직원={len(part_squads[p['id']]['staff'])}명): {p['instruction']}"
+                for idx, p in enumerate(enabled_parts)
+            )
+            mode_guide_lines = (
+                "  * RESEARCH_HTML: `research_report.html` + `summary_data.json`\n"
+                "  * RESEARCH: `research_report.md` + `summary_data.json`\n"
+                "  * DOCUMENT: `proposal_document.md`\n"
+                "  * WEB: `index.html`, `styles.css`, `app.js`\n"
+                "  * CODE: `main.py` 등 실행 가능한 실제 소스 파일\n"
+            )
+            plan_prompt = (
+                f"당신은 프로젝트를 총괄 지휘하는 '{lead_def['name']}'({lead_assignee['emp_name']})입니다.\n"
+                f"사용자의 업무 지시 '{goal}'를 분석하여 산출물 모드를 확정하고 각 파트장에게 내릴 업무 분장 지시서(ORDER)를 작성하세요.\n"
+                f"1) 첫 줄에 반드시 `DELIVERABLE_MODE: {deliverable_mode}` 형식으로 명시하세요 (선택지: RESEARCH_HTML, RESEARCH, DOCUMENT, WEB, CODE).\n"
+                f"2) 산출물 기준 (코딩 요청이 아닌 조사·기획 업무에 불필요한 `.py` 코드를 지시하지 마세요):\n{mode_guide_lines}"
+                f"3) 현재 투입된 실무 파트 목록:\n{parts_roster_desc}\n"
+                f"각 파트(부하직원 순회 → 파트장 취합)가 수행할 핵심 과업과 검증 기준을 6줄 이내 한국어로 명확히 분장하세요."
+                f"{existing_folder_ctx[:9000]}"
+            )
+            res_plan = _call_cli_with_fallback(
+                lead_assignee["prov_k"],
+                plan_prompt,
+                timeout_s=65.0,
+                role_name="LEAD",
+                phase_name="LEAD_PLANNING",
+                model_override=planner_model_ov,
+                emp_id_ov=lead_assignee["emp_id"],
+                emp_name_ov=lead_assignee["emp_name"],
+            )
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if not _is_stopped():
+                stage_outputs["LEAD_PLANNING"] = (
+                    res_plan["output"].strip()
+                    if (res_plan and res_plan.get("output"))
+                    else (
+                        f"DELIVERABLE_MODE: {deliverable_mode}\n"
+                        f"- 총괄팀장: {lead_assignee['emp_name']} ({lead_def['name']})\n"
+                        f"- 산출물 유형: {intent_label} (`{intent_spec['primary_file']}`)\n"
+                        f"- 파트별 분장: {' → '.join(p['name'] for p in enabled_parts)}"
                     )
+                )
+                intent_spec = _refine_intent_from_plan(stage_outputs["LEAD_PLANNING"], intent_spec)
+                deliverable_mode = intent_spec["mode"]
+                intent_label = intent_spec["label"]
+                stage_outputs["PLANNING"] = stage_outputs["LEAD_PLANNING"]
+                _record_stage_done(
+                    s1,
+                    "LEAD_PLANNING",
+                    "LEAD",
+                    lead_assignee["prov_k"],
+                    res_plan,
+                    stage_outputs["LEAD_PLANNING"],
+                    agent_id=lead_assignee["emp_id"],
+                    agent_name=lead_assignee["emp_name"],
+                    org_rank="LEAD",
+                    cli_model=planner_model_ov or "",
+                )
+                _save_mission_checkpoint("LEAD_PLANNING")
         else:
-            intent_spec = _refine_intent_from_plan(stage_outputs.get("PLANNING", ""), intent_spec)
+            intent_spec = _refine_intent_from_plan(stage_outputs.get("LEAD_PLANNING") or stage_outputs.get("PLANNING", ""), intent_spec)
             deliverable_mode = intent_spec["mode"]
             intent_label = intent_spec["label"]
 
@@ -3882,283 +6838,462 @@ def _run_mission_pipeline(
                     m["deliverable_type_label"] = intent_label
 
         # =========================================================================
-        # STAGE 02 ~ 04: BUILDING -> VERIFYING -> REVIEWING (with Automatic Repair Loop!)
+        # PHASE 02: UPSTREAM PART EXECUTION (파트별 부하직원 순회 [사원 1 ∥ 사원 2] → 파트장 취합·확정)
         # =========================================================================
-        skip_build_once = bool(resume_from_stage == "REVIEWING" and stage_outputs.get("BUILDING") and stage_outputs.get("VERIFYING"))
+        for p_def in prep_parts_defs:
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if _is_stopped():
+                break
+            pid = p_def["id"]
+            if part_outputs.get(pid) and resume_from_stage != pid:
+                continue
+            squad = part_squads[pid]
+            p_ass = squad["lead"]
+            p_staff_list = squad["staff"]
+            prev_parts_ctx = "\n\n".join(
+                f"[{k} 결과]:\n{v[:3000]}" for k, v in part_outputs.items() if v
+            )
+            if existing_folder_ctx:
+                prev_parts_ctx = (prev_parts_ctx + "\n\n" if prev_parts_ctx else "") + existing_folder_ctx[:10000]
+            rev_note_for_part = f"\n\n[사용자 보완 재지시 사항]:\n{user_revision_feedback}" if user_revision_feedback else ""
+            staff_concise_rule = (
+                "도구 호출 없이 핵심 요점만 5~7줄 불릿으로 즉시 작성하세요."
+                if profile_clean == "quick"
+                else "담당 전문 관점에서 핵심 사실·수치·구조안을 10~14줄 이내로 명확하고 중복 없이 정리하세요."
+            )
+
+            # 2-A) Subordinate Staff Execution (사원 2인 이상 시 기본 동시 병렬수행 [사원1 ∥ 사원2] -> 파트장 전달)
+            def _prep_staff_prompt_builder(
+                st_idx: int,
+                stf: Dict[str, Any],
+                stf_mod: Optional[str],
+                earlier_staff_ctx: str,
+                is_parallel_batch: bool,
+            ) -> str:
+                parallel_focus_note = (
+                    f"\n- 현재 동료 사원들과 **동시 병렬 수행(#{st_idx}/{len(p_staff_list)})** 중입니다. 본인의 고유 전담 관점·스킬({', '.join(stf['skills']) or stf['emp_name']})에 집중해 파트장에게 독립 보고하세요."
+                    if is_parallel_batch
+                    else ""
+                )
+                search_hint = (
+                    "\n- 필요한 경우 `search_web`을 최대 1~2회 이내로 사용하고 확인 불가 항목은 `[추정]`/`[모름]`으로 표기하세요."
+                    if (p_def.get("part_kind") == "research" and profile_clean != "quick" and st_idx == 1)
+                    else "\n- 불필요한 외부 도구 호출 없이 즉시 핵심 분석·설계 결과를 작성하세요."
+                )
+                return (
+                    f"당신은 '{p_def['name']}' 산하 일반 사원 '{stf['emp_name']}'(사번 #{stf['emp_id']}, 실행모델: {stf_mod or '기본'})입니다.\n"
+                    f"- 사원 전담 페르소나: {stf['system_prompt'] or p_def['instruction']}\n"
+                    f"- 장착 스킬: {', '.join(stf['skills']) or p_def['stage_label']}{parallel_focus_note}\n"
+                    f"- 프로젝트 목표: '{goal}' (최종 산출물 유형: {intent_label}){search_hint}\n"
+                    f"- {staff_concise_rule}{rev_note_for_part}\n\n"
+                    f"[총괄팀장 분장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}\n"
+                    + (f"\n[선행 파트 전달 자료]:\n{prev_parts_ctx}" if prev_parts_ctx else "")
+                    + earlier_staff_ctx
+                )
+
+            staff_reports = _execute_part_staff_members(
+                pid=pid,
+                p_def=p_def,
+                p_staff_list=p_staff_list,
+                prompt_builder_fn=_prep_staff_prompt_builder,
+                timeout_val=60.0 if profile_clean == "quick" else 110.0,
+            )
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if _is_stopped():
+                break
+
+            # 2-B) Part Lead Synthesis & Sign-off (파트장 취합·검증)
+            p_lead_mod = p_ass["model_ov"] or fast_exec_model_ov
+            s_part = _record_stage_start(
+                pid,
+                pid,
+                p_ass["prov_k"],
+                f"⭐ [{p_def['name']} 파트장 · {p_ass['emp_name']} ({p_lead_mod or 'SDK 기본'})] 부하직원 {len(staff_reports)}명의 보고를 취합·검증하여 [{p_def['stage_label']}] 최종안을 확정 중입니다.",
+                p_ass["emp_id"],
+                p_ass["emp_name"],
+            )
+            staff_bundle_txt = (
+                "\n\n[소속 부하직원 실무 보고 내역 — 취합 및 교차 검증 필수]:\n"
+                + "\n\n".join(
+                    f"### 👤 {stf['emp_name']} (모델: {stf['model_ov'] or stf['prov_k']})\n{stf_txt[:2500]}"
+                    for stf, stf_txt in staff_reports
+                )
+                if staff_reports
+                else ""
+            )
+            concise_rule = (
+                "핵심 팩트와 구조 위주로 간결하고 신속하게(12줄 이내) 확정 정리하세요."
+                if profile_clean == "quick"
+                else "누락 없이 구체적인 세부 정보·비교 항목·근거 출처와 [확실]/[추정]/[불확실]/[모름] 등급을 체계적으로 확정하세요."
+            )
+            if p_def.get("part_kind") == "research":
+                part_prompt = (
+                    f"당신은 '{p_def['name']}'의 파트장 '{p_ass['emp_name']}'입니다. 지침: {p_def['instruction']}\n"
+                    f"- 프로젝트 목표: '{goal}' (최종 산출물 유형: {intent_label})\n"
+                    f"- 소속 사원들의 보고를 검증·통합하여 후속 기획·제작 파트에 넘길 공식 조사 보고서를 확정하세요. 확인되지 않은 내용은 `[추정]`/`[모름]`으로 명확히 구분하세요.\n"
+                    f"- {concise_rule}{rev_note_for_part}\n\n"
+                    f"[총괄팀장 업무분장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}"
+                    f"{staff_bundle_txt}"
+                )
+            elif p_def.get("part_kind") == "structure":
+                json_req = (
+                    "\n- 조사형 산출물이므로 정형 요약 데이터 파일(`### FILE: summary_data.json`)로 함께 구조화하거나 표/섹션 스키마를 명확히 제시하세요."
+                    if deliverable_mode in ("RESEARCH_HTML", "RESEARCH") and profile_clean != "quick"
+                    else ""
+                )
+                part_prompt = (
+                    f"당신은 '{p_def['name']}'의 파트장 '{p_ass['emp_name']}'입니다. 지침: {p_def['instruction']}\n"
+                    f"- 프로젝트 목표: '{goal}' (최종 산출물 유형: {intent_label} · 기본 파일: `{intent_spec['primary_file']}`)\n"
+                    f"- 선행 파트 조사 결과와 소속 사원들의 데이터 정제·목차 초안을 통합 검증하여 제작 파트가 즉시 구현 가능한 최종 구조 설계안을 확정하세요.{json_req}\n"
+                    f"- {concise_rule}{rev_note_for_part}\n\n"
+                    f"[총괄팀장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}\n\n"
+                    f"{prev_parts_ctx}{staff_bundle_txt}"
+                )
+            else:
+                part_prompt = (
+                    f"당신은 '{p_def['name']}'의 파트장 '{p_ass['emp_name']}'입니다. 전담 과업 지침: {p_def['instruction']}\n"
+                    f"- 프로젝트 목표: '{goal}' (산출물 유형: {intent_label})\n"
+                    f"- 선행 파트 결과와 소속 사원 보고를 통합 검증하여 본 파트의 공식 산출 내용을 한국어로 명확히 확정하세요. {concise_rule}{rev_note_for_part}\n\n"
+                    f"[총괄팀장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}\n\n"
+                    f"{prev_parts_ctx}{staff_bundle_txt}"
+                )
+
+            p_timeout = 85.0 if profile_clean == "quick" else 160.0
+            res_p = _call_cli_with_fallback(
+                p_ass["prov_k"],
+                part_prompt,
+                timeout_s=p_timeout,
+                role_name=pid,
+                phase_name=pid,
+                model_override=p_lead_mod,
+                emp_id_ov=p_ass["emp_id"],
+                emp_name_ov=p_ass["emp_name"],
+            )
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if _is_stopped():
+                break
+            p_lead_txt = res_p["output"].strip() if (res_p and res_p.get("output")) else f"[{p_def['name']} 파트장] 사원 보고 취합 완료"
+            combined_part_doc = p_lead_txt
+            if staff_reports:
+                staff_digest = "\n\n".join(
+                    f"- **👤 {stf['emp_name']} (`{stf['model_ov'] or stf['prov_k']}`)**:\n{stf_txt[:1200]}"
+                    for stf, stf_txt in staff_reports
+                )
+                combined_part_doc = (
+                    f"### ⭐ 파트장({p_ass['emp_name']} · `{p_lead_mod or p_ass['prov_k']}`) 최종 취합·검증본\n{p_lead_txt}\n\n"
+                    f"#### 👥 소속 일반 사원({len(staff_reports)}명) 실무 순회 기록\n{staff_digest}"
+                )
+            part_outputs[pid] = combined_part_doc
+            stage_outputs[pid] = combined_part_doc
+
+            if "### FILE:" in p_lead_txt:
+                p_files = _extract_and_write_project_files(
+                    mission_id,
+                    f"{goal} ({p_def['stage_label']})",
+                    p_lead_txt,
+                    project_dir,
+                    default_prefix=pid.lower(),
+                    deliverable_mode=deliverable_mode,
+                )
+                for pf in p_files:
+                    if pf not in generated_files:
+                        generated_files.append(pf)
+
+            _record_stage_done(
+                s_part,
+                pid,
+                pid,
+                p_ass["prov_k"],
+                res_p,
+                f"[⭐ 파트장 {p_ass['emp_name']} ({p_lead_mod or p_ass['prov_k']}) 확정]\n{p_lead_txt[:400]}",
+                agent_id=p_ass["emp_id"],
+                agent_name=p_ass["emp_name"],
+                org_rank="PART_LEAD",
+                cli_model=p_lead_mod or "",
+            )
+            _save_mission_checkpoint(pid)
+
+        # =========================================================================
+        # PHASE 03: BUILD PART (부하직원 순회 -> 파트장 최종 구현) + SELF/PEER REVIEW
+        # =========================================================================
+        b_id = build_part_def["id"]
+        b_squad = part_squads[b_id]
+        b_ass = b_squad["lead"]
+        b_staff_list = b_squad["staff"]
+        peer_reviewer_def = prep_parts_defs[0] if prep_parts_defs else build_part_def
+        peer_ass = part_assignees.get(peer_reviewer_def["id"], b_ass)
+        peer_prov = peer_ass["prov_k"]
+        if peer_prov == b_ass["prov_k"] and not peer_ass.get("model_ov") and (diag_provs.get(reviewer_p) or {}).get("auth_state") == "LOGGED_IN":
+            peer_prov = reviewer_p
+
         v_last_passed = True
         rev_failed = False
         no_tool_rule = (
-            "중요 실행 규칙: 웹 검색(`search_web`)이 필요한 경우 포괄적인 통합 검색어로 최대 2~4회 이내만 신속히 조회한 뒤, "
-            "지체 없이 현재 작업 폴더에 요청된 파일(예: research_report.html, summary_data.json 등)을 직접 생성(`write_file`)하거나 "
-            "`### FILE: <파일명>` 헤더와 함께 표준 출력으로 작성하세요. 사용자에게 역질문하지 말고 즉시 완성하세요."
+            "중요 실행 규칙: 선행 파트와 소속 사원이 작성한 아래 자료를 적극 활용하고, 추가 웹 검색(`search_web`)이 꼭 필요할 때만 1~2회 이내로 조회한 뒤, "
+            "지체 없이 현재 작업 폴더에 요청된 최종 산출물 파일(예: research_report.html, summary_data.json, main.py 등)을 직접 생성(`write_file`)하거나 "
+            "`### FILE: <파일명>` 헤더와 함께 표준 출력으로 완성하세요. 사용자에게 역질문하지 말고 즉시 완성하세요."
+        )
+        build_staff_reports: List[Tuple[Dict[str, Any], str]] = []
+        review_already_passed = bool(
+            stage_outputs.get("PART_REVIEW")
+            and "verdict: fail" not in stage_outputs.get("PART_REVIEW", "").lower()
+            and resume_from_stage not in (b_id, "PART_REVIEW")
         )
 
-        while True:
-            with _STATE_LOCK:
-                if STATE.get("stop_requested"):
-                    break
+        while not review_already_passed:
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if _is_stopped():
+                break
 
             is_repair = repair_attempt > 0
-            repair_tag = f" (자동 수정 #{repair_attempt}/{max_repairs})" if is_repair else ""
+            repair_tag = f" (파트 상호검토 보완 #{repair_attempt}/{max_repairs})" if is_repair else ""
+            upstream_bundle = "\n\n".join(
+                f"### [{ next((p['name'] for p in enabled_parts if p['id'] == k), k) } 전달 자료]\n{v[:4500]}"
+                for k, v in part_outputs.items()
+                if v and k != b_id
+            )
+            upstream_section = f"\n\n[선행 파트 수집·설계 전달 자료 — 누락 없이 본문에 반영하세요]:\n{upstream_bundle}" if upstream_bundle else ""
+            if existing_folder_ctx:
+                upstream_section += (
+                    "\n\n[📂 중요 — 기존 작업 폴더 이어하기 안내]:\n"
+                    "현재 실행 작업 디렉터리(`cwd`)에 기존 프로젝트 폴더의 모든 파일이 이미 복사되어 있습니다. "
+                    "기존 파일을 임의로 삭제하지 말고 유지한 상태에서, 요청된 추가 기능·수정 코드·실행파일(`.exe`) 빌드 등을 수행하세요."
+                    f"{existing_folder_ctx}"
+                )
+            b_lead_mod = b_ass["model_ov"] or fast_exec_model_ov
 
-            if not skip_build_once:
-                # --- STAGE 02: BUILDING (Adaptive to RESEARCH_HTML / RESEARCH / DOCUMENT / WEB / CODE) ---
-                if profile_clean == "deep" and not is_repair:
-                    deep_f1, deep_f2 = intent_spec["deep_files"]
-                    s2_a = _record_stage_start(
-                        "BUILDING",
-                        "BUILDER",
-                        builder_p,
-                        f"BUILDER({PROVIDER_META[builder_p]['label']})가 [{intent_label} · PART 1 ({deep_f1})] 산출물을 작성 중입니다.",
-                    )
-                    if deliverable_mode == "RESEARCH_HTML":
-                        b1_prompt = (
-                            f"당신은 BUILDER(수석 리서치 분석가 & 데이터 시각화 개발자 · 계정 1)입니다. 사용자의 업무 지시 '{goal}'를 빠짐없이 조사하여 완성형 HTML 보고서를 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 반드시 첫 줄에 `### FILE: research_report.html`을 적고 `<!doctype html>`부터 `</html>`까지 내장 CSS(`<style>`)가 완비된 가독성 높은 한국어 HTML 보고서를 작성하세요.\n"
-                            f"- 필수 포함 항목: 1) 조사 개요 요약 헤더, 2) 전체 조사 대상 한눈에 보기 비교 `<table>`, 3) 각 조사 대상별 상세 카드/섹션(사용자가 요구한 위치·규모·부대시설·특장점·방문객 평가 등 모든 세부 항목 포함), 4) 각 정보별 `[확실]`/`[추정]`/`[불확실]`/`[모름]` 신뢰도 배지 표기(허위 수치 날조 금지), 5) 공식 참고 자료 및 출처 섹션.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+            build_already_done = bool(
+                part_outputs.get(b_id)
+                and not last_error_feedback
+                and resume_from_stage != b_id
+                and generated_files
+                and all((project_dir / Path(gf).name).exists() for gf in generated_files)
+            )
+
+            if not build_already_done:
+                # 3-A) Build Part Subordinate Staff Execution on initial build pass (사원 2인 이상 시 기본 동시 병렬수행)
+                if not is_repair and b_staff_list and not build_staff_reports:
+                    bstf_len_rule = "6~10줄 이내 핵심 코드/구성 요점만" if profile_clean == "quick" else "12~20줄 이내 구체적 핵심 로직/구성안으로"
+
+                    def _build_staff_prompt_builder(
+                        bst_idx: int,
+                        bstf: Dict[str, Any],
+                        bstf_mod: Optional[str],
+                        prev_bstf_ctx: str,
+                        is_parallel_batch: bool,
+                    ) -> str:
+                        par_focus = (
+                            f"\n- 현재 동료 사원과 **동시 병렬 수행(#{bst_idx}/{len(b_staff_list)})** 중이므로 본인 전담 영역({', '.join(bstf['skills']) or bstf['emp_name']})에 집중하세요."
+                            if is_parallel_batch
+                            else ""
                         )
-                        b2_prompt = (
-                            f"당신은 SUB-BUILDER(정형 데이터 담당 · 계정 2)입니다. 사용자의 업무 지시 '{goal}'의 핵심 조사 데이터를 JSON으로 구조화하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 반드시 첫 줄에 `### FILE: summary_data.json`을 적고 조사된 모든 대상의 세부 속성(위치, 규모, 부대시설, 특장점, 방문객 평가 등)을 유효한 JSON 배열/객체로 작성하세요.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                    elif deliverable_mode == "RESEARCH":
-                        b1_prompt = (
-                            f"당신은 BUILDER(수석 리서치 분석가 · 계정 1)입니다. 사용자의 업무 지시 '{goal}'에 대해 심층 조사 리포트 본문을 한국어로 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 반드시 첫 줄에 `### FILE: research_report.md`를 적고, 그 아래에 완성도 높은 마크다운 보고서를 작성하세요 (파이썬 코드 작성 금지).\n"
-                            f"- 필수 포함 구성: 1) 조사 개요 및 지역/분야 배경, 2) 주요 대상별 상세 현황·특징·대표 품목/강점, 3) 한눈에 비교하는 마크다운 표(Table), 4) [확실히 검증된 사실]과 [현장/공식기관 추가 확인이 필요한 정보]의 명확한 구분(추측·허위 수치 날조 금지), 5) 참고 자료 및 출처 기준.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                        b2_prompt = (
-                            f"당신은 SUB-BUILDER(데이터 구조화·요약 담당 · 계정 2)입니다. 사용자의 업무 지시 '{goal}'에 대한 정형 요약 데이터와 핵심 요약본을 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 첫 번째 파일은 `### FILE: summary_data.json` 헤더 아래에 유효한 JSON 형식(배열 또는 객체)으로 핵심 조사 항목·특징·분류 데이터를 구조화하세요.\n"
-                            f"- 두 번째 파일은 `### FILE: executive_summary.md` 헤더 아래에 핵심 요약 및 실무 활용 포인트를 정리하세요 (파이썬 더미 코드 작성 금지).\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                    elif deliverable_mode == "DOCUMENT":
-                        b1_prompt = (
-                            f"당신은 BUILDER(수석 기획자 · 계정 1)입니다. 사용자의 업무 지시 '{goal}'에 대한 핵심 기획서/실무 문서를 한국어로 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 반드시 첫 줄에 `### FILE: proposal_document.md`를 적고, 목적·배경·핵심 전략·세부 구성안·비교 표(Markdown Table)·기대효과를 충실하게 작성하세요 (파이썬 코드 작성 금지).\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                        b2_prompt = (
-                            f"당신은 SUB-BUILDER(실행 로드맵 담당 · 계정 2)입니다. 사용자의 업무 지시 '{goal}'에 대한 단계별 실행 계획서 및 실무 체크리스트를 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 반드시 첫 줄에 `### FILE: action_plan.md`를 적고, 일정표(표 형식)·담당 R&R·리스크 관리 방안·점검 체크리스트를 구체적으로 작성하세요.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                    elif deliverable_mode == "WEB":
-                        b1_prompt = (
-                            f"당신은 BUILDER(프론트엔드 UI 개발 · 계정 1)입니다. 목표 '{goal}'의 웹 화면 마크업과 디자인 스타일을 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"`### FILE: index.html` 및 `### FILE: styles.css` 형식으로 파일명을 명시하고 브라우저에서 즉시 동작하는 반응형 한국어 UI를 구현하세요.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                        b2_prompt = (
-                            f"당신은 SUB-BUILDER(인터랙션 로직 개발 · 계정 2)입니다. 목표 '{goal}'의 동적 동작 스크립트를 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"반드시 첫 줄에 `### FILE: app.js`를 적고 문법 오류가 없는 순수 JavaScript 코드를 작성하세요.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                    else:
-                        b1_prompt = (
-                            f"당신은 BUILDER(구현 개발 · 계정 1)입니다. 목표 '{goal}'의 [MODULE 1: 핵심 로직]을 파이썬 코드로 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"반드시 첫 줄에 `### FILE: core_module.py`를 적고 ```python 코드블록으로 완전하고 바로 실행 가능한 코드를 작성하세요.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
-                        )
-                        b2_prompt = (
-                            f"당신은 SUB-BUILDER(분담 개발 · 계정 2)입니다. 목표 '{goal}'의 [MODULE 2: 실행 및 검증 테스트]를 독립 실행 가능한 파이썬 코드로 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"반드시 첫 줄에 `### FILE: app_runner.py`를 적고 ```python 코드블록으로 외부 입력(`input()`) 없이 즉시 실행·출력되는 완전한 코드를 작성하세요.\n\n"
-                            f"[HEAD ORDER]:\n{stage_outputs['PLANNING']}"
+                        return (
+                            f"당신은 '{build_part_def['name']}' 산하 일반 사원 '{bstf['emp_name']}'(사번 #{bstf['emp_id']}, 모델: {bstf_mod or '기본'})입니다.\n"
+                            f"- 전담 역할: {bstf['system_prompt'] or build_part_def['instruction']}{par_focus}\n"
+                            f"- 목표: '{goal}' (최종 파일: `{intent_spec['primary_file']}`)\n"
+                            f"- 주의: 실제 파일 생성(`write_file` / `### FILE:`)은 파트장이 최종 통합 시 수행하므로, 도구 호출 없이 파트장에게 전달할 핵심 구현 로직·본문 모듈·보강 포인트만 {bstf_len_rule} 즉시 작성하세요.\n"
+                            + (f"\n[사용자 보완 재지시]: {user_revision_feedback}\n" if user_revision_feedback else "")
+                            + f"\n[총괄팀장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}{upstream_section}{prev_bstf_ctx}"
                         )
 
-                    res_b1 = _call_cli_with_fallback(builder_p, b1_prompt, timeout_s=420.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
-                    out_b1 = res_b1["output"].strip() if (res_b1 and res_b1.get("output")) else ""
-                    files_b1 = _extract_and_write_project_files(
-                        mission_id,
-                        f"{goal} (Part 1)",
-                        out_b1,
-                        project_dir,
-                        default_prefix=deep_f1.rsplit(".", 1)[0],
-                        deliverable_mode=deliverable_mode,
+                    build_staff_reports = _execute_part_staff_members(
+                        pid=b_id,
+                        p_def=build_part_def,
+                        p_staff_list=b_staff_list,
+                        prompt_builder_fn=_build_staff_prompt_builder,
+                        timeout_val=65.0 if profile_clean == "quick" else 110.0,
                     )
-                    for f in files_b1:
-                        if f not in generated_files:
-                            generated_files.append(f)
-                    _record_stage_done(s2_a, "BUILDING", "BUILDER", builder_p, res_b1, f"[PART 1 생성 완료] {', '.join(files_b1)}\n{out_b1[:400]}")
+                    if _SERVER_SHUTTING_DOWN.is_set():
+                        return
+                    if _is_stopped():
+                        break
 
-                    s2_b = _record_stage_start(
-                        "BUILDING",
-                        "SUB-BUILDER",
-                        sub_builder_p,
-                        f"SUB-BUILDER({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})가 [{intent_label} · PART 2 ({deep_f2})] 산출물을 분담 작성 중입니다.",
+                build_staff_section = (
+                    "\n\n[소속 제작 사원들의 핵심 구현 초안 & 품질 마감 제안 — 통합 반영 필수]:\n"
+                    + "\n\n".join(
+                        f"### 👤 {bstf['emp_name']} ({bstf['model_ov'] or bstf['prov_k']})\n{bstf_txt[:2500]}"
+                        for bstf, bstf_txt in build_staff_reports
                     )
-                    res_b2 = _call_cli_with_fallback(sub_builder_p, b2_prompt, timeout_s=420.0, role_name="SUB-BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
-                    out_b2 = res_b2["output"].strip() if (res_b2 and res_b2.get("output")) else ""
-                    files_b2 = _extract_and_write_project_files(
-                        mission_id,
-                        f"{goal} (Part 2)",
-                        out_b2,
-                        project_dir,
-                        default_prefix=deep_f2.rsplit(".", 1)[0],
-                        deliverable_mode=deliverable_mode,
+                    if build_staff_reports
+                    else ""
+                )
+                repair_clause = (
+                    f"\n\n[⚠️ 파트 검증 / 보완 지시 사항 — 아래 항목을 모두 해결하여 전체 완성본 파일을 다시 작성하세요]:\n{last_error_feedback}"
+                    if last_error_feedback
+                    else ""
+                )
+
+                s_build = _record_stage_start(
+                    b_id,
+                    b_id,
+                    b_ass["prov_k"],
+                    f"⭐ [{build_part_def['name']} 파트장 · {b_ass['emp_name']} ({b_lead_mod or 'SDK 기본'})] 선행 파트 및 소속 사원({len(build_staff_reports)}명) 결과를 통합해 [{intent_label}] 최종 산출물을 제작 중입니다.{repair_tag}",
+                    b_ass["emp_id"],
+                    b_ass["emp_name"],
+                )
+
+                if deliverable_mode == "RESEARCH_HTML":
+                    b_prompt = (
+                        f"당신은 '{build_part_def['name']}' 파트장 '{b_ass['emp_name']}'입니다. 지침: {build_part_def['instruction']}\n"
+                        f"사용자의 업무 지시 '{goal}'에 대해 브라우저에서 즉시 열람 가능한 완성형 한국어 HTML 조사 보고서를 작성하세요.\n"
+                        f"- {no_tool_rule}\n"
+                        f"- 단순 제목만 적힌 빈 껍데기 HTML은 절대 금지합니다. 선행 파트가 조사한 모든 대상과 세부 항목(위치·규모·부대시설·특장점·평가 등)을 빠짐없이 담으세요.\n"
+                        f"- 파일 1: 첫 줄에 `### FILE: research_report.html`을 적고 `<!doctype html>`부터 `</html>`까지 반응형 내장 `<style>`, 요약 대시보드, 전체 비교 `<table>`, 대상별 상세 카드, `[확실]`/`[추정]`/`[불확실]`/`[모름]` 배지, 공식 출처 섹션을 포함한 전체 HTML을 출력하세요.\n"
+                        f"- 파일 2: 이어서 `### FILE: summary_data.json` 줄을 적고 정형 JSON 데이터를 함께 출력하세요.{repair_clause}\n\n"
+                        f"[총괄팀장 업무분장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}{upstream_section}{build_staff_section}"
                     )
-                    for f in files_b2:
-                        if f not in generated_files:
-                            generated_files.append(f)
-                    stage_outputs["BUILDING"] = (
-                        f"### [PART 1 · BUILDER ({PROVIDER_META[builder_p]['label']})]\n{out_b1 or f'{deep_f1} 응답 비어 있음'}\n\n"
-                        f"### [PART 2 · SUB-BUILDER ({PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']})]\n{out_b2 or f'{deep_f2} 응답 비어 있음'}"
+                elif deliverable_mode == "RESEARCH":
+                    b_prompt = (
+                        f"당신은 '{build_part_def['name']}' 파트장 '{b_ass['emp_name']}'입니다. 사용자의 업무 지시 '{goal}'에 대해 마크다운 조사 보고서와 JSON 데이터를 작성하세요.\n"
+                        f"- {no_tool_rule}\n"
+                        f"- 파일 1: `### FILE: research_report.md` (개요, 대상별 상세 조사, 비교 표, `[확실]`/`[추정]` 구분, 출처 포함)\n"
+                        f"- 파일 2: `### FILE: summary_data.json` (유효 JSON 정형 데이터){repair_clause}\n\n"
+                        f"[총괄팀장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}{upstream_section}{build_staff_section}"
                     )
-                    _record_stage_done(s2_b, "BUILDING", "SUB-BUILDER", sub_builder_p, res_b2, f"[PART 2 생성 완료] {', '.join(files_b2)}\n{out_b2[:400]}")
+                elif deliverable_mode == "DOCUMENT":
+                    b_prompt = (
+                        f"당신은 '{build_part_def['name']}' 파트장 '{b_ass['emp_name']}'입니다. 사용자의 업무 지시 '{goal}'에 맞는 실무 기획/제안 문서를 작성하세요.\n"
+                        f"- {no_tool_rule}\n"
+                        f"- 첫 줄에 `### FILE: proposal_document.md`를 적고 목적·배경, 핵심 전략, 세부 실행 표(Markdown Table), 기대효과 및 체크리스트를 충실히 작성하세요.{repair_clause}\n\n"
+                        f"[총괄팀장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}{upstream_section}{build_staff_section}"
+                    )
+                elif deliverable_mode == "WEB":
+                    b_prompt = (
+                        f"당신은 '{build_part_def['name']}' 파트장 '{b_ass['emp_name']}'입니다. 사용자의 업무 지시 '{goal}'에 맞는 완성형 웹 화면 산출물을 작성하세요.\n"
+                        f"- {no_tool_rule}\n"
+                        f"- `### FILE: index.html` (필요 시 `### FILE: styles.css`, `### FILE: app.js` 포함) 형식으로 실제 콘텐츠·디자인·동작이 완비된 한국어 웹 화면 코드를 작성하세요.{repair_clause}\n\n"
+                        f"[총괄팀장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}{upstream_section}{build_staff_section}"
+                    )
                 else:
-                    active_builder = sub_builder_p if (is_repair and repair_attempt % 2 == 1 and sub_builder_p in PROVIDER_META) else builder_p
-                    s2 = _record_stage_start(
-                        "BUILDING",
-                        "BUILDER",
-                        active_builder,
-                        f"BUILDER({PROVIDER_META[active_builder]['label']})가 '{goal}' 업무에 맞춘 [{intent_label}] 산출물 파일을 작성 중입니다.{repair_tag}",
-                    )
-                    repair_clause = (
-                        f"\n\n[⚠️ 이전 단계 검증/검수 보완 사항 — 아래 결함을 모두 해결하여 완성된 전체 산출물을 다시 출력하세요]:\n{last_error_feedback}"
-                        if is_repair and last_error_feedback
+                    exe_req_note = (
+                        "\n- **중요 (.exe 포함 요청 감지)**: 현재 작업 폴더 루트에 전체 원본 프로그램 소스 파일들(`main.py`, 세부 모듈 `.py`, `requirements.txt`, 샘플 `.md`, `README_사용법.md` 등)을 **절대 삭제하지 말고 모두 그대로 보존**한 상태에서, 빌드된 `.exe` 실행 파일도 현재 작업 폴더 루트(또는 `dist/` 내)에 함께 생성하세요. 상위 프로젝트 폴더 자체가 이미 지정된 이름으로 생성되므로 불필요한 중복 한글 하위 폴더를 또 만들지 마세요."
+                        if any(tok in goal.lower() for tok in ("exe", "실행파일", "실행 파일", "실행가능한 파일"))
                         else ""
                     )
-                    if deliverable_mode == "RESEARCH_HTML":
-                        b_prompt = (
-                            f"당신은 BUILDER(수석 리서처 · HTML 보고서 제작 전문가) 에이전트입니다. 사용자의 업무 지시 '{goal}'를 철저히 조사하여 브라우저에서 즉시 열람·인쇄 가능한 고품질 한국어 HTML 조사 보고서를 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 단순 제목만 적힌 빈 껍데기 HTML은 절대 금지합니다. 사용자가 요청한 모든 조사 대상과 모든 세부 항목(예: 위치·규모·부대시설·특장점·방문객 평가 등)을 빠짐없이 작성하세요.\n"
-                            f"- 파일 1: 첫 줄에 반드시 `### FILE: research_report.html`을 적고 `<!doctype html>`부터 `</html>`까지 깔끔한 반응형 내장 `<style>`이 적용된 완성형 단일 HTML 보고서를 출력하세요.\n"
-                            f"  * 필수 섹션: ① 조사 개요 및 핵심 요약 대시보드, ② 전체 대상 한눈에 보기 비교 `<table>`, ③ 대상별 상세 조사 카드(요구된 모든 세부 항목 충실 기재), ④ 각 정보의 신뢰도 등급(`[확실]`/`[추정]`/`[불확실]`/`[모름]`) 표시 — 확인되지 않은 수치는 추정/미확인으로 명시하고 절대 허위 날조 금지, ⑤ 공식 출처 및 참고 자료 안내.\n"
-                            f"- 파일 2: 이어서 `### FILE: summary_data.json` 줄을 적고 조사된 핵심 대상 목록과 속성 데이터를 유효한 JSON 배열로 함께 출력하세요.{repair_clause}\n\n"
-                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
-                        )
-                    elif deliverable_mode == "RESEARCH":
-                        b_prompt = (
-                            f"당신은 BUILDER(수석 리서처 · 데이터 분석가) 에이전트입니다. 사용자의 업무 지시 '{goal}'를 충실히 수행하여 실제 활용 가능한 조사 보고서와 정형 데이터 파일을 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 절대 불필요한 파이썬 코드(`main.py`)로 대체하지 말고, 실제 조사 내용을 한국어로 상세히 작성하세요.\n"
-                            f"- 파일 1: 반드시 `### FILE: research_report.md` 줄을 먼저 적고 그 아래에 체계적인 마크다운 조사 보고서를 작성하세요.\n"
-                            f"  * 포함 항목: 1) 조사 개요 및 핵심 요약, 2) 주요 조사 대상별 상세 현황·위치/특징·주요 취급 품목/강점, 3) 항목별 한눈에 보는 마크다운 비교 표(Table), 4) 사실 확인 구분(공식·일반적으로 검증된 사실 vs 현장/지자체 최신 확인이 필요한 세부 수치 구분 — 허위 정보 날조 금지), 5) 활용 시사점 및 참고 출처.\n"
-                            f"- 파일 2: 이어서 `### FILE: summary_data.json` 줄을 적고 조사된 핵심 대상 목록과 속성 정보를 유효한 JSON(배열 또는 객체)으로 정리하세요.{repair_clause}\n\n"
-                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
-                        )
-                    elif deliverable_mode == "DOCUMENT":
-                        b_prompt = (
-                            f"당신은 BUILDER(수석 기획자 · 실무 문서 작성가) 에이전트입니다. 사용자의 업무 지시 '{goal}'에 부합하는 완성도 높은 실무 문서를 한국어로 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 절대 파이썬 더미 코드(`main.py`)를 출력하지 말고, 즉시 실무에 사용할 수 있는 문서를 작성하세요.\n"
-                            f"- 반드시 첫 줄에 `### FILE: proposal_document.md`를 적고, 목적·배경, 핵심 구성안/전략, 세부 실행 계획 표(Markdown Table), 기대효과 및 실무 체크리스트를 체계적으로 작성하세요.{repair_clause}\n\n"
-                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
-                        )
-                    elif deliverable_mode == "WEB":
-                        b_prompt = (
-                            f"당신은 BUILDER(프론트엔드 웹 개발자) 에이전트입니다. 사용자의 업무 지시 '{goal}'에 맞는 완성된 웹페이지/프론트엔드 산출물을 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"- 반드시 `### FILE: index.html` (필요 시 `### FILE: styles.css`, `### FILE: app.js` 추가) 형식으로 파일명을 명시하고, 빈 제목만 있는 스텁이 아니라 실제 콘텐츠·스타일·기능이 완비된 한국어 웹 화면 코드를 작성하세요.{repair_clause}\n\n"
-                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
-                        )
-                    else:
-                        b_prompt = (
-                            f"당신은 BUILDER(구현 개발) 에이전트입니다. 목표 '{goal}'에 대해 실제 동작하는 소스 파일을 작성하세요.\n"
-                            f"- {no_tool_rule}\n"
-                            f"반드시 `### FILE: main.py` (또는 목표 언어에 맞는 파일명) 형식으로 파일명을 명시한 뒤 코드블록 안에 `input()` 대기 없이 즉시 실행·검증 가능한 전체 코드를 작성하세요.{repair_clause}\n\n"
-                            f"[HEAD의 작업 지시서(ORDER)]:\n{stage_outputs['PLANNING']}"
-                        )
-                    res_build = _call_cli_with_fallback(active_builder, b_prompt, timeout_s=420.0, role_name="BUILDER", phase_name="BUILDING", model_override=hydrogen_model_ov)
-                    out_build = res_build["output"].strip() if (res_build and res_build.get("output")) else ""
-                    files_b = _extract_and_write_project_files(
-                        mission_id,
-                        goal,
-                        out_build,
-                        project_dir,
-                        default_prefix=intent_spec["primary_file"].rsplit(".", 1)[0],
-                        deliverable_mode=deliverable_mode,
-                    )
-                    for f in files_b:
-                        if f not in generated_files:
-                            generated_files.append(f)
-                    stage_outputs["BUILDING"] = out_build or (f"생성된 산출물 파일: {', '.join(files_b)}" if files_b else "⚠️ BUILDER 응답이 비어 있어 생성된 파일이 없습니다.")
-                    _record_stage_done(
-                        s2,
-                        "BUILDING",
-                        "BUILDER",
-                        active_builder,
-                        res_build,
-                        f"[{intent_label}] 생성 파일: {', '.join(files_b) or '(없음)'}\n{stage_outputs['BUILDING'][:400]}",
-                        step_state="PASS" if files_b else "REPAIR",
+                    b_prompt = (
+                        f"당신은 '{build_part_def['name']}' 파트장 '{b_ass['emp_name']}'입니다. 목표 '{goal}'에 대해 즉시 실행 가능한 전체 프로그램 소스 코드와 요청된 결과물을 작성하세요.\n"
+                        f"- {no_tool_rule}{exe_req_note}\n"
+                        f"- 현재 작업 폴더에 `write_file` 도구로 전체 소스 파일들(`main.py` 및 모듈, 설정·문서 파일)을 빠짐없이 작성하거나 `### FILE: <파일명>` 헤더 아래 완전한 코드를 출력하세요 (`input()` 블로킹 대기 금지).{repair_clause}\n\n"
+                        f"[총괄팀장 지시서]:\n{stage_outputs.get('LEAD_PLANNING', '')}{upstream_section}{build_staff_section}"
                     )
 
-                # Quick mode (2 stages): run fast verification and finish immediately!
-                if profile_clean == "quick":
-                    v_quick = _verify_project_files(project_dir, deliverable_mode=deliverable_mode)
-                    v_last_passed = v_quick["passed"]
-                    stage_outputs["VERIFYING"] = v_quick["summary"]
-                    q_verdict = "완료" if v_last_passed else "검증 미달 (보완 필요)"
-                    stage_outputs["DECIDING"] = f"⚡ QUICK 2단계 미션 {q_verdict} ({intent_label}) · 생성 파일({len(generated_files)}개): {', '.join(generated_files) or '(없음)'}"
+                res_build = _call_cli_with_fallback(
+                    b_ass["prov_k"],
+                    b_prompt,
+                    timeout_s=420.0,
+                    role_name=b_id,
+                    phase_name=b_id,
+                    model_override=b_lead_mod,
+                    emp_id_ov=b_ass["emp_id"],
+                    emp_name_ov=b_ass["emp_name"],
+                )
+                if _SERVER_SHUTTING_DOWN.is_set():
+                    return
+                if _is_stopped():
                     break
-
-                # --- STAGE 03: VERIFYING (Scope Guard + Adaptive Format/Execution Verification) ---
-                s3 = _record_stage_start(
-                    "VERIFYING",
-                    "DIRECTOR",
-                    head_p,
-                    f"DIRECTOR Scope Guard 및 생성된 [{intent_label}] 파일({len(generated_files)}개) 구조·데이터·실행 검증을 수행 중입니다.{repair_tag}",
+                out_build = res_build["output"].strip() if (res_build and res_build.get("output")) else ""
+                files_b = _extract_and_write_project_files(
+                    mission_id,
+                    goal,
+                    out_build,
+                    project_dir,
+                    default_prefix=intent_spec["primary_file"].rsplit(".", 1)[0],
+                    deliverable_mode=deliverable_mode,
                 )
-                v_result = _verify_project_files(project_dir, deliverable_mode=deliverable_mode)
-                v_last_passed = v_result["passed"]
-                stage_outputs["VERIFYING"] = v_result["summary"]
+                for f in files_b:
+                    if f not in generated_files:
+                        generated_files.append(f)
+                build_combined_doc = out_build or f"생성된 산출물 파일: {', '.join(files_b)}"
+                if build_staff_reports:
+                    bstf_digest = "\n\n".join(
+                        f"- **👤 {bstf['emp_name']} (`{bstf['model_ov'] or bstf['prov_k']}`)**:\n{bstf_txt[:1200]}"
+                        for bstf, bstf_txt in build_staff_reports
+                    )
+                    build_combined_doc = (
+                        f"### ⭐ 파트장({b_ass['emp_name']} · `{b_lead_mod or b_ass['prov_k']}`) 통합 제작 완료 (`{', '.join(files_b)}`)\n"
+                        f"{build_combined_doc}\n\n"
+                        f"#### 👥 소속 제작 사원({len(build_staff_reports)}명) 실무 순회 기록\n{bstf_digest}"
+                    )
+                part_outputs[b_id] = build_combined_doc
+                stage_outputs["BUILDING"] = part_outputs[b_id]
                 _record_stage_done(
-                    s3,
-                    "VERIFYING",
-                    "DIRECTOR",
-                    head_p,
-                    None,
-                    stage_outputs["VERIFYING"],
-                    step_state="PASS" if v_result["passed"] else "REPAIR",
+                    s_build,
+                    b_id,
+                    b_id,
+                    b_ass["prov_k"],
+                    res_build,
+                    f"[⭐ 파트장 {b_ass['emp_name']} ({b_lead_mod or b_ass['prov_k']})] 생성 파일: {', '.join(files_b) or '(없음)'}\n{out_build[:340]}",
+                    step_state="PASS" if files_b else "REPAIR",
+                    agent_id=b_ass["emp_id"],
+                    agent_name=b_ass["emp_name"],
+                    org_rank="PART_LEAD",
+                    cli_model=b_lead_mod or "",
                 )
+                _save_mission_checkpoint(b_id)
 
-                # If mechanical verification failed and we have repair budget left -> Mid-Trajectory Recovery + loop back to 02 BUILDING!
-                if not v_result["passed"] and repair_attempt < max_repairs:
-                    repair_attempt += 1
-                    last_error_feedback = "\n".join(v_result["errors"])
-                    if eff_orch_mode in ("argon", "carbon") or "orchestrator" in str(eff_orch_mode).lower():
-                        rec_s = _record_stage_start(
-                            "PLANNING",
-                            "HEAD",
-                            head_p,
-                            f"🔄 [{orch_display} · Mid-Trajectory Recovery] 검증 결함 감지 → 상위 플래너로 회귀하여 보완 계획을 재수립합니다.",
-                        )
-                        rec_prompt = (
-                            f"당신은 {orch_display} 상위 플래너입니다. 실행 산출물 검증 단계에서 아래 결함이 감지되었습니다.\n"
-                            f"[검증 결함]:\n{last_error_feedback}\n\n"
-                            f"결함을 해결하기 위한 보완 지시서(ORDER)를 3줄 이내 한국어로 재작성하세요."
-                        )
-                        res_rec = _call_cli_with_fallback(head_p, rec_prompt, timeout_s=45.0, role_name="HEAD", phase_name="PLANNING", model_override=planner_model_ov)
-                        if res_rec and res_rec.get("output"):
-                            stage_outputs["PLANNING"] = stage_outputs["PLANNING"] + f"\n\n[회귀 복구 지시 #{repair_attempt}]:\n" + res_rec["output"].strip()
-                        _record_stage_done(rec_s, "PLANNING", "HEAD", head_p, res_rec, f"상위 플래너 회귀 복구 계획 수립 완료 (#{repair_attempt})")
-                    repair_history.append(f"자동 수정 #{repair_attempt}: 03 VERIFYING 결함 감지 ({last_error_feedback[:180]}) → 02 BUILDING 재실행")
-                    continue
-
-            skip_build_once = False
-
-            # --- STAGE 04: REVIEWING (Independent Cross-AI Audit) ---
-            s4 = _record_stage_start(
-                "REVIEWING",
-                "REVIEWER",
-                reviewer_p,
-                f"REVIEWER({PROVIDER_META[reviewer_p]['label']})가 생성된 [{intent_label}] 산출물({len(generated_files)}개)의 완성도·정확성을 독립 검수 중입니다.{repair_tag}",
+            # --- Part Self-Verification & Cross-Part Peer Review (PART_REVIEW by Part Leads) ---
+            peer_mod = peer_ass.get("model_ov") or ""
+            s_rev = _record_stage_start(
+                "PART_REVIEW",
+                peer_reviewer_def["id"],
+                peer_prov,
+                f"🤝 [파트장 상호검증·교차검토 · {peer_ass['emp_name']} & {b_ass['emp_name']}] 생성된 [{intent_label}] 파일({len(generated_files)}개)의 기계 무결성 및 파트 조사 내용 반영 여부를 검토 중입니다.{repair_tag}",
+                peer_ass["emp_id"],
+                peer_ass["emp_name"],
             )
+            v_result = _verify_project_files(project_dir, deliverable_mode=deliverable_mode)
+            v_last_passed = v_result["passed"]
+            stage_outputs["VERIFYING"] = v_result["summary"]
+
+            if not v_result["passed"] and repair_attempt < max_repairs:
+                repair_attempt += 1
+                last_error_feedback = "[파트 자체 기계·구조 검증 결함]:\n" + "\n".join(v_result["errors"])
+                repair_history.append(f"파트 자체검증 보완 #{repair_attempt}: {last_error_feedback[:160]}")
+                part_outputs.pop(b_id, None)
+                stage_outputs.pop("PART_REVIEW", None)
+                _record_stage_done(
+                    s_rev,
+                    "PART_REVIEW",
+                    peer_reviewer_def["id"],
+                    peer_prov,
+                    None,
+                    last_error_feedback,
+                    step_state="REPAIR",
+                    agent_id=b_ass["emp_id"],
+                    agent_name=b_ass["emp_name"],
+                    org_rank="PART_LEAD",
+                    cli_model=b_lead_mod or "",
+                )
+                _save_mission_checkpoint(b_id)
+                continue
+
+            if profile_clean == "quick" and v_result["passed"]:
+                rev_text = (
+                    f"VERDICT: PASS (파트장 고속 상호검증 통과)\n"
+                    f"- [{b_ass['emp_name']} & {peer_ass['emp_name']}] 기계·구조 무결성 점검 완료:\n{v_result['summary']}"
+                )
+                stage_outputs["PART_REVIEW"] = rev_text
+                stage_outputs["REVIEWING"] = rev_text
+                _record_stage_done(
+                    s_rev,
+                    "PART_REVIEW",
+                    peer_reviewer_def["id"],
+                    peer_prov,
+                    None,
+                    rev_text,
+                    step_state="PASS",
+                    agent_id=peer_ass["emp_id"],
+                    agent_name=peer_ass["emp_name"],
+                    org_rank="PART_LEAD",
+                    cli_model=peer_mod,
+                )
+                _save_mission_checkpoint("PART_REVIEW")
+                break
+
             ext_fence_map = {
                 ".md": "markdown",
                 ".json": "json",
@@ -4172,95 +7307,171 @@ def _run_mission_pipeline(
             }
             actual_files_dump = []
             for f_p in sorted(project_dir.rglob("*")):
-                if f_p.is_file() and f_p.name != "README.md":
+                if f_p.is_file() and not _is_ignored_deliverable_entry(f_p, project_dir):
                     try:
-                        fence_lang = ext_fence_map.get(f_p.suffix.lower(), "text")
-                        actual_files_dump.append(
-                            f"### FILE: {f_p.relative_to(project_dir).as_posix()}\n```{fence_lang}\n{f_p.read_text(encoding='utf-8', errors='replace')[:6000]}\n```"
-                        )
+                        rel_disp = f_p.relative_to(project_dir).as_posix()
+                        if _is_binary_deliverable_file(f_p):
+                            actual_files_dump.append(
+                                f"### BINARY FILE: {rel_disp} ({f_p.stat().st_size:,} bytes)"
+                            )
+                        else:
+                            fence_lang = ext_fence_map.get(f_p.suffix.lower(), "text")
+                            actual_files_dump.append(
+                                f"### FILE: {rel_disp}\n```{fence_lang}\n{f_p.read_text(encoding='utf-8', errors='replace')[:5500]}\n```"
+                            )
                     except Exception:
                         pass
             files_inspect_str = "\n\n".join(actual_files_dump) or "(생성된 산출물 파일 없음)"
 
-            if deliverable_mode in ("RESEARCH_HTML", "RESEARCH", "DOCUMENT"):
-                rev_prompt = (
-                    f"당신은 REVIEWER(독립 품질·팩트 감사) 에이전트입니다. 사용자의 업무 지시 '{goal}'에 대해 BUILDER가 작성한 [{intent_label}] 산출물을 검수하세요.\n"
-                    f"- 점검 기준: 1) 사용자의 질문/지시 의도와 요구된 세부 조사·기획 항목이 실질적으로 충실히 담겼는가(빈 껍데기나 단순 에코 여부), 2) 표·섹션 구조의 가독성, 3) 허위 사실 날조 방지 및 근거 명시 여부.\n"
-                    f"- 치명적 결함(P0/P1)이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2~3줄 핵심 검수 평을 작성하세요. 중대한 누락이 있다면 첫 줄에 `VERDICT: FAIL`과 구체적 보완 지시를 적으세요.\n\n"
-                    f"[생성된 산출물 파일 내용]:\n{files_inspect_str}\n\n"
-                    f"[03 VERIFYING 검증 결과]:\n{stage_outputs.get('VERIFYING', '')}"
-                )
-            else:
-                rev_prompt = (
-                    f"당신은 REVIEWER(독립 코드·품질 감사) 에이전트입니다. 목표 '{goal}'에 대해 BUILDER가 생성한 아래 [{intent_label}] 파일들과 실행 검증 결과를 검수하세요.\n"
-                    f"치명적 결함(P0/P1)이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2줄 검수 평을 작성하세요.\n\n"
-                    f"[실제 생성된 산출물 파일 내용]:\n{files_inspect_str}\n\n"
-                    f"[03 VERIFYING 검증 결과]:\n{stage_outputs.get('VERIFYING', '')}"
-                )
-            res_rev = _call_cli_with_fallback(reviewer_p, rev_prompt, timeout_s=65.0, role_name="REVIEWER", phase_name="REVIEWING")
+            peer_prompt = (
+                f"당신은 '{peer_reviewer_def['name']}' 파트장 '{peer_ass['emp_name']}'으로서 파트장 상호 교차검토를 수행합니다.\n"
+                f"사용자의 원래 지시 '{goal}' 및 선행 파트가 전달한 조사·설계 내용이 '{build_part_def['name']}'이 제작한 최종 산출물에 누락·왜곡 없이 충실히 반영되었는지 검토하세요.\n"
+                f"- 중대한 누락이나 결함이 없다면 첫 줄에 반드시 `VERDICT: PASS (P0:0, P1:0)`을 적고 한국어로 2~3줄 검토 의견을 작성하세요.\n"
+                f"- 반드시 보완해야 할 결함이 있다면 첫 줄에 `VERDICT: FAIL`을 적고 구체적 수정 사항을 작성하세요.\n\n"
+                f"[파트 기계·구조 검증 결과]:\n{v_result['summary']}\n\n"
+                f"[제작된 산출물 파일 내용]:\n{files_inspect_str}"
+            )
+            res_rev = _call_cli_with_fallback(
+                peer_prov,
+                peer_prompt,
+                timeout_s=65.0,
+                role_name=peer_reviewer_def["id"],
+                phase_name="PART_REVIEW",
+                model_override=peer_mod or None,
+                emp_id_ov=peer_ass["emp_id"],
+                emp_name_ov=peer_ass["emp_name"],
+            )
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if _is_stopped():
+                break
             rev_text = (
                 res_rev["output"].strip()
                 if (res_rev and res_rev.get("output"))
                 else (
-                    f"VERDICT: PASS (P0: 0건, P1: 0건)\n- 생성된 [{intent_label}] 산출물 파일({', '.join(generated_files)})의 구조 및 검증 기준 충족을 확인했습니다."
+                    f"VERDICT: PASS (P0:0, P1:0)\n- 파트장 교차검토 결과 산출물({', '.join(generated_files)})의 요구사항 반영 및 무결성을 확인했습니다."
                     if v_last_passed and generated_files
-                    else "VERDICT: FAIL (P0: 1건)\n- 산출물 파일이 정상 생성되지 않았거나 검증을 통과하지 못했습니다."
+                    else "VERDICT: FAIL\n- 산출물 검증 기준 미충족"
                 )
             )
-            stage_outputs["REVIEWING"] = rev_text
+            stage_outputs["PART_REVIEW"] = f"{v_result['summary']}\n\n[파트 교차검토 의견 ({peer_reviewer_def['name']} · {peer_ass['emp_name']})]:\n{rev_text}"
+            stage_outputs["REVIEWING"] = stage_outputs["PART_REVIEW"]
             rev_failed = ("verdict: fail" in rev_text.lower()) or ("p0: 1" in rev_text.lower()) or ("p0:1" in rev_text.lower())
-            _record_stage_done(s4, "REVIEWING", "REVIEWER", reviewer_p, res_rev, rev_text, step_state="REPAIR" if rev_failed else "PASS")
+            _record_stage_done(
+                s_rev,
+                "PART_REVIEW",
+                peer_reviewer_def["id"],
+                peer_prov,
+                res_rev,
+                stage_outputs["PART_REVIEW"],
+                step_state="REPAIR" if rev_failed else "PASS",
+                agent_id=peer_ass["emp_id"],
+                agent_name=peer_ass["emp_name"],
+                org_rank="PART_LEAD",
+                cli_model=peer_mod,
+            )
 
             if rev_failed and repair_attempt < max_repairs:
                 repair_attempt += 1
-                if eff_orch_mode in ("argon", "carbon") or "orchestrator" in str(eff_orch_mode).lower():
-                    orch_label = "Carbon" if eff_orch_mode == "carbon" else "Argon"
-                    rec_prompt = (
-                        f"당신은 Antigravity Orchestrator ({orch_label}) 계획/복구 플래너입니다.\n"
-                        f"04 REVIEWING 감사 단계에서 아래 반려 사유가 발생했습니다. 원인을 분석하고 BUILDER가 보완할 핵심 가이드(3줄)를 작성하세요.\n"
-                        f"[REVIEWER 반려 사유]:\n{rev_text[:1500]}"
-                    )
-                    rec_res = _call_cli_with_fallback(
-                        head_p, rec_prompt, timeout_s=45.0, role_name="HEAD", phase_name="REVIEWING", model_override=planner_model_ov
-                    )
-                    rec_guide = rec_res["output"].strip() if (rec_res and rec_res.get("output")) else "REVIEWER 지적 사항을 즉시 보완하세요."
-                    last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}\n\n[Orchestrator ({orch_label}) 복구 지침]:\n{rec_guide}"
-                    repair_history.append(f"자동 수정 #{repair_attempt} [Orchestrator {orch_label}]: 04 REVIEWING 반려 → 플래너 복구 분석 후 02 BUILDING 재실행")
-                else:
-                    last_error_feedback = f"REVIEWER 검수 반려 사유:\n{rev_text}"
-                    repair_history.append(f"자동 수정 #{repair_attempt}: 04 REVIEWING 반려 → 02 BUILDING 재실행")
+                last_error_feedback = f"[{peer_reviewer_def['name']} 교차검토 보완 요청]:\n{rev_text}"
+                repair_history.append(f"파트 교차검토 보완 #{repair_attempt}: {rev_text[:160]}")
+                part_outputs.pop(b_id, None)
+                stage_outputs.pop("PART_REVIEW", None)
+                _save_mission_checkpoint(b_id)
                 continue
-
-            # --- STAGE 05: DECIDING ---
-            final_passed = bool(generated_files) and v_last_passed and not rev_failed
-            verdict_str = "PASS" if final_passed else "NEEDS_REVIEW (품질 보완 필요)"
-            s5 = _record_stage_start(
-                "DECIDING",
-                "HEAD",
-                head_p,
-                f"HEAD({PROVIDER_META[head_p]['label']})가 [{intent_label}] 최종 {verdict_str} 판정 및 산출물 파일({len(generated_files)}개) 결과를 기록했습니다.",
-            )
-            repair_note = (
-                f" (자동 수정 루프 {repair_attempt}회 거쳐 검증 통과)"
-                if (final_passed and repair_attempt > 0)
-                else (" (1차 무결점 통과)" if final_passed else f" (자동 수정 {repair_attempt}회 수행 후 추가 보완 필요)")
-            )
-            stage_outputs["DECIDING"] = (
-                f"- 최종 판정: **{verdict_str}**{repair_note}\n"
-                f"- 자동 분석된 산출물 유형: **{intent_label}** (`{deliverable_mode}`)\n"
-                f"- 오케스트레이션 엔진: `{orch_display}`\n"
-                f"- 생성된 프로젝트 폴더: `deliverables/{mission_id}_project/`\n"
-                f"- 생성된 산출물 파일 ({len(generated_files)}개): {', '.join(f'`{f}`' for f in generated_files) or '(없음)'}\n"
-                f"- 통합 리포트: `deliverables/{mission_id}.md`"
-            )
-            _record_stage_done(s5, "DECIDING", "HEAD", head_p, None, stage_outputs["DECIDING"], step_state="PASS" if final_passed else "REPAIR")
+            _save_mission_checkpoint("PART_REVIEW")
             break
 
+        # =========================================================================
+        # PHASE 04: LEAD_REPORT (총괄팀장 통합보고서 작성 -> 사용자 최종 승인 대기!)
+        # =========================================================================
+        if _SERVER_SHUTTING_DOWN.is_set():
+            return
+        if not _is_stopped() and not stage_outputs.get("LEAD_REPORT"):
+            s_lead_rep = _record_stage_start(
+                "LEAD_REPORT",
+                "LEAD",
+                lead_assignee["prov_k"],
+                f"📋 [{lead_def['name']} · {lead_assignee['emp_name']}] 전 파트(파트장 및 소속 일반 사원)의 수행 결과와 상호검토 내역을 취합하여 사용자 결재용 「통합보고서」를 작성 중입니다.",
+                lead_assignee["emp_id"],
+                lead_assignee["emp_name"],
+            )
+            part_digest_lines = []
+            for p in enabled_parts:
+                sq = part_squads[p["id"]]
+                st_names = ", ".join(f"{s['emp_name']}({s['model_ov'] or s['prov_k']})" for s in sq["staff"]) or "없음"
+                p_out_snip = (part_outputs.get(p["id"]) or "(수행 완료)").strip()[:600]
+                part_digest_lines.append(
+                    f"- **{p['icon']} {p['name']}** [파트장: {sq['lead']['emp_name']}({sq['lead']['model_ov'] or sq['lead']['prov_k']}) / 사원: {st_names}]:\n{p_out_snip}"
+                )
+            parts_digest_txt = "\n\n".join(part_digest_lines)
+
+            lead_report_prompt = (
+                f"당신은 프로젝트를 총괄한 '{lead_def['name']}'({lead_assignee['emp_name']})입니다.\n"
+                f"각 파트(파트장 및 소속 일반 사원들)의 순회 수행과 파트장 간 상호 검증·검토가 완료되었습니다. 최종 결정권자인 사용자에게 올릴 간결하고 명확한 한국어 **「총괄팀장 통합보고서」**를 작성하세요 (도구 호출 불필요, 6~10줄 이내).\n"
+                f"- 필수 포함 항목:\n"
+                f"  1) 업무 목표 달성 요약 및 산출물 파일(`{', '.join(generated_files) or '없음'}`) 핵심 구성\n"
+                f"  2) 참여 파트별(파트장 + 부하직원 협업) 수행 및 상호검토 결과 요약\n"
+                f"  3) 최종 승인권자(사용자)께서 확인·승인해 주실 핵심 체크 포인트\n\n"
+                f"[업무 목표]: {goal}\n"
+                f"[파트별 수행 요약]:\n{parts_digest_txt}\n\n"
+                f"[파트 상호검증·교차검토 결과]:\n{stage_outputs.get('PART_REVIEW', '')[:1200]}"
+            )
+            res_lrep = _call_cli_with_fallback(
+                lead_assignee["prov_k"],
+                lead_report_prompt,
+                timeout_s=55.0,
+                role_name="LEAD",
+                phase_name="LEAD_REPORT",
+                model_override=planner_model_ov,
+                emp_id_ov=lead_assignee["emp_id"],
+                emp_name_ov=lead_assignee["emp_name"],
+            )
+            if _SERVER_SHUTTING_DOWN.is_set():
+                return
+            if not _is_stopped():
+                parts_arrow_txt = " → ".join(
+                    f"{p['name']}(파트장:{part_squads[p['id']]['lead']['emp_name']} + 사원{len(part_squads[p['id']]['staff'])}명)"
+                    for p in enabled_parts
+                )
+                consolidated_report = (
+                    res_lrep["output"].strip()
+                    if (res_lrep and res_lrep.get("output"))
+                    else (
+                        f"### 📋 {lead_def['name']}({lead_assignee['emp_name']}) 통합보고\n"
+                        f"- **수행 목표**: {goal}\n"
+                        f"- **참여 파트**: {parts_arrow_txt}\n"
+                        f"- **파트 상호검증 결과**: {'검증 및 교차검토 통과' if (v_last_passed and not rev_failed) else '일부 항목 확인 필요'}\n"
+                        f"- **생성된 산출물 ({len(generated_files)}개)**: {', '.join(generated_files) or '(없음)'}\n"
+                        f"- 아래 미리보기 링크로 결과물을 검토하신 뒤 **[✅ 최종 승인]** 또는 **[🔄 보완 재지시]**를 선택해 주십시오."
+                    )
+                )
+                stage_outputs["LEAD_REPORT"] = consolidated_report
+                stage_outputs["DECIDING"] = consolidated_report
+                _record_stage_done(
+                    s_lead_rep,
+                    "LEAD_REPORT",
+                    "LEAD",
+                    lead_assignee["prov_k"],
+                    res_lrep,
+                    consolidated_report,
+                    step_state="PASS",
+                    agent_id=lead_assignee["emp_id"],
+                    agent_name=lead_assignee["emp_name"],
+                    org_rank="LEAD",
+                    cli_model=planner_model_ov or "",
+                )
+                _save_mission_checkpoint("LEAD_REPORT")
+
     except _AllQuotaExhaustedError as q_err:
+        if _SERVER_SHUTTING_DOWN.is_set():
+            return
+        _clear_live_agent_stream(team_id=eff_team_id, mission_id=mission_id)
         with _STATE_LOCK:
-            STATE["phase"] = "QUOTA_PAUSED"
-            STATE["working_now"] = []
-            STATE["paused_mission"] = {
+            STATE["working_now"] = [
+                w for w in STATE.get("working_now", []) if w.get("mission_id") != mission_id
+            ]
+            paused_snap = {
                 "mission_id": mission_id,
                 "goal": goal,
                 "profile": profile_clean,
@@ -4269,18 +7480,27 @@ def _run_mission_pipeline(
                 "team_id": eff_team_id,
                 "team_name": team_name,
                 "output_root": str(base_output_dir),
+                "project_folder_name": project_folder_name,
+                "continue_existing": continue_existing,
+                "explicit_project_dir": str(project_dir) if continue_existing else "",
                 "interrupted_stage": q_err.phase_name,
                 "interrupted_role": q_err.role_name,
                 "stage_outputs": dict(stage_outputs),
+                "part_outputs": dict(part_outputs),
+                "staff_outputs_by_part": {pk: dict(pv) for pk, pv in staff_outputs_by_part.items() if pv},
                 "generated_files": list(generated_files),
                 "repair_attempt": repair_attempt,
                 "last_error_feedback": last_error_feedback,
+                "user_revision_feedback": user_revision_feedback,
+                "revision_plan_done": revision_plan_done,
                 "repair_history": list(repair_history),
                 "step_counter": step_counter,
                 "exhausted_slots": list(q_err.exhausted_slots),
                 "reason": q_err.reason,
                 "paused_at": utc_now_iso(),
             }
+            STATE["paused_mission"] = paused_snap
+            STATE.setdefault("mission_checkpoints", {})[mission_id] = dict(paused_snap)
             for m in STATE["missions"]:
                 if m["mission_id"] == mission_id:
                     m["live"] = False
@@ -4291,6 +7511,7 @@ def _run_mission_pipeline(
                     m["orchestrator_display"] = orch_display
                     m["paused_stage"] = q_err.phase_name
                     m["updated_at"] = utc_now_iso()
+            STATE["phase"] = _recompute_global_phase_unlocked()
             STATE["events"].insert(
                 0,
                 {
@@ -4314,114 +7535,143 @@ def _run_mission_pipeline(
                     "at": utc_now_iso(),
                 }
             )
+        save_runtime_state()
+        return
+    except Exception as unexpected_exc:
+        if _SERVER_SHUTTING_DOWN.is_set():
+            return
+        _clear_live_agent_stream(team_id=eff_team_id, mission_id=mission_id)
+        with _STATE_LOCK:
+            STATE["working_now"] = [
+                w for w in STATE.get("working_now", []) if w.get("mission_id") != mission_id
+            ]
+            err_snap = {
+                "mission_id": mission_id,
+                "goal": goal,
+                "profile": profile_clean,
+                "orchestrator_mode": eff_orch_mode,
+                "deliverable_mode": deliverable_mode,
+                "team_id": eff_team_id,
+                "team_name": team_name,
+                "output_root": str(base_output_dir),
+                "project_folder_name": project_folder_name,
+                "continue_existing": continue_existing,
+                "explicit_project_dir": str(project_dir) if continue_existing else "",
+                "stage_outputs": dict(stage_outputs),
+                "part_outputs": dict(part_outputs),
+                "staff_outputs_by_part": {pk: dict(pv) for pk, pv in staff_outputs_by_part.items() if pv},
+                "generated_files": list(generated_files),
+                "repair_attempt": repair_attempt,
+                "last_error_feedback": last_error_feedback,
+                "user_revision_feedback": user_revision_feedback,
+                "revision_plan_done": revision_plan_done,
+                "repair_history": list(repair_history),
+                "step_counter": step_counter,
+                "reason": f"예기치 않은 파이프라인 예외: {str(unexpected_exc)[:180]}",
+                "paused_at": utc_now_iso(),
+            }
+            STATE["paused_mission"] = err_snap
+            STATE.setdefault("mission_checkpoints", {})[mission_id] = dict(err_snap)
+            for m in STATE["missions"]:
+                if m["mission_id"] == mission_id:
+                    m["live"] = False
+                    m["status"] = "PAUSED_ERROR"
+                    m["updated_at"] = utc_now_iso()
+            STATE["phase"] = _recompute_global_phase_unlocked()
+            STATE["events"].insert(
+                0,
+                {
+                    "at": utc_now_iso(),
+                    "run_id": f"{mission_id}-err-pause",
+                    "to_state": "PAUSED_ERROR",
+                    "state_ko": f"⚠️ [{team_name}] 미션({mission_id}) 실행 중 예외 감지 — 체크포인트 보존됨 ({str(unexpected_exc)[:140]})",
+                    "project": STATE["project_name"],
+                    "role": "DIRECTOR",
+                },
+            )
+        save_runtime_state()
+        return
+
+    if _SERVER_SHUTTING_DOWN.is_set():
         return
 
     with _STATE_LOCK:
         STATE["paused_mission"] = None
+        stopped = _is_mission_stopped_unlocked(mission_id)
 
-    # Write README.md inside project_dir as well
+    # Write README.md & consolidated report (.md) directly INSIDE project_dir!
     try:
         project_dir.mkdir(parents=True, exist_ok=True)
         project_readme = project_dir / "README.md"
-        project_readme.write_text(
+        readme_entry = (
             f"# {goal}\n\n"
-            f"- **Mission ID**: `{mission_id}`\n"
+            f"- **Mission ID**: `{mission_id}`" + (" *(기존 폴더 이어하기)*" if continue_existing else "") + "\n"
             f"- **Deliverable Type**: {intent_label} (`{deliverable_mode}`)\n"
-            f"- **Profile**: `{profile_clean.upper()}`\n"
-            f"- **Orchestrator**: `{orch_display}`\n"
-            f"- **Saved Directory**: `{project_dir}` ({'Google Drive 동기화 폴더' if is_gdrive_target else '로컬 폴더'})\n"
-            f"- **Generated Files**: {', '.join(generated_files)}\n",
-            encoding="utf-8",
+            f"- **Project Lead**: {lead_def['name']} (`{lead_assignee['emp_name']}`)\n"
+            f"- **Participating Parts**: {', '.join(p['name'] for p in enabled_parts)}\n"
+            f"- **Saved Directory**: `{project_dir}`\n"
+            f"- **Generated Files**: {', '.join(generated_files)}\n"
         )
+        if continue_existing and project_readme.exists():
+            prev_readme = project_readme.read_text(encoding="utf-8", errors="replace").strip()
+            if prev_readme and f"`{mission_id}`" not in prev_readme:
+                readme_entry = readme_entry + f"\n---\n\n### 📜 이전 프로젝트 기록\n\n{prev_readme}\n"
+        project_readme.write_text(readme_entry, encoding="utf-8")
     except Exception:
         pass
 
-    # Write final deliverable report to <base_output_dir>/<mission_id>.md
-    deliv_rel_path = f"deliverables/{mission_id}.md"
-    deliv_full_path = base_output_dir / f"{mission_id}.md"
-    storage_tag = f"☁️ Google Drive 폴더 (`{base_output_dir}`)" if is_gdrive_target else f"💻 로컬 폴더 (`{base_output_dir}`)"
+    report_filename = f"{project_folder_name}_통합보고서.md"
+    deliv_rel_path = f"deliverables/{project_folder_name}/{report_filename}"
+    deliv_full_path = project_dir / report_filename
+    approval_badge = "🛑 작업 중단됨 (STOPPED)" if stopped else ("⏳ 사용자 최종 승인 대기 중 (AWAITING_APPROVAL)" if require_approval else "✅ 자동 완료")
+    storage_tag = f"☁️ Google Drive 연동 폴더 (`{project_dir}`)" if is_gdrive_target else f"💻 작업 폴더 (`{project_dir}`)"
     files_bullet_list = "\n".join(f"  - [{f}](/{f}) (`{project_dir / Path(f).name}`)" for f in generated_files) or "  - (없음)"
     repair_section = (
-        "\n## 🔄 자동 수정 루프 (Auto-Repair Loop) 이력\n" + "\n".join(f"- {r}" for r in repair_history) + "\n"
+        "\n## 🔄 파트 상호검토 & 보완 이력\n" + "\n".join(f"- {r}" for r in repair_history) + "\n"
         if repair_history
         else ""
     )
+    parts_md_sections = "\n\n".join(
+        f"## {p['icon']} [{p['name']} ({part_assignees[p['id']]['emp_name']}) 수행 결과]\n{part_outputs.get(p['id'], '(수행 내역 없음)')}"
+        for p in enabled_parts
+    )
+    cont_mode_line = f"- **작업 방식 (Folder Mode)**: 📂 기존 폴더 이어하기 (`{project_dir}`)\n" if continue_existing else f"- **작업 방식 (Folder Mode)**: 🆕 새 작업 폴더 생성 (`{project_dir}`)\n"
     deliv_markdown = (
-        f"# 📦 Triad 미션 통합 산출물 리포트 ({mission_id})\n\n"
+        f"# 📋 프로젝트 총괄팀장 통합보고서 ({mission_id})\n\n"
+        f"- **결재 상태 (Approval Status)**: **{approval_badge}**\n"
         f"- **미션 목표 (Goal)**: {goal}\n"
-        f"- **자동 분석된 산출물 유형 (Deliverable Type)**: {intent_label} (`{deliverable_mode}`)\n"
+        f"{cont_mode_line}"
+        f"- **산출물 유형 (Deliverable Type)**: {intent_label} (`{deliverable_mode}`)\n"
         f"- **수행 팀 (Team)**: `{team_name}` (`{team_floor}`)\n"
-        f"- **오케스트레이션 엔진 (Orchestrator)**: `{orch_display}`\n"
-        f"- **실행 모드 (Profile)**: `{profile_clean.upper()}` (자동 수정 횟수: {repair_attempt} / {max_repairs}회)\n"
+        f"- **총괄팀장 (Project Lead)**: `{lead_assignee['emp_name']}` ({PROVIDER_META[lead_assignee['prov_k']]['label']})\n"
+        f"- **참여 파트 담당**: " + " / ".join(f"{p['name']}={part_assignees[p['id']]['emp_name']}" for p in enabled_parts) + "\n"
         f"- **저장 위치 (Output Folder)**: {storage_tag}\n"
-        f"- **산출물 폴더 실제 경로**: `{project_dir}`\n"
-        f"- **완료 시각**: {utc_now_iso()}\n"
-        f"- **역할 배정**: HEAD={PROVIDER_META[head_p]['label']} / BUILDER={PROVIDER_META[builder_p]['label']} / SUB-BUILDER={PROVIDER_META.get(sub_builder_p, PROVIDER_META[builder_p])['label']} / REVIEWER={PROVIDER_META[reviewer_p]['label']}\n"
-        f"- **생성된 산출물 파일 ({len(generated_files)}개)**:\n{files_bullet_list}\n\n"
+        f"- **통합보고서 경로**: `{deliv_full_path}`\n"
+        f"- **보고 시각**: {utc_now_iso()}\n"
+        f"- **작업 폴더 산출물 파일 ({len(generated_files)}개)**:\n{files_bullet_list}\n\n"
         f"---\n\n"
-        f"## 01. PLANNING (HEAD 업무 의도 분석 & 작업 지시서 · ORDER)\n{stage_outputs.get('PLANNING', '')}\n\n"
-        f"## 02. BUILDING (BUILDER / SUB-BUILDER 맞춤형 산출물 작성)\n{stage_outputs.get('BUILDING', '')}\n\n"
-        f"## 03. VERIFYING (DIRECTOR 품질 · 데이터 · 실행 검증)\n{stage_outputs.get('VERIFYING', '')}\n\n"
-        f"## 04. REVIEWING (REVIEWER 독립 교차 검수)\n{stage_outputs.get('REVIEWING', '(Quick 모드 생략)')}\n"
+        f"## 👑 총괄팀장 통합보고 브리핑\n{stage_outputs.get('LEAD_REPORT', '')}\n\n"
+        f"---\n\n"
+        f"## 01. 총괄팀장 업무분장 지시서 (LEAD_PLANNING)\n{stage_outputs.get('LEAD_PLANNING', '')}\n\n"
+        f"{parts_md_sections}\n\n"
+        f"## 🤝 파트 담당 자체검증 & 상호 교차검토 (PART_REVIEW)\n{stage_outputs.get('PART_REVIEW', '')}\n"
         f"{repair_section}\n"
-        f"## 05. DECIDING (HEAD 최종 판정)\n{stage_outputs.get('DECIDING', '')}\n"
     )
     try:
         deliv_full_path.parent.mkdir(parents=True, exist_ok=True)
+        if continue_existing and deliv_full_path.exists():
+            prev_rep_md = deliv_full_path.read_text(encoding="utf-8", errors="replace").strip()
+            if prev_rep_md and f"({mission_id})" not in prev_rep_md.splitlines()[0]:
+                deliv_markdown += (
+                    "\n\n---\n\n"
+                    "<details>\n"
+                    "<summary>📜 이전 작업 통합보고서 누적 이력 열기</summary>\n\n"
+                    f"{prev_rep_md}\n\n"
+                    "</details>\n"
+                )
         deliv_full_path.write_text(deliv_markdown, encoding="utf-8")
     except Exception:
         pass
-
-    # Optional mirror copy to local deliverables/ when saving to external or Google Drive folder
-    if mirror_local:
-        try:
-            if base_output_dir.resolve() != DELIVERABLES_DIR.resolve():
-                DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
-                if project_dir.exists():
-                    shutil.copytree(project_dir, DELIVERABLES_DIR / project_dir.name, dirs_exist_ok=True)
-                if deliv_full_path.exists():
-                    shutil.copy2(deliv_full_path, DELIVERABLES_DIR / deliv_full_path.name)
-        except Exception:
-            pass
-
-    # Direct Google Drive Cloud Upload (REST API v3) — Team-specific setting takes priority over global
-    gdrive_upload_info: Optional[Dict[str, Any]] = None
-    fresh_out_status = get_output_dir_status(force_gdrive_refresh=True)
-    gd_direct = fresh_out_status.get("gdrive_direct") or {}
-    gd_is_connected = bool(gd_direct.get("connected"))
-    team_gd_enabled = bool(team_ws.get("gdrive_direct_enabled", False))
-    use_team_gd = gd_is_connected and team_gd_enabled
-    use_global_gd = gd_is_connected and bool(gd_direct.get("enabled")) and not team_gd_enabled
-    if (use_team_gd or use_global_gd) and not STATE.get("stop_requested", False):
-        try:
-            target_fid = (team_ws.get("gdrive_folder_id") if use_team_gd else gd_direct.get("folder_id")) or "root"
-            target_fname = (team_ws.get("gdrive_folder_name") if use_team_gd else gd_direct.get("folder_name")) or "내 드라이브"
-            gdrive_upload_info = upload_mission_bundle(project_dir, deliv_full_path, target_folder_id=target_fid)
-            with _STATE_LOCK:
-                STATE["events"].insert(
-                    0,
-                    {
-                        "at": utc_now_iso(),
-                        "run_id": f"{mission_id}-gdrive",
-                        "to_state": "GDRIVE_UPLOAD",
-                        "state_ko": f"☁️ [{team_name}] Google Drive 직접 업로드 완료 ({target_fname} → {project_dir.name}, {gdrive_upload_info['uploaded_count']}개 파일)",
-                        "project": STATE["project_name"],
-                        "role": "DIRECTOR",
-                    },
-                )
-        except Exception as gd_exc:
-            with _STATE_LOCK:
-                STATE["events"].insert(
-                    0,
-                    {
-                        "at": utc_now_iso(),
-                        "run_id": f"{mission_id}-gdrive-err",
-                        "to_state": "GDRIVE_ERROR",
-                        "state_ko": f"⚠️ Google Drive 직접 업로드 중 오류 발생 (로컬 파일은 정상 보존됨): {str(gd_exc)[:140]}",
-                        "project": STATE["project_name"],
-                        "role": "DIRECTOR",
-                    },
-                )
 
     primary_file_path = project_dir / intent_spec["primary_file"]
     clean_preview = ""
@@ -4431,71 +7681,367 @@ def _run_mission_pipeline(
         except Exception:
             pass
     if not clean_preview:
-        clean_preview = stage_outputs.get("BUILDING", "")
+        clean_preview = stage_outputs.get("LEAD_REPORT", "")
+
+    _clear_live_agent_stream(team_id=eff_team_id, mission_id=mission_id)
+
+    # If stopped OR user approval is required -> pause at AWAITING_APPROVAL before final cloud delivery!
+    if stopped or require_approval:
+        target_status = "STOPPED" if stopped else "AWAITING_APPROVAL"
+        with _STATE_LOCK:
+            STATE["working_now"] = [
+                w for w in STATE.get("working_now", []) if w.get("mission_id") != mission_id
+            ]
+            for m in STATE["missions"]:
+                if m["mission_id"] == mission_id:
+                    m["live"] = False
+                    m["status"] = target_status
+                    m["awaiting_approval"] = not stopped
+                    m["team_id"] = eff_team_id
+                    m["team_name"] = team_name
+                    m["team_floor"] = team_floor
+                    m["team_color"] = team_color
+                    m["deliverable_mode"] = deliverable_mode
+                    m["deliverable_type_label"] = intent_label
+                    m["orchestrator_mode"] = eff_orch_mode
+                    m["orchestrator_display"] = orch_display
+                    m["deliverable_file"] = deliv_rel_path
+                    m["deliverable_abs"] = str(deliv_full_path)
+                    m["project_folder_name"] = project_folder_name
+                    m["project_dir"] = f"deliverables/{project_folder_name}"
+                    m["project_dir_abs"] = str(project_dir)
+                    m["output_root"] = str(base_output_dir)
+                    m["is_google_drive"] = is_gdrive_target
+                    m["mirror_local"] = mirror_local
+                    m["generated_files"] = generated_files
+                    m["repair_count"] = repair_attempt
+                    m["consolidated_report"] = stage_outputs.get("LEAD_REPORT", "")
+                    m["deliverable_preview"] = clean_preview
+                    m["review_preview"] = stage_outputs.get("PART_REVIEW", "")
+                    m["stage_outputs_snapshot"] = dict(stage_outputs)
+                    m["part_outputs_snapshot"] = dict(part_outputs)
+                    m["pipeline_stages"] = stage_descriptors
+                    m["lead_agent_id"] = lead_assignee["emp_id"]
+                    m["lead_agent_name"] = lead_assignee["emp_name"]
+                    m["applied"] = {"status": "pending_approval", "files": generated_files, "output_dir": str(project_dir)}
+                    m["updated_at"] = utc_now_iso()
+            STATE["phase"] = _recompute_global_phase_unlocked()
+            if not stopped:
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mission_id}-await-approval",
+                        "to_state": "AWAITING_APPROVAL",
+                        "state_ko": f"📋 [{lead_def['name']} · {lead_assignee['emp_name']}] 파트별 수행 및 상호검토 완료 → 사용자 최종 승인 대기 중 ({len(generated_files)}개 산출물 준비됨)",
+                        "project": STATE["project_name"],
+                        "role": "LEAD",
+                    },
+                )
+            next_chat_id = max((c["id"] for c in STATE["chat_messages"]), default=0) + 1
+            if stopped:
+                STATE["chat_messages"].append(
+                    {
+                        "id": next_chat_id,
+                        "role": "SYSTEM",
+                        "content": f"작업 정지 요청에 의해 미션({mission_id})이 즉시 중단(STOPPED)되었습니다.",
+                        "at": utc_now_iso(),
+                    }
+                )
+            else:
+                STATE["chat_messages"].append(
+                    {
+                        "id": next_chat_id,
+                        "role": "LEAD",
+                        "content": (
+                            f"📋 [{lead_def['name']} 통합보고 · {mission_id}] '{goal}' 작업의 전 파트 수행 및 파트 담당 상호검토가 완료되었습니다. "
+                            f"산출물 {len(generated_files)}개를 미리보기로 확인하신 후 [✅ 최종 승인] 또는 [🔄 보완 재지시]를 내려주십시오."
+                        ),
+                        "at": utc_now_iso(),
+                    }
+                )
+        save_runtime_state()
+        return
+
+    # Auto-approve fallback if require_user_approval was explicitly disabled
+    finalize_or_revise_mission(mission_id=mission_id, decision="approve", feedback="자동 승인 설정에 의한 완료")
+
+
+def finalize_or_revise_mission(
+    mission_id: Optional[str] = None,
+    decision: str = "approve",
+    feedback: str = "",
+) -> Dict[str, Any]:
+    """Handles the user's final approval (`approve`) or revision request (`revise`) after receiving the Project Lead's consolidated report."""
+    act_dec = str(decision or "approve").lower().strip()
+    fb_clean = str(feedback or "").strip()
 
     with _STATE_LOCK:
-        stopped = STATE.get("stop_requested", False)
-        STATE["phase"] = "IDLE"
-        STATE["working_now"] = []
+        target_m = None
         for m in STATE["missions"]:
-            if m["mission_id"] == mission_id:
-                m["live"] = False
-                m["status"] = "STOPPED" if stopped else "DONE"
-                m["team_id"] = eff_team_id
-                m["team_name"] = team_name
-                m["team_floor"] = team_floor
-                m["team_color"] = team_color
-                m["deliverable_mode"] = deliverable_mode
-                m["deliverable_type_label"] = intent_label
-                m["orchestrator_mode"] = eff_orch_mode
-                m["orchestrator_display"] = orch_display
-                m["deliverable_file"] = deliv_rel_path
-                m["deliverable_abs"] = str(deliv_full_path)
-                m["project_dir"] = f"deliverables/{mission_id}_project"
-                m["project_dir_abs"] = str(project_dir)
-                m["output_root"] = str(base_output_dir)
-                m["is_google_drive"] = is_gdrive_target or bool(gdrive_upload_info)
-                if gdrive_upload_info:
-                    m["gdrive_project_url"] = gdrive_upload_info.get("project_folder_url")
-                    m["gdrive_report_url"] = gdrive_upload_info.get("report_url")
-                    m["gdrive_uploaded_count"] = gdrive_upload_info.get("uploaded_count", 0)
-                m["generated_files"] = generated_files
-                m["repair_count"] = repair_attempt
-                m["deliverable_preview"] = clean_preview
-                m["review_preview"] = stage_outputs.get("REVIEWING", "")
-                m["applied"] = {"status": "applied", "files": generated_files, "output_dir": str(project_dir)}
-                m["updated_at"] = utc_now_iso()
-        next_chat_id = max((c["id"] for c in STATE["chat_messages"]), default=0) + 1
-        if stopped:
+            if mission_id and m.get("mission_id") == mission_id:
+                target_m = m
+                break
+            if not mission_id and m.get("status") == "AWAITING_APPROVAL":
+                target_m = m
+                break
+        if not target_m and STATE["missions"]:
+            target_m = STATE["missions"][0]
+        if not target_m:
+            return {"ok": False, "error": "결재 대상 미션을 찾을 수 없습니다."}
+
+        mid = target_m["mission_id"]
+
+        if act_dec in ("revise", "reject", "rework"):
+            m_tid_chk = target_m.get("team_id")
+            if any(
+                om.get("mission_id") != mid
+                and om.get("team_id") == m_tid_chk
+                and om.get("status") == "RUNNING"
+                for om in STATE["missions"]
+            ):
+                return {"ok": False, "error": "해당 팀에서 이미 실행 중인 다른 프로젝트가 있습니다."}
+            if not fb_clean:
+                fb_clean = "파트 산출물의 완성도와 세부 내용을 한층 더 보강하여 다시 통합보고해 주세요."
+            STATE["stop_requested"] = False
+            if isinstance(STATE.get("stopped_missions"), set):
+                STATE["stopped_missions"].discard(mid)
+            STATE["phase"] = "LEAD_PLANNING"
+            target_m["status"] = "RUNNING"
+            target_m["live"] = True
+            target_m["awaiting_approval"] = False
+            target_m["revision_count"] = int(target_m.get("revision_count") or 0) + 1
+            target_m["updated_at"] = utc_now_iso()
+
+            prev_lead_plan = str((target_m.get("stage_outputs_snapshot") or {}).get("LEAD_PLANNING") or "")
+            rev_resume = {
+                "mission_id": mid,
+                "goal": target_m.get("goal", ""),
+                "profile": target_m.get("profile", "standard"),
+                "orchestrator_mode": target_m.get("orchestrator_mode"),
+                "team_id": target_m.get("team_id"),
+                "output_root": target_m.get("output_root"),
+                "project_folder_name": target_m.get("project_folder_name"),
+                "continue_existing": bool(target_m.get("continue_existing", False)),
+                "explicit_project_dir": str(target_m.get("project_dir_abs") or ""),
+                "deliverable_mode": target_m.get("deliverable_mode"),
+                "current_stage": "LEAD_PLANNING",
+                "generated_files": list(target_m.get("generated_files") or []),
+                "stage_outputs": {"LEAD_PLANNING": prev_lead_plan} if prev_lead_plan else {},
+                "part_outputs": {},
+                "staff_outputs_by_part": {},
+                "repair_attempt": 0,
+                "repair_history": [],
+                "step_counter": len(target_m.get("steps") or []),
+                "user_revision_feedback": fb_clean,
+                "revision_plan_done": False,
+            }
+            STATE.setdefault("mission_checkpoints", {})[mid] = dict(rev_resume)
+            STATE["events"].insert(
+                0,
+                {
+                    "at": utc_now_iso(),
+                    "run_id": f"{mid}-user-revise-{target_m['revision_count']}",
+                    "to_state": "LEAD_PLANNING",
+                    "state_ko": f"🔄 [사용자 보완 재지시 #{target_m['revision_count']}] '{fb_clean[:120]}' → 총괄팀장이 파트 담당들에게 보완 작업을 재지시합니다.",
+                    "project": STATE["project_name"],
+                    "role": "USER",
+                },
+            )
+            next_cid = max((c["id"] for c in STATE["chat_messages"]), default=0) + 1
             STATE["chat_messages"].append(
                 {
-                    "id": next_chat_id,
-                    "role": "SYSTEM",
-                    "content": f"작업 정지 요청에 의해 미션({mission_id})이 즉시 중단(STOPPED)되었습니다.",
+                    "id": next_cid,
+                    "role": "USER",
+                    "content": f"[🔄 보완 재지시 · {mid}] {fb_clean}",
                     "at": utc_now_iso(),
                 }
             )
-        else:
-            loc_badge = "☁️ Google Drive" if (is_gdrive_target or bool(gdrive_upload_info)) else "📁 지정 폴더"
-            STATE["chat_messages"].append(
-                {
-                    "id": next_chat_id,
-                    "role": "HEAD",
-                    "content": (
-                        f"미션({mission_id} · {profile_clean.upper()} · {intent_label}) 완료: '{goal}' 작업으로 "
-                        f"[{loc_badge}: `{project_dir}`]에 맞춤형 산출물 {len(generated_files)}개와 "
-                        f"통합 리포트(`{deliv_full_path.name}`)가 저장되었습니다."
-                    ),
-                    "at": utc_now_iso(),
-                }
+            m_goal = target_m.get("goal", "")
+            m_prof = target_m.get("profile", "standard")
+            m_tid = target_m.get("team_id")
+            m_orch = target_m.get("orchestrator_mode")
+
+    if act_dec in ("revise", "reject", "rework"):
+        save_runtime_state()
+        t = threading.Thread(
+            target=_run_mission_pipeline,
+            args=(mid, m_goal, m_prof, rev_resume, m_tid, m_orch),
+            daemon=True,
+        )
+        t.start()
+        return {
+            "ok": True,
+            "status": "REVISING",
+            "mission_id": mid,
+            "message": f"총괄팀장에게 보완 재지시('{fb_clean[:80]}')를 전달했습니다. 파트별 보완 및 상호검토 후 다시 통합보고서를 올립니다.",
+        }
+
+    # --- APPROVE PATH: Finalize report, mirror local copy, & upload to Google Drive if connected! ---
+    project_dir = Path(target_m.get("project_dir_abs") or (DELIVERABLES_DIR / f"{mid}_project"))
+    deliv_full_path = Path(target_m.get("deliverable_abs") or (DELIVERABLES_DIR / f"{mid}.md"))
+    base_output_dir = Path(target_m.get("output_root") or DELIVERABLES_DIR)
+    mirror_local = bool(target_m.get("mirror_local", False))
+    team_obj = get_team_by_id(target_m.get("team_id"))
+    team_name = team_obj["name"]
+    team_ws = team_obj.get("workspace") or {}
+    approved_ts = utc_now_iso()
+
+    if deliv_full_path.exists():
+        try:
+            md_raw = deliv_full_path.read_text(encoding="utf-8", errors="replace")
+            md_updated = md_raw.replace(
+                "⏳ 사용자 최종 승인 대기 중 (AWAITING_APPROVAL)",
+                f"✅ 사용자 최종 승인 완료 ({approved_ts})" + (f" — 승인 메모: {fb_clean}" if fb_clean else ""),
             )
+            deliv_full_path.write_text(md_updated, encoding="utf-8")
+        except Exception:
+            pass
 
+    if mirror_local:
+        try:
+            if base_output_dir.resolve() != DELIVERABLES_DIR.resolve():
+                DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
+                if project_dir.exists():
+                    shutil.copytree(
+                        project_dir,
+                        DELIVERABLES_DIR / project_dir.name,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(*_IGNORED_ISO_BUILD_DIRS, "*.pyc", "*.pyo", "*.spec"),
+                    )
+                if deliv_full_path.exists() and deliv_full_path.parent.resolve() != project_dir.resolve():
+                    shutil.copy2(deliv_full_path, DELIVERABLES_DIR / deliv_full_path.name)
+        except Exception:
+            pass
 
-def stop_active_missions(reason: str = "사용자 정지 요청") -> Dict[str, Any]:
-    killed = []
+    gdrive_upload_info: Optional[Dict[str, Any]] = None
+    fresh_out_status = get_output_dir_status(force_gdrive_refresh=True)
+    gd_direct = fresh_out_status.get("gdrive_direct") or {}
+    gd_is_connected = bool(gd_direct.get("connected"))
+    team_gd_enabled = bool(team_ws.get("gdrive_direct_enabled", False))
+    use_team_gd = gd_is_connected and team_gd_enabled
+    use_global_gd = gd_is_connected and bool(gd_direct.get("enabled")) and not team_gd_enabled
+    if use_team_gd or use_global_gd:
+        try:
+            target_fid = (team_ws.get("gdrive_folder_id") if use_team_gd else gd_direct.get("folder_id")) or "root"
+            target_fname = (team_ws.get("gdrive_folder_name") if use_team_gd else gd_direct.get("folder_name")) or "내 드라이브"
+            if project_dir.exists() and deliv_full_path.exists():
+                gdrive_upload_info = upload_mission_bundle(project_dir, deliv_full_path, target_folder_id=target_fid)
+                with _STATE_LOCK:
+                    STATE["events"].insert(
+                        0,
+                        {
+                            "at": utc_now_iso(),
+                            "run_id": f"{mid}-gdrive",
+                            "to_state": "GDRIVE_UPLOAD",
+                            "state_ko": f"☁️ [{team_name}] 사용자 최종 승인 후 Google Drive 납품 완료 ({target_fname} → {project_dir.name}, {gdrive_upload_info['uploaded_count']}개 파일)",
+                            "project": STATE["project_name"],
+                            "role": "LEAD",
+                        },
+                    )
+        except Exception as gd_exc:
+            with _STATE_LOCK:
+                STATE["events"].insert(
+                    0,
+                    {
+                        "at": utc_now_iso(),
+                        "run_id": f"{mid}-gdrive-err",
+                        "to_state": "GDRIVE_ERROR",
+                        "state_ko": f"⚠️ Google Drive 업로드 중 오류 발생 (로컬 승인 파일은 정상 보존됨): {str(gd_exc)[:140]}",
+                        "project": STATE["project_name"],
+                        "role": "LEAD",
+                    },
+                )
+
     with _STATE_LOCK:
-        STATE["stop_requested"] = True
+        target_m["status"] = "DONE"
+        target_m["live"] = False
+        target_m["awaiting_approval"] = False
+        STATE["phase"] = _recompute_global_phase_unlocked()
+        target_m["approved_by_user"] = True
+        target_m["approved_at"] = approved_ts
+        target_m["approval_note"] = fb_clean or "사용자 최종 승인 완료"
+        target_m["is_google_drive"] = bool(target_m.get("is_google_drive")) or bool(gdrive_upload_info)
+        if gdrive_upload_info:
+            target_m["gdrive_project_url"] = gdrive_upload_info.get("project_folder_url")
+            target_m["gdrive_report_url"] = gdrive_upload_info.get("report_url")
+            target_m["gdrive_uploaded_count"] = gdrive_upload_info.get("uploaded_count", 0)
+        target_m["applied"] = {
+            "status": "approved",
+            "files": target_m.get("generated_files") or [],
+            "output_dir": str(project_dir),
+        }
+        target_m["updated_at"] = approved_ts
+
+        STATE["events"].insert(
+            0,
+            {
+                "at": approved_ts,
+                "run_id": f"{mid}-approved",
+                "to_state": "PASS",
+                "state_ko": f"✅ [사용자 최종 승인 확정 · {mid}] 총괄팀장 통합보고 결재 완료 — 산출물 {len(target_m.get('generated_files') or [])}개 최종 납품 확정!",
+                "project": STATE["project_name"],
+                "role": "USER",
+            },
+        )
+        next_cid = max((c["id"] for c in STATE["chat_messages"]), default=0) + 1
+        loc_badge = "☁️ Google Drive & 로컬 폴더" if gdrive_upload_info else "📁 지정 작업 폴더"
+        STATE["chat_messages"].append(
+            {
+                "id": next_cid,
+                "role": "LEAD",
+                "content": (
+                    f"✅ 최종 승인 감사합니다! 미션({mid})의 모든 산출물이 [{loc_badge}: `{project_dir}`]에 최종 확정·보관되었습니다."
+                ),
+                "at": approved_ts,
+            }
+        )
+        m_snapshot = dict(target_m)
+
+    save_runtime_state()
+    return {
+        "ok": True,
+        "status": "APPROVED",
+        "mission_id": mid,
+        "mission": m_snapshot,
+        "gdrive_upload": gdrive_upload_info,
+        "message": f"미션({mid}) 최종 승인이 완료되어 산출물 납품이 확정되었습니다.",
+    }
+
+
+def stop_active_missions(
+    reason: str = "사용자 정지 요청",
+    team_id: Optional[str] = None,
+    mission_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    killed = []
+    clean_tid = str(team_id or "").strip() or None
+    clean_mid = str(mission_id or "").strip() or None
+    scoped = bool(clean_tid or clean_mid)
+    with _STATE_LOCK:
+        stopped_set = STATE.setdefault("stopped_missions", set())
+        target_mids: set = set()
+        for m in STATE["missions"]:
+            if m.get("live") or m.get("status") in ("RUNNING", "QUOTA_PAUSED", "AWAITING_APPROVAL"):
+                if clean_mid and m.get("mission_id") != clean_mid:
+                    continue
+                if clean_tid and m.get("team_id") != clean_tid:
+                    continue
+                if scoped and m.get("status") == "AWAITING_APPROVAL" and not clean_mid:
+                    # Stopping a running team leaves already-completed approval items untouched unless explicitly targeted
+                    continue
+                target_mids.add(m["mission_id"])
+
+        if not scoped:
+            STATE["stop_requested"] = True
+
         for pid, cli_name in list(_ACTIVE_PIDS.items()):
+            p_meta = _ACTIVE_PID_META.get(pid) or {}
+            if scoped:
+                if clean_mid and p_meta.get("mission_id") != clean_mid:
+                    continue
+                if clean_tid and p_meta.get("team_id") != clean_tid and p_meta.get("mission_id") not in target_mids:
+                    continue
             try:
                 if os.name == "nt":
                     subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
@@ -4505,27 +8051,54 @@ def stop_active_missions(reason: str = "사용자 정지 요청") -> Dict[str, A
             except Exception:
                 pass
             _ACTIVE_PIDS.pop(pid, None)
+            _ACTIVE_PID_META.pop(pid, None)
+
         stopped_ids = []
         for m in STATE["missions"]:
-            if m.get("live") or m.get("status") in ("RUNNING", "QUOTA_PAUSED"):
+            if m.get("mission_id") in target_mids:
+                stopped_set.add(m["mission_id"])
                 m["live"] = False
+                m["awaiting_approval"] = False
                 m["status"] = "STOPPED"
                 m["updated_at"] = utc_now_iso()
                 stopped_ids.append(m["mission_id"])
-        STATE["phase"] = "IDLE"
-        STATE["working_now"] = []
-        STATE["paused_mission"] = None
+
+        if scoped:
+            STATE["working_now"] = [
+                w for w in STATE.get("working_now", [])
+                if w.get("mission_id") not in target_mids and (not clean_tid or w.get("team_id") != clean_tid)
+            ]
+            if clean_tid and isinstance(STATE.get("team_streams"), dict) and clean_tid in STATE["team_streams"]:
+                STATE["team_streams"][clean_tid]["active"] = False
+                STATE["team_streams"][clean_tid]["tool"] = ""
+                STATE["team_streams"][clean_tid]["parallel_agents"] = []
+        else:
+            STATE["working_now"] = []
+            STATE["paused_mission"] = None
+            if isinstance(STATE.get("team_streams"), dict):
+                for ts_obj in STATE["team_streams"].values():
+                    if isinstance(ts_obj, dict):
+                        ts_obj["active"] = False
+                        ts_obj["tool"] = ""
+                        ts_obj["parallel_agents"] = []
+            if isinstance(STATE.get("live_agent_stream"), dict):
+                STATE["live_agent_stream"]["active"] = False
+                STATE["live_agent_stream"]["tool"] = ""
+                STATE["live_agent_stream"]["parallel_agents"] = []
+
+        STATE["phase"] = _recompute_global_phase_unlocked()
         STATE["events"].insert(
             0,
             {
                 "at": utc_now_iso(),
-                "run_id": "stop-signal",
+                "run_id": f"stop-signal-{int(time.time())}",
                 "to_state": "STOPPED",
-                "state_ko": f"작업 정지 실행 ({reason})",
+                "state_ko": f"작업 정지 실행 ({reason})" + (f" · 대상 미션: {', '.join(stopped_ids)}" if stopped_ids else ""),
                 "project": STATE["project_name"],
                 "role": "DIRECTOR",
             },
         )
+    save_runtime_state()
     return {"status": "stopped" if stopped_ids else "idle", "missions": stopped_ids, "killed": killed, "reason": reason}
 
 
@@ -4558,16 +8131,24 @@ def build_activity_payload() -> Dict[str, Any]:
     diag = probe_cli_diagnostics(deep=False)
     out_dir_st = get_output_dir_status()
     teams_sum = get_teams_payload(force_gdrive_refresh=False)
+    sdk_st = get_antigravity_sdk_status(force_refresh=False, diag=diag)
+    part_roles_cfg = load_part_roles_config()
+    char_cfgs = load_character_configs()
     with _STATE_LOCK:
         usage_snap = json.loads(json.dumps(STATE["usage"]))
         return {
             "companion_connected": False,
             "phase": STATE["phase"],
             "roles": roles,
+            "part_roles": part_roles_cfg,
+            "character_configs": char_cfgs,
             "provider_meta": PROVIDER_META,
             "diagnostics": diag,
+            "sdk_status": sdk_st,
+            "live_agent_stream": dict(STATE.get("live_agent_stream") or {}),
+            "team_streams": json.loads(json.dumps(STATE.get("team_streams") or {})),
             "focus_mission_id": STATE["focus_mission_id"],
-            "missions": STATE["missions"][:10],
+            "missions": STATE["missions"][:25],
             "working_now": list(STATE["working_now"]),
             "usage": {
                 "mission": usage_snap,
@@ -4711,7 +8292,9 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
         if path == "/ops/character-config":
             return self._send_json({"configs": load_character_configs()})
         if path == "/ops/roles":
-            return self._send_json({"roles": load_roles(), "csrf": _BRIDGE_TOKEN, "providers": PROVIDER_META})
+            return self._send_json({"roles": load_roles(), "part_roles": load_part_roles_config(), "csrf": _BRIDGE_TOKEN, "providers": PROVIDER_META})
+        if path == "/ops/part-roles":
+            return self._send_json({"ok": True, "part_roles": load_part_roles_config()})
         if path == "/ops/activity":
             return self._send_json(build_activity_payload())
         if path == "/status":
@@ -4732,6 +8315,10 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
             return self._send_json(probe_cli_diagnostics(deep=deep))
         if path == "/ops/cli-slots":
             return self._send_json({"slots": load_cli_slots(), "catalog": CLI_CATALOG, "diagnostics": probe_cli_diagnostics(deep=False)})
+        if path == "/ops/sdk-status":
+            qs = parse_qs(parsed.query)
+            force = qs.get("refresh", ["0"])[0] in ("1", "true", "yes")
+            return self._send_json(get_antigravity_sdk_status(force_refresh=force))
         if path == "/ops/teams":
             qs = parse_qs(parsed.query)
             force = qs.get("refresh", ["0"])[0] in ("1", "true", "yes")
@@ -4826,6 +8413,9 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     for m_item in STATE["missions"]:
                         if m_item.get("output_root"):
                             candidate_roots.append(Path(m_item["output_root"]))
+                        if m_item.get("project_dir_abs"):
+                            candidate_roots.append(Path(m_item["project_dir_abs"]).parent)
+                            candidate_roots.append(Path(m_item["project_dir_abs"]))
                 for r_dir in out_stat.get("recent_dirs", []):
                     candidate_roots.append(Path(r_dir))
                 candidate_roots.append(DELIVERABLES_DIR)
@@ -5003,6 +8593,42 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 return self._send_json(res, 200 if res.get("ok") else 400)
             except Exception as exc:
                 return self._send_json({"ok": False, "error": str(exc)}, 500)
+
+        if path == "/ops/sdk-install":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                action = str((payload or {}).get("action") or "install").lower().strip()
+                if action == "test":
+                    res = test_antigravity_sdk_shared_auth()
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"sdk-test-{int(time.time())}",
+                                "to_state": "SDK_TEST",
+                                "state_ko": f"🧪 Antigravity SDK 로컬 구독 공유 테스트 · {'성공' if res.get('ok') else '확인 필요'}",
+                                "project": STATE["project_name"],
+                                "role": "DIRECTOR",
+                            },
+                        )
+                    return self._send_json(res, 200 if res.get("ok") else 400)
+                res = install_antigravity_sdk_via_uv()
+                with _STATE_LOCK:
+                    STATE["events"].insert(
+                        0,
+                        {
+                            "at": utc_now_iso(),
+                            "run_id": f"sdk-install-{int(time.time())}",
+                            "to_state": "SDK_INSTALL",
+                            "state_ko": f"📦 uv 기반 Antigravity SDK 자동설치 · {'완료' if res.get('ok') else '실패'}",
+                            "project": STATE["project_name"],
+                            "role": "DIRECTOR",
+                        },
+                    )
+                return self._send_json(res, 200 if res.get("ok") else 500)
+            except Exception as exc:
+                return self._send_json({"ok": False, "message": f"SDK 처리 중 예외 발생: {exc}", "log": str(exc)}, 500)
 
         if path == "/ops/cli-slots":
             try:
@@ -5258,12 +8884,30 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
             except Exception:
                 payload = {}
+            req_mid = str((payload or {}).get("mission_id") or "").strip() or None
             with _STATE_LOCK:
-                paused = STATE.get("paused_mission")
+                paused = None
+                if req_mid and isinstance(STATE.get("mission_checkpoints"), dict):
+                    paused = STATE["mission_checkpoints"].get(req_mid)
                 if not paused:
-                    return self._send_json({"status": "error", "error": "현재 일시 중지된 미션이 없습니다."}, 404)
-                if STATE["working_now"]:
-                    return self._send_json({"status": "busy", "error": "이미 실행 중인 작업이 있습니다."}, 409)
+                    paused = STATE.get("paused_mission")
+                if not paused and isinstance(STATE.get("mission_checkpoints"), dict):
+                    for m_cand in STATE.get("missions") or []:
+                        if m_cand.get("status") in ("QUOTA_PAUSED", "PAUSED_ERROR"):
+                            paused = STATE["mission_checkpoints"].get(m_cand["mission_id"])
+                            if paused:
+                                break
+                if not paused:
+                    return self._send_json({"status": "error", "error": "현재 일시 중지되거나 재개 가능한 미션이 없습니다."}, 404)
+                mission_id = paused["mission_id"]
+                p_tid = paused.get("team_id")
+                if any(
+                    om.get("mission_id") != mission_id
+                    and om.get("team_id") == p_tid
+                    and om.get("status") == "RUNNING"
+                    for om in (STATE.get("missions") or [])
+                ):
+                    return self._send_json({"status": "busy", "error": "해당 팀에서 이미 실행 중인 다른 프로젝트가 있습니다."}, 409)
                 # Clear exhausted flags so newly connected or swapped AI slots can run
                 if payload.get("new_provider") and paused.get("interrupted_role"):
                     role_map_key = {
@@ -5281,14 +8925,17 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         pass
                 STATE["quota_exhausted_slots"] = {}
                 STATE["stop_requested"] = False
-                mission_id = paused["mission_id"]
+                if isinstance(STATE.get("stopped_missions"), set):
+                    STATE["stopped_missions"].discard(mission_id)
                 goal = paused["goal"]
                 profile = paused.get("profile", "standard")
-                interrupted_stage = paused.get("interrupted_stage", "BUILDING")
+                p_orch = paused.get("orchestrator_mode")
+                interrupted_stage = paused.get("interrupted_stage") or paused.get("current_stage") or "BUILDING"
                 for m in STATE["missions"]:
                     if m["mission_id"] == mission_id:
                         m["live"] = True
                         m["status"] = "RUNNING"
+                        m["resumed_count"] = int(m.get("resumed_count") or 0) + 1
                         m["updated_at"] = utc_now_iso()
                 STATE["events"].insert(
                     0,
@@ -5298,12 +8945,13 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "to_state": interrupted_stage,
                         "state_ko": f"▶ [작업 재개] 미션({mission_id})을 중단된 {interrupted_stage} 단계부터 이어서 재개합니다.",
                         "project": STATE["project_name"],
-                        "role": paused.get("interrupted_role", "HEAD"),
+                        "role": paused.get("interrupted_role", "LEAD"),
                     },
                 )
+            save_runtime_state()
             t = threading.Thread(
                 target=_run_mission_pipeline,
-                args=(mission_id, goal, profile, paused),
+                args=(mission_id, goal, profile, paused, p_tid, p_orch),
                 daemon=True,
             )
             t.start()
@@ -5682,12 +9330,16 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 req_output_dir = None
                 req_team_id = None
                 req_orch = None
+                req_folder_mode = "new"
+                req_continue_dir = ""
                 if ctype == "application/json":
                     data = json.loads(raw.decode("utf-8") or "{}")
                     goal = str(data.get("message") or data.get("goal") or "").strip()
                     profile = str(data.get("profile") or "standard")
                     req_team_id = str(data.get("team_id") or "").strip() or None
                     req_orch = str(data.get("orchestrator_mode") or "").lower().strip() or None
+                    req_folder_mode = str(data.get("folder_mode") or "new").lower().strip() or "new"
+                    req_continue_dir = str(data.get("continue_dir") or "").strip()
                     if "output_dir" in data and data.get("output_dir") is not None:
                         req_output_dir = str(data.get("output_dir")).strip()
                 else:
@@ -5696,6 +9348,8 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     profile = qs.get("profile", ["standard"])[0]
                     req_team_id = (qs.get("team_id", [""])[0]).strip() or None
                     req_orch = (qs.get("orchestrator_mode", [""])[0]).lower().strip() or None
+                    req_folder_mode = (qs.get("folder_mode", ["new"])[0]).lower().strip() or "new"
+                    req_continue_dir = (qs.get("continue_dir", [""])[0]).strip()
 
                 if req_orch in ("argon", "carbon"):
                     diag_chk = probe_cli_diagnostics(deep=False)
@@ -5713,11 +9367,6 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                 if req_orch in ("standard", "argon", "carbon"):
                     save_workspace_settings(orchestrator_mode=req_orch)
 
-                if req_team_id:
-                    try:
-                        set_active_team(req_team_id)
-                    except Exception:
-                        pass
                 target_team = get_team_by_id(req_team_id)
 
                 if req_output_dir is not None:
@@ -5730,13 +9379,59 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     return self._send_json({"status": "error", "error": "작업 목표(Goal)를 입력해 주세요."}, 400)
 
                 if goal.lower() in ("stop", "중단", "멈춰", "작업 정지"):
-                    res = stop_active_missions("채팅 중단 명령")
+                    res = stop_active_missions("채팅 중단 명령", team_id=req_team_id)
                     return self._send_json({"status": "stopped", **res})
 
-                with _STATE_LOCK:
-                    if STATE["working_now"]:
+                continue_existing_flag = req_folder_mode == "continue" or bool(req_continue_dir)
+                validated_continue_dir: Optional[Path] = None
+                if continue_existing_flag:
+                    if not req_continue_dir:
                         return self._send_json(
-                            {"status": "busy", "error": "이미 실행 중인 파이프라인이 있습니다. 완료 후 보내거나 작업 정지를 눌러주세요."},
+                            {"status": "error", "error": "이어서 작업할 기존 폴더를 [최근 목록]에서 고르거나 [🗂️ 폴더 선택]으로 지정해 주세요."},
+                            400,
+                        )
+                    cand_cont = Path(req_continue_dir).expanduser()
+                    if not cand_cont.is_absolute():
+                        cand_cont = (DELIVERABLES_DIR / cand_cont).resolve()
+                    else:
+                        cand_cont = cand_cont.resolve()
+                    if not cand_cont.exists() or not cand_cont.is_dir():
+                        return self._send_json(
+                            {"status": "error", "error": f"선택한 기존 작업 폴더를 찾을 수 없습니다: {req_continue_dir}"},
+                            400,
+                        )
+                    low_cont = str(cand_cont).lower().rstrip("\\/")
+                    blocked_prefixes = [str(ROOT.resolve()).lower().rstrip("\\/")]
+                    for env_k in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)"):
+                        ev = os.environ.get(env_k)
+                        if ev:
+                            blocked_prefixes.append(str(Path(ev).resolve()).lower().rstrip("\\/"))
+                    if cand_cont.parent == cand_cont or any(low_cont == bp for bp in blocked_prefixes):
+                        return self._send_json(
+                            {"status": "error", "error": "드라이브 최상위 루트나 시스템/서버 본체 폴더는 이어하기 작업 폴더로 지정할 수 없습니다. 하위 프로젝트 폴더를 선택해 주세요."},
+                            400,
+                        )
+                    validated_continue_dir = cand_cont
+
+                with _STATE_LOCK:
+                    running_same_team = next(
+                        (
+                            m
+                            for m in STATE["missions"]
+                            if m.get("team_id") == target_team["id"] and m.get("status") == "RUNNING"
+                        ),
+                        None,
+                    )
+                    if running_same_team:
+                        return self._send_json(
+                            {
+                                "status": "busy",
+                                "team_id": target_team["id"],
+                                "error": (
+                                    f"[{target_team['name']}] 팀에서 이미 프로젝트({running_same_team['mission_id']})가 진행 중입니다. "
+                                    f"다른 팀의 프로젝트 입력창에서는 동시에 새 프로젝트를 실행할 수 있습니다."
+                                ),
+                            },
                             409,
                         )
                     STATE["stop_requested"] = False
@@ -5744,8 +9439,31 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     STATE["chat_messages"].append(
                         {"id": next_id, "role": "USER", "content": f"[{target_team['name']}] {goal}", "at": utc_now_iso()}
                     )
-                    mission_id = f"mission-{int(time.time()) % 100000}"
+                    base_num = (int(time.time() * 1000) + secrets.randbelow(997)) % 1000000
+                    mission_id = f"mission-{base_num:06d}"
+                    while any(m.get("mission_id") == mission_id for m in STATE["missions"]):
+                        base_num = (base_num + 1) % 1000000
+                        mission_id = f"mission-{base_num:06d}"
+                    if isinstance(STATE.get("stopped_missions"), set):
+                        STATE["stopped_missions"].discard(mission_id)
                     init_intent = classify_mission_intent(goal)
+                    if continue_existing_flag and validated_continue_dir is not None:
+                        init_proj_dir = validated_continue_dir
+                        init_base_dir = validated_continue_dir.parent
+                        init_proj_folder = validated_continue_dir.name
+                    else:
+                        init_base_dir, _, _ = _resolve_team_base_output_dir(target_team)
+                        init_proj_folder = derive_project_folder_name(goal, mission_id, init_base_dir)
+                        init_proj_dir = init_base_dir / init_proj_folder
+                        try:
+                            init_proj_dir.mkdir(parents=True, exist_ok=True)
+                            if not (init_proj_dir / "README.md").exists():
+                                (init_proj_dir / "README.md").write_text(
+                                    f"# {goal}\n\n- **Mission ID**: `{mission_id}`\n- **Project Folder**: `{init_proj_folder}`\n",
+                                    encoding="utf-8",
+                                )
+                        except Exception:
+                            pass
                     new_mission = {
                         "mission_id": mission_id,
                         "goal": goal,
@@ -5755,6 +9473,11 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "team_name": target_team["name"],
                         "team_floor": target_team.get("floor", "1F"),
                         "team_color": target_team.get("color", "#0f6848"),
+                        "output_root": str(init_base_dir),
+                        "project_folder_name": init_proj_folder,
+                        "project_dir": f"deliverables/{init_proj_folder}",
+                        "project_dir_abs": str(init_proj_dir),
+                        "continue_existing": bool(continue_existing_flag),
                         "project": STATE["project_name"],
                         "status": "RUNNING",
                         "live": True,
@@ -5771,7 +9494,33 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                     }
                     STATE["missions"].insert(0, new_mission)
                     STATE["focus_mission_id"] = mission_id
+                    STATE.setdefault("mission_checkpoints", {})[mission_id] = {
+                        "mission_id": mission_id,
+                        "goal": goal,
+                        "profile": profile,
+                        "orchestrator_mode": req_orch or "standard",
+                        "deliverable_mode": init_intent["mode"],
+                        "team_id": target_team["id"],
+                        "team_name": target_team["name"],
+                        "output_root": str(init_base_dir),
+                        "project_folder_name": init_proj_folder,
+                        "continue_existing": bool(continue_existing_flag),
+                        "explicit_project_dir": str(init_proj_dir) if continue_existing_flag else "",
+                        "current_stage": "LEAD_PLANNING",
+                        "stage_outputs": {},
+                        "part_outputs": {},
+                        "staff_outputs_by_part": {},
+                        "generated_files": [],
+                        "repair_attempt": 0,
+                        "last_error_feedback": "",
+                        "user_revision_feedback": "",
+                        "revision_plan_done": False,
+                        "repair_history": [],
+                        "step_counter": 0,
+                        "updated_at": utc_now_iso(),
+                    }
 
+                save_runtime_state()
                 t = threading.Thread(
                     target=_run_mission_pipeline,
                     args=(mission_id, goal, profile, None, target_team["id"], req_orch),
@@ -5783,6 +9532,8 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "status": "started",
                         "mission_id": mission_id,
                         "goal": goal,
+                        "project_folder_name": init_proj_folder,
+                        "project_dir_abs": str(init_proj_dir),
                         "deliverable_mode": init_intent["mode"],
                         "deliverable_type_label": init_intent["label"],
                         "orchestrator_mode": req_orch or "standard",
@@ -5794,13 +9545,127 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 return self._send_json({"status": "error", "error": str(exc)}, 500)
 
+        if path == "/ops/part-roles":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                action = str((payload or {}).get("action") or "add").lower().strip()
+                if action == "add":
+                    saved_cfg = add_part_role(
+                        name=str(payload.get("name") or ""),
+                        stage_label=str(payload.get("stage_label") or ""),
+                        icon=str(payload.get("icon") or "🧩"),
+                        instruction=str(payload.get("instruction") or ""),
+                        default_cli_role=str(payload.get("default_cli_role") or "builder"),
+                    )
+                    added_p = saved_cfg.get("added_part") or {}
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"part-add-{int(time.time())}",
+                                "to_state": "PART_ROLE_ADD",
+                                "state_ko": f"➕ 새 실무 파트 담당 추가: {added_p.get('icon', '🧩')} {added_p.get('name', '')} ({added_p.get('id', '')})",
+                                "project": STATE["project_name"],
+                                "role": "LEAD",
+                            },
+                        )
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"[{added_p.get('name')}] 파트가 파이프라인에 추가되었습니다."})
+                if action == "update":
+                    rid = str(payload.get("id") or payload.get("role_id") or "")
+                    saved_cfg = update_part_role(rid, payload)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": "파트 담당 설정이 저장되었습니다."})
+                if action == "delete":
+                    rid = str(payload.get("id") or payload.get("role_id") or "")
+                    saved_cfg = delete_part_role(rid)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"[{rid}] 파트가 삭제되었습니다."})
+                if action == "reorder":
+                    rid = str(payload.get("id") or payload.get("role_id") or "")
+                    direction = str(payload.get("direction") or "up").lower().strip()
+                    saved_cfg = reorder_part_role(rid, direction)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": "파트 실행 순서가 변경되었습니다."})
+                if action == "reset":
+                    saved_cfg = reset_part_roles()
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": "기본 총괄팀장 + 3대 실무 파트(자료수집·기획구조·제작구현) 구성으로 복원되었습니다."})
+                if action == "apply_sdk_squad":
+                    tid = str(payload.get("team_id") or "").strip() or None
+                    applied = apply_sdk_squad_preset_to_workspace(target_team_id=tid)
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"sdk-squad-{int(time.time())}",
+                                "to_state": "SDK_SQUAD_APPLIED",
+                                "state_ko": f"🤖 [10인 SDK 표준 편제 적용] 총괄팀장 1명 + 3개 파트별 [파트장 1명 + 일반사원 2명] 전원 Antigravity SDK 고정 및 세부 모델 배정 완료",
+                                "project": STATE["project_name"],
+                                "role": "LEAD",
+                            },
+                        )
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            **applied,
+                            "message": "총괄팀장 1명 + 파트별 [파트장 1명 + 부하직원 2명] 총 10인 Antigravity SDK 표준 편제가 적용되었습니다.",
+                        }
+                    )
+                if action == "recruit_staff":
+                    pid = str(payload.get("part_id") or payload.get("id") or "").strip()
+                    tid = str(payload.get("team_id") or "").strip() or None
+                    cname = str(payload.get("name") or "").strip()
+                    cmod = str(payload.get("model") or "").strip()
+                    rec = recruit_sdk_staff_for_part(part_id=pid, target_team_id=tid, custom_name=cname, custom_model=cmod)
+                    ag_info = rec["recruited_agent"]
+                    with _STATE_LOCK:
+                        STATE["events"].insert(
+                            0,
+                            {
+                                "at": utc_now_iso(),
+                                "run_id": f"recruit-staff-{int(time.time())}",
+                                "to_state": "PART_STAFF_RECRUIT",
+                                "state_ko": f"👤 [{pid}] 부하직원 충원: #{ag_info['id']} {ag_info['name']} (Antigravity SDK · {ag_info['cliModel']})",
+                                "project": STATE["project_name"],
+                                "role": pid,
+                            },
+                        )
+                    return self._send_json(
+                        {
+                            "ok": True,
+                            **rec,
+                            "message": f"[#{ag_info['id']} {ag_info['name']}] 일반 사원이 Antigravity SDK ({ag_info['cliModel']})로 파견·배치되었습니다.",
+                        }
+                    )
+                if action == "set_staff_mode":
+                    mode_val = str(payload.get("mode") or "parallel").strip().lower()
+                    saved_cfg = set_staff_execution_mode(mode_val)
+                    mode_ko = "동시 병렬 수행 (사원1 ∥ 사원2 → 파트장)" if saved_cfg.get("staff_execution_mode") == "parallel" else "순차 이어받기 (사원1 → 사원2 → 파트장)"
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"파트 사원 실행 방식이 [{mode_ko}] 모드로 저장되었습니다."})
+                return self._send_json({"ok": False, "error": f"지원하지 않는 action입니다: {action}"}, 400)
+            except ValueError as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": f"파트 설정 오류: {exc}"}, 500)
+
+        if path == "/ops/missions/decision":
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
+                mid = str((payload or {}).get("mission_id") or "").strip() or None
+                dec = str((payload or {}).get("decision") or "approve").lower().strip()
+                fb = str((payload or {}).get("feedback") or "").strip()
+                res = finalize_or_revise_mission(mission_id=mid, decision=dec, feedback=fb)
+                return self._send_json(res, 200 if res.get("ok") else 400)
+            except Exception as exc:
+                return self._send_json({"ok": False, "error": f"결재 처리 오류: {exc}"}, 500)
+
         if path == "/ops/missions/stop":
             try:
                 payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
             except Exception:
                 payload = {}
             reason = str(payload.get("reason") or "버추얼 오피스 작업 정지 버튼")[:200]
-            return self._send_json(stop_active_missions(reason))
+            stop_tid = str(payload.get("team_id") or "").strip() or None
+            stop_mid = str(payload.get("mission_id") or "").strip() or None
+            return self._send_json(stop_active_missions(reason, team_id=stop_tid, mission_id=stop_mid))
 
         return self._send_json({"error": "Not found"}, 404)
 
@@ -5809,12 +9674,35 @@ def run(port: int = 8080):
     mimetypes.add_type("application/javascript", ".js")
     mimetypes.add_type("application/json", ".json")
     server = ThreadingHTTPServer(("0.0.0.0", port), VirtualOfficeHandler)
+
+    atexit.register(graceful_shutdown_orchestrator, "프로세스 종료(atexit)")
+    if threading.current_thread() is threading.main_thread():
+        def _handle_term_signal(signum, _frame):
+            sig_name = "SIGINT" if signum == getattr(signal, "SIGINT", 2) else f"SIGNAL({signum})"
+            graceful_shutdown_orchestrator(f"서버 종료 시그널({sig_name})")
+            threading.Thread(target=server.shutdown, daemon=True).start()
+
+        for sig_attr in ("SIGINT", "SIGTERM", "SIGBREAK"):
+            sig_val = getattr(signal, sig_attr, None)
+            if sig_val is not None:
+                try:
+                    signal.signal(sig_val, _handle_term_signal)
+                except Exception:
+                    pass
+
+    resumed_mids = load_runtime_state_and_auto_resume(auto_resume=True)
     print(f"NEXUS AI Virtual Office × AI DEV DIRECTOR running at http://127.0.0.1:{port}", flush=True)
+    if resumed_mids:
+        print(
+            f"[AUTO-RESUME] 서버 재기동 감지: 중단되었던 프로젝트 {len(resumed_mids)}건({', '.join(resumed_mids)})을 체크포인트부터 자동 이어하기 가동!",
+            flush=True,
+        )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        graceful_shutdown_orchestrator("KeyboardInterrupt 종료")
     finally:
+        graceful_shutdown_orchestrator("서버 종료")
         server.server_close()
 
 

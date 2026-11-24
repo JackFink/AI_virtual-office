@@ -230,6 +230,9 @@ def resolve_team_local_path(raw_dir: str, detected_gdrives: List[Dict[str, str]]
     return cand, is_def
 
 
+_IGNORED_SCAN_DIRS = {"__pycache__", ".git", ".venv", "venv", "node_modules", ".pytest_cache", ".mypy_cache", "build"}
+
+
 def scan_folder_quick_stats(folder_path: Path) -> Dict[str, Any]:
     accessible = False
     project_count = 0
@@ -244,17 +247,25 @@ def scan_folder_quick_stats(folder_path: Path) -> Dict[str, Any]:
             if idx >= 300:
                 break
             try:
+                if entry.name.startswith(".") or entry.name in _IGNORED_SCAN_DIRS:
+                    continue
                 st = entry.stat()
                 if st.st_mtime > latest_mtime:
                     latest_mtime = st.st_mtime
                 if entry.is_dir():
-                    if entry.name.endswith("_project"):
-                        project_count += 1
+                    has_proj_marker = entry.name.endswith("_project") or (entry / "README.md").is_file()
+                    sub_files_seen = 0
                     for sub_i, sub in enumerate(entry.iterdir()):
-                        if sub_i >= 50:
+                        if sub_i >= 80:
                             break
-                        if sub.is_file():
+                        if sub.is_file() and not sub.name.startswith("."):
+                            sub_files_seen += 1
                             file_count += 1
+                            if sub.name.endswith("_통합보고서.md"):
+                                report_count += 1
+                                has_proj_marker = True
+                    if has_proj_marker or sub_files_seen > 0:
+                        project_count += 1
                 elif entry.is_file():
                     if not entry.name.startswith(".nexus_write_test"):
                         file_count += 1
@@ -280,6 +291,71 @@ def scan_folder_quick_stats(folder_path: Path) -> Dict[str, Any]:
         "has_non_ascii_or_space": has_non_ascii_or_space,
         "last_modified_at": updated_iso,
     }
+
+
+def list_recent_project_folders(
+    eff_path: Path,
+    team_missions: List[Dict[str, Any]],
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """Lists existing project folders in the team's workspace + recent mission directories for continuing work."""
+    candidates: Dict[str, Path] = {}
+    try:
+        if eff_path.exists() and eff_path.is_dir():
+            for entry in eff_path.iterdir():
+                if not entry.is_dir() or entry.name.startswith(".") or entry.name in _IGNORED_SCAN_DIRS:
+                    continue
+                try:
+                    candidates[str(entry.resolve()).lower()] = entry.resolve()
+                except OSError:
+                    continue
+    except OSError:
+        pass
+
+    for m in team_missions or []:
+        raw_abs = str(m.get("project_dir_abs") or "").strip()
+        if not raw_abs:
+            continue
+        try:
+            mp = Path(raw_abs)
+            if mp.exists() and mp.is_dir() and mp.name not in _IGNORED_SCAN_DIRS:
+                candidates.setdefault(str(mp.resolve()).lower(), mp.resolve())
+        except OSError:
+            continue
+
+    items: List[Tuple[float, Dict[str, Any]]] = []
+    for p in candidates.values():
+        try:
+            st = p.stat()
+            f_cnt = 0
+            for idx_f, sub in enumerate(p.rglob("*")):
+                if idx_f >= 250:
+                    break
+                if not sub.is_file() or sub.name.startswith(".") or sub.name == "README.md" or sub.name.endswith("_통합보고서.md"):
+                    continue
+                rel_parts = sub.relative_to(p).parts
+                if any(pt in _IGNORED_SCAN_DIRS for pt in rel_parts[:-1]):
+                    continue
+                if sub.suffix.lower() in {".pyc", ".pyo", ".spec"}:
+                    continue
+                f_cnt += 1
+            upd_iso = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            items.append(
+                (
+                    st.st_mtime,
+                    {
+                        "name": p.name,
+                        "path": str(p),
+                        "file_count": f_cnt,
+                        "updated_at": upd_iso,
+                    },
+                )
+            )
+        except OSError:
+            continue
+
+    items.sort(key=lambda x: x[0], reverse=True)
+    return [x[1] for x in items[:limit]]
 
 
 def _validate_and_apply_workspace_dict(
@@ -666,6 +742,16 @@ def build_teams_and_workspaces_payload(
             or (not m.get("team_id") and t["id"] == active_id and m.get("source") == "virtual-office")
         ]
         latest_m = team_missions[0] if team_missions else None
+        active_or_latest_m = next(
+            (m for m in team_missions if m.get("status") in ("RUNNING", "AWAITING_APPROVAL")),
+            latest_m,
+        )
+        raw_proj_abs = str((active_or_latest_m or {}).get("project_dir_abs") or "").strip()
+        active_project_dir = raw_proj_abs if (raw_proj_abs and Path(raw_proj_abs).exists()) else ""
+        active_project_folder_name = str(
+            (active_or_latest_m or {}).get("project_folder_name")
+            or (Path(active_project_dir).name if active_project_dir else "")
+        ).strip()
 
         member_details = []
         for mid in t["member_ids"]:
@@ -688,11 +774,17 @@ def build_teams_and_workspaces_payload(
             else f"https://drive.google.com/drive/folders/{gd_fid}"
         )
         is_cloud_primary = bool(ws.get("gdrive_direct_enabled") and is_def)
+        effective_work_dir = active_project_dir if (is_def and not is_cloud_primary and active_project_dir) else str(eff_path)
+        recent_proj_folders = list_recent_project_folders(eff_path, team_missions, limit=20)
 
         ws_status = {
             "configured_dir": ws.get("output_dir") or "",
             "effective_dir": str(eff_path),
-            "display_path": gd_web_url if is_cloud_primary else str(eff_path),
+            "active_project_dir": active_project_dir,
+            "active_project_folder_name": active_project_folder_name,
+            "recent_project_folders": recent_proj_folders,
+            "folder_naming_mode": "project_based" if (is_def and not is_cloud_primary) else "custom_fixed",
+            "display_path": gd_web_url if is_cloud_primary else effective_work_dir,
             "is_cloud_primary": is_cloud_primary,
             "is_default": is_def,
             "is_google_drive_local": is_gd_local,
@@ -709,11 +801,18 @@ def build_teams_and_workspaces_payload(
             },
         }
 
+        active_team_missions = [
+            m for m in team_missions
+            if m.get("team_id") == t["id"]
+            and m.get("status") in ("RUNNING", "AWAITING_APPROVAL", "QUOTA_PAUSED", "PAUSED_ERROR")
+        ]
+
         enriched_team = {
             **t,
             "is_active": t["id"] == active_id,
             "member_details": member_details,
             "workspace_status": ws_status,
+            "active_mission_count": len(active_team_missions),
             "mission_count": len(team_missions),
             "latest_mission": {
                 "mission_id": latest_m.get("mission_id"),

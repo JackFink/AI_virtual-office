@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NEXUS · AI 설정 & 직원 질문 / 미션 컨트롤</title>
-<link rel="stylesheet" href="styles.css?v=triad44">
+<link rel="stylesheet" href="styles.css?v=triad45">
 </head>
 <body data-page="settings">
 <div class="app">
@@ -46,6 +46,7 @@
     </div>
     <div class="heading-actions" style="flex-shrink:0;flex-wrap:wrap">
       <button type="button" class="btn" id="btnStopMission" style="color:#c45865;border-color:#f5cfd3;white-space:nowrap">■ 작업 정지</button>
+      <a class="btn" href="#antigravitySdkSection" style="white-space:nowrap;border-color:#93c5fd;color:#1d4ed8;background:#eff6ff">📦 SDK uv 자동설치 ↓</a>
       <a class="btn" href="#cliAuthSection" style="white-space:nowrap">🔑 CLI 설치 &amp; 로그인 설정 ↓</a>
       <a class="btn" href="agents.html" style="white-space:nowrap">♙ AI 직원 관리</a>
       <a class="btn primary" href="office.html" style="white-space:nowrap">⬡ 가상 오피스 입장 <span class="arrow">↗</span></a>
@@ -68,16 +69,103 @@
     </div>
   </section>
 
+  <!-- [신규 카드] Antigravity SDK (uv 자동설치) · 로컬 구독 계정 자동 공유 카드 -->
+  <section class="panel settings-section-panel" id="antigravitySdkSection" aria-label="Antigravity SDK uv 자동설치 및 로컬 구독 계정 자동 공유">
+    <div class="panel-head settings-panel-head" style="background:linear-gradient(135deg,#f0f9ff 0%,#ecfdf5 100%);border-bottom:1px solid #bae6fd">
+      <div style="flex:1;min-width:260px">
+        <div class="eyebrow" style="color:#0369a1">ANTIGRAVITY PYTHON SDK · UV AUTO-INSTALL &amp; UNIFIED SUBSCRIPTION AUTH</div>
+        <div class="panel-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px">
+          <span>📦 Antigravity SDK (<code>uv</code> 자동설치) — 로컬 구독 계정 자동 공유</span>
+          <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">API 키 불필요 · 추가 과금 $0</span>
+        </div>
+        <div class="panel-sub"><code>uv</code> 패키지 매니저와 프로젝트 격리 가상환경(<code>.venv</code>)을 자동으로 구성해 공식 <code>google-antigravity</code> SDK를 설치하며, 로컬 PC에 로그인된 Antigravity 구독 계정(Unified Authentication Layer)을 별도 API 키 없이 즉시 자동 공유합니다.</div>
+      </div>
+      <span class="status running" id="sdkStatusMainBadge" style="flex-shrink:0">SDK 상태 확인 중...</span>
+    </div>
+    <div class="settings-panel-body" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px" id="sdkStatusCardsRow">
+        <div style="padding:11px 13px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:10px;font-weight:800;color:#64748b">① uv 패키지 매니저</span>
+          <strong id="sdkUvStatusVal" style="font-size:12px;color:#0f172a">확인 중...</strong>
+          <span id="sdkUvPathSub" style="font-size:10px;color:#64748b;font-family:var(--font-mono,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">미설치 시 공식 스크립트 자동 설치</span>
+        </div>
+        <div style="padding:11px 13px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:10px;font-weight:800;color:#64748b">② Python SDK (<code>.venv</code> 격리 환경)</span>
+          <strong id="sdkPkgStatusVal" style="font-size:12px;color:#0f172a">확인 중...</strong>
+          <span id="sdkVenvPathSub" style="font-size:10px;color:#64748b;font-family:var(--font-mono,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">.venv/ (google-antigravity)</span>
+        </div>
+        <div style="padding:11px 13px;border-radius:10px;border:1px solid #bbf7d0;background:#f0fdf4;display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:10px;font-weight:800;color:#166534">③ 로컬 구독 계정 자동 공유</span>
+          <strong id="sdkSharedAccVal" style="font-size:12px;color:#14532d">확인 중...</strong>
+          <span id="sdkSharedPlanSub" style="font-size:10px;color:#15803d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Antigravity App · CLI · SDK 통합 인증</span>
+        </div>
+        <div style="padding:11px 13px;border-radius:10px;border:1px solid #bae6fd;background:#f0f9ff;display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:10px;font-weight:800;color:#0369a1">④ 종량제 과금 차단 보호</span>
+          <strong style="font-size:12px;color:#0c4a6e">✓ GEMINI_API_KEY 자동 차단됨</strong>
+          <span style="font-size:10px;color:#0284c7">오직 로컬 구독 플랜 쿼터만 사용 ($0)</span>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-radius:10px;background:#ffffff;border:1px solid #cbd5e1">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn small primary" id="btnAutoInstallSdkUv" style="height:34px;padding:0 14px;font-size:11.5px;background:#0f6848;border-color:#0f6848;white-space:nowrap">⚡ uv + Antigravity SDK 원클릭 자동설치</button>
+          <button type="button" class="btn small" id="btnTestSdkSharedAuth" style="height:34px;padding:0 13px;font-size:11px;background:#eff6ff;color:#1d4ed8;border-color:#93c5fd;font-weight:700;white-space:nowrap">🧪 로컬 구독 공유 응답 테스트</button>
+          <button type="button" class="btn small mint" id="btnLoginForSdkShare" style="height:34px;padding:0 12px;font-size:11px;white-space:nowrap">🔑 로컬 구독 계정 로그인 / 전환</button>
+          <button type="button" class="btn small" id="btnRefreshSdkStatus" style="height:34px;padding:0 10px;font-size:11px;white-space:nowrap">🔄 상태 새로고침</button>
+          <a href="agents.html" class="btn small" style="height:34px;padding:0 12px;font-size:11px;background:#f0fdf4;color:#0f6848;border-color:#86efac;font-weight:800;white-space:nowrap">♙ 직원 캐릭터에 SDK 배정 ↗</a>
+        </div>
+        <span id="sdkActionFeedbackText" style="font-size:11px;color:#475569;font-weight:600">💡 <b>Antigravity SDK (구독·로컬 $0)</b>를 직원 캐릭터 및 팀 역할에 바로 연결해 <code>SubagentConfig</code> 다중 직원 오케스트레이션과 실시간 말풍선 스트리밍을 사용할 수 있습니다.</span>
+      </div>
+
+      <div id="sdkInstallLogBox" style="display:none;background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:10px;font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-height:210px;overflow-y:auto;white-space:pre-wrap"></div>
+    </div>
+  </section>
+
   <!-- [2] 직원 선택 질문 & 1사이클(5단계) 미션 실행 섹션 -->
   <section class="panel settings-section-panel" aria-label="직원 선택 질문 및 파이프라인 단계">
     <div class="panel-head settings-panel-head">
       <div>
-        <div class="panel-title">02 · AI 직원 선택 질문 &amp; 5단계 1-Cycle 미션 실행</div>
-        <div class="panel-sub">원하는 AI 직원을 지정하여 즉답 질문을 보내거나, 5단계 파이프라인(계획→구현→검증→검수→판정) 미션을 가동합니다.</div>
+        <div class="panel-title">02 · 👑 총괄팀장 지휘 &amp; 파트별 협업 미션 실행 · 통합보고 결재함</div>
+        <div class="panel-sub">총괄팀장이 지시문을 분석해 각 파트 담당(자료수집 → 기획·구조 → 제작·구현 등)에게 배분하고, 파트 상호검토 완료 후 <b>총괄팀장 통합보고서</b>를 올리면 대표님(사용자)께서 최종 승인합니다.</div>
       </div>
-      <span class="cli-pill" id="triadReplyMeta" style="flex-shrink:0">Ready</span>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex-shrink:0">
+        <a href="agents.html#partRolesManagerSection" class="btn small" style="background:#ecfdf5;color:#0f6848;border-color:#86efac;font-weight:800">🧩 파트 담당 추가·편집 ↗</a>
+        <span class="cli-pill" id="triadReplyMeta" style="flex-shrink:0">Ready</span>
+      </div>
     </div>
     <div class="settings-panel-body" style="display:flex;flex-direction:column;gap:12px">
+      <!-- [신규] 팀별 구분 프로젝트 동시 실행 입력 보드 -->
+      <div id="settingsPerTeamMissionBoard" style="display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:12px;background:linear-gradient(135deg,#f0fdf4 0%,#f0f9ff 100%);border:1.5px solid #86efac">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <div>
+            <strong style="font-size:13px;color:#0f172a">🏢 팀별 프로젝트 독립 입력창 (여러 팀 프로젝트 동시 가동 지원)</strong>
+            <div style="font-size:10.5px;color:#475569;margin-top:2px">팀마다 분리된 아래 입력창에 각각 프로젝트를 지시하면 대기 없이 동시에 병렬 가동됩니다. 완료된 통합보고 결재는 <a href="index.html#dashboardMyAiOfficeSection" style="color:#0f6848;font-weight:800;text-decoration:underline">대시보드 대표 결재함 ↗</a>에서도 일괄 관리됩니다.</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn small primary" id="btnPerTeamBoardAddTeam" style="height:28px;padding:0 11px;font-size:10.5px;background:#0f6848;border-color:#0f6848">➕ 새 팀 &amp; 입력창 추가</button>
+            <a href="index.html#dashboardMyAiOfficeSection" class="btn small" style="height:28px;padding:0 10px;font-size:10.5px;background:#fffbeb;color:#92400e;border-color:#fcd34d;font-weight:800">👑 대시보드 대표 결재함 ↗</a>
+          </div>
+        </div>
+        <div id="settingsPerTeamMissionGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px">
+          <div style="grid-column:1/-1;padding:12px;text-align:center;color:#64748b;font-size:11px">팀별 프로젝트 입력창을 불러오는 중입니다...</div>
+        </div>
+
+        <!-- 팀별 프로젝트 독립 입력창 보드 하단: 연결된 작업 폴더 전체 목록 및 상태 -->
+        <div class="connected-ws-box" id="settingsConnectedWorkspacesBox" style="margin-top:2px;background:#ffffff">
+          <div class="connected-ws-head">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="background:#1e3a8a;color:#fff;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:800">📂 연결된 작업 폴더 전체 목록</span>
+              <span id="settingsConnectedWsSummaryLabel" style="font-size:11px;color:#334155;font-weight:700">팀별 지정 폴더 · 기본 폴더 · Google Drive 클라우드 연결 경로 통합 현황</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn small" id="btnSettingsBoardOpenGdrive" style="height:26px;padding:0 9px;font-size:10px;background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">🔑 Google Drive 연결 설정</button>
+              <button type="button" class="btn small" id="btnSettingsBoardRefreshWs" style="height:26px;padding:0 9px;font-size:10px">🔄 폴더 새로고침</button>
+            </div>
+          </div>
+          <div class="connected-ws-list" id="settingsConnectedWorkspacesList"></div>
+        </div>
+      </div>
+
       <form class="settings-question-form" id="triadGoalForm">
         <!-- [신규] 작업 수행 팀 선택 & 팀 구성 관리 바 -->
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-radius:10px;background:#f0fdf4;border:1px solid #86efac">
@@ -184,6 +272,8 @@
           </div>
         </div>
 
+        <div id="settingsGlobalContinueMount"></div>
+
         <div class="settings-question-input-row">
           <input type="text" class="triad-goal-input" id="triadGoalInput" placeholder="선택한 AI 직원에게 간단한 질문을 하거나, 실행 모드를 '1사이클 미션'으로 바꿔 목표를 지시하세요!" required>
           <button type="submit" class="btn primary" id="triadGoalSubmit" style="height:40px;padding:0 18px;white-space:nowrap;flex-shrink:0">질문 / 미션 실행 ↗</button>
@@ -192,17 +282,19 @@
 
       <div id="triadChatReplyBox" class="settings-reply-box">
         <div>
-          <strong style="color:#0f6848;display:inline-block;margin-right:6px" id="triadReplyRole">[HEAD Director AI 응답 대기]</strong>
-          <span id="triadReplyText">위 드롭다운에서 원하는 AI 직원을 선택해 바로 질문하거나, '1사이클 미션 Standard'를 선택해 5단계 파이프라인 결과물(.md 리포트)을 생성해 보세요.</span>
+          <strong style="color:#0f6848;display:inline-block;margin-right:6px" id="triadReplyRole">[👑 프로젝트 총괄팀장 보고 대기]</strong>
+          <span id="triadReplyText">업무 지시를 입력하면 총괄팀장이 파트 담당들에게 작업을 배분하고, 파트 담당들의 상호 검증·검토가 끝난 뒤 이곳에 <b>「총괄팀장 통합보고서」</b>와 <b>[✅ 최종 승인] / [🔄 보완 재지시]</b> 결재 창을 올립니다.</span>
         </div>
       </div>
 
-      <div class="triad-steps settings-triad-steps" id="triadPipelineSteps">
-        <div class="triad-step" data-stage="PLANNING"><b>01 · 계획 (PLANNING)</b><span id="pipeLabelHead1">HEAD · Claude</span></div>
-        <div class="triad-step" data-stage="BUILDING"><b>02 · 구현 (BUILDING)</b><span id="pipeLabelBuilder">BUILDER · Antigravity</span></div>
-        <div class="triad-step" data-stage="VERIFYING"><b>03 · 검증 (VERIFYING)</b><span>DIRECTOR · Scope Guard</span></div>
-        <div class="triad-step" data-stage="REVIEWING"><b>04 · 검수 (REVIEWING)</b><span id="pipeLabelReviewer">REVIEWER · Codex</span></div>
-        <div class="triad-step" data-stage="DECIDING"><b>05 · 판정 (DECIDING)</b><span id="pipeLabelHead2">HEAD · PASS/FAIL</span></div>
+      <div class="triad-steps settings-triad-steps" id="triadPipelineSteps" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+        <div class="triad-step" data-stage="LEAD_PLANNING"><b>01 · 총괄팀장 분장</b><span id="pipeLabelHead1">👑 프로젝트 총괄팀장</span></div>
+        <div class="triad-step" data-stage="PART_RESEARCH"><b>02 · 자료수집·팩트조사</b><span>🔎 자료수집 파트 담당</span></div>
+        <div class="triad-step" data-stage="PART_STRUCTURE"><b>03 · 데이터정제·구조설계</b><span>🗂️ 기획·구조설계 파트</span></div>
+        <div class="triad-step" data-stage="PART_BUILD"><b>04 · 산출물 제작·구현</b><span id="pipeLabelBuilder">🛠️ 제작·구현 파트 담당</span></div>
+        <div class="triad-step" data-stage="PART_REVIEW"><b>05 · 파트 상호검증·검토</b><span id="pipeLabelReviewer">🤝 파트 담당 교차검토</span></div>
+        <div class="triad-step" data-stage="LEAD_REPORT"><b>06 · 총괄팀장 통합보고</b><span id="pipeLabelHead2">📋 통합보고 브리핑</span></div>
+        <div class="triad-step" data-stage="AWAITING_APPROVAL"><b>07 · 내 최종 승인</b><span>✅ 대표님 최종 결재</span></div>
       </div>
     </div>
   </section>
@@ -212,8 +304,8 @@
     <div class="panel-head settings-panel-head">
       <div style="flex:1;min-width:260px">
         <div class="eyebrow">SUBSCRIPTION CLI AUTHENTICATION &amp; DIAGNOSTICS</div>
-        <div class="panel-title" style="font-size:15px;margin-top:2px">03 · 🔑 AI CLI 로그인 상태 확인 &amp; 실행 경로 설정 (5대 AI · 구글 멀티 계정 지원)</div>
-        <div class="panel-sub">각 AI CLI의 표시 타이틀(이름)을 직접 수정하고, 구독 플랜 지정·로그인 세션 상태·실행 파일 경로를 통합 관리합니다.</div>
+        <div class="panel-title" style="font-size:15px;margin-top:2px">03 · 🔑 AI CLI 로그인 상태 확인 &amp; 실행 경로 설정 (활성 AI 슬롯 관리 · 멀티 계정 지원)</div>
+        <div class="panel-sub">각 AI CLI/SDK 슬롯의 표시 타이틀 수정·추가·제거, 연결 계정 요금제 자동 로드, 실행 파일 경로를 통합 관리합니다.</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0">
         <button type="button" class="btn small mint" id="btnInstallAllMissingCli" style="white-space:nowrap">⚡ 미설치 CLI 일괄 원클릭 설치</button>
@@ -232,6 +324,7 @@
         <div class="cli-slot-add-controls">
           <select id="addCliTypeSelect" class="triad-cli-select" style="height:36px;min-width:250px;background:#ffffff" aria-label="추가할 AI CLI 종류 선택 드롭다운">
             <option value="antigravity" selected>🌐 Google Antigravity (Gemini · 구글 AI)</option>
+            <option value="antigravity_sdk">📦 Antigravity SDK (구독·로컬 $0 · Subagent 오케스트레이션)</option>
             <option value="claude">🟠 Claude Code (claude · Anthropic AI)</option>
             <option value="openai">🟢 OpenAI Codex (codex · ChatGPT AI)</option>
             <option value="grok">🟣 xAI Grok (grok · SuperGrok AI)</option>
@@ -252,11 +345,7 @@
       <form id="cliModalAskForm" class="settings-cli-test-form">
         <span class="triad-role-badge role-reviewer" style="white-space:nowrap;flex-shrink:0">💬 CLI 직접 응답 테스트</span>
         <select id="cliModalAskTarget" class="triad-cli-select" style="height:34px;flex-shrink:0">
-          <option value="antigravity">Google Antigravity (agy · 계정 1)</option>
-          <option value="gemini">Google Gemini 2 (gemini · 서브 계정 2)</option>
-          <option value="claude">Claude Code (claude)</option>
-          <option value="openai">OpenAI Codex (codex)</option>
-          <option value="grok">xAI Grok (grok)</option>
+          <option value="antigravity_sdk">📦 Antigravity SDK (구독·로컬 $0)</option>
           <option value="head">현재 HEAD 담당 CLI</option>
         </select>
         <input type="text" id="cliModalAskInput" class="triad-goal-input" style="height:34px;font-size:11px;flex:1;min-width:200px" value="안녕? 너는 어떤 AI CLI이고 지금 정상 작동 중이니? 한 문장으로 답해줘." placeholder="CLI에 던질 간단한 질문을 입력하세요">
@@ -271,7 +360,7 @@
 </div>
 </main>
 </div>
-<script src="app.js?v=triad58"></script>
+<script src="app.js?v=triad75"></script>
 </body>
 </html>
 

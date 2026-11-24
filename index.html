@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEXUS · AI Office Dashboard (AI DEV DIRECTOR)</title><link rel="stylesheet" href="styles.css?v=triad44">
+<title>NEXUS · AI Office Dashboard (AI DEV DIRECTOR)</title><link rel="stylesheet" href="styles.css?v=triad45">
 </head>
 <body data-page="dashboard">
 <div class="app">
@@ -13,7 +13,7 @@
     <a class="nav-link active" href="index.html" aria-current="page"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a>
     <a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">3D 가상 오피스</span><span class="nav-pill">LIVE</span></a>
     <a class="nav-link" href="agents.html"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a>
-    <a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">AI 설정 & 질문</span></a>
+    <a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">AI 설정 &amp; 질문</span></a>
     <a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a>
   </nav>
   <div class="nav-label" style="margin-top:30px">MANAGEMENT</div>
@@ -21,128 +21,128 @@
     <a class="nav-link" href="logs.html"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a>
   </nav>
   <div class="sidebar-bottom">
-    <div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption" id="sidebarTriadCaption">4대 AI CLI 연동 완료<br>종량제 API 키 차단(Sanitized)</div><div class="usage"><span>미션 단계 예산</span><strong id="sidebarStepUsage">5 / 6</strong></div><div class="usage-track"><span style="width:83%"></span></div></div>
+    <div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption" id="sidebarTriadCaption">Antigravity SDK ($0 구독 공유)<br>LEAD · PART_RESEARCH · PART_STRUCTURE · PART_BUILD</div><div class="usage"><span>미션 단계 예산</span><strong id="sidebarStepUsage">7 / 7</strong></div><div class="usage-track"><span style="width:100%"></span></div></div>
     <div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div>
   </div>
 </aside>
 <main class="main">
-<header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>Overview · Triad Orchestrator</strong></div><div class="top-actions"><div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">TRIAD STANDBY · 구독 CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
+<header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>Overview · Multi-Team AI Office</strong></div><div class="top-actions"><div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">STANDBY · 구독 SDK/CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
 <div class="content">
-  <div class="page-heading"><div><div class="eyebrow">AI DEV DIRECTOR × NEXUS VIRTUAL OFFICE · TRIAD SYSTEM</div><h1>좋은 저녁입니다, 팀장님 <span style="font-size:23px">✦</span></h1><p>다섯 개의 AI 코딩 CLI(Claude Code, OpenAI Codex, Google Antigravity [계정 1], Google Gemini 2 [계정 2], xAI Grok)가 역할별로 협업하고 있습니다.</p></div><div class="heading-actions"><a class="btn" href="settings.html">⚙ AI 설정 & 질문</a><a class="btn" href="agents.html">♙ 역할 & 직원 관리</a><a class="btn primary" href="office.html">가상 오피스 입장 <span class="arrow">↗</span></a></div></div>
+  <div class="page-heading"><div><div class="eyebrow">AI DEV DIRECTOR × NEXUS VIRTUAL OFFICE</div><h1>좋은 저녁입니다, 팀장님 <span style="font-size:23px">✦</span></h1><p id="dashboardHeroSubtitle">현재 연동된 활성 AI 엔진 슬롯과 구성된 팀별 전담 AI 에이전트 편제가 실시간으로 동기화되어 협업하고 있습니다.</p></div><div class="heading-actions"><a class="btn" href="settings.html">⚙ AI 설정 &amp; 질문</a><a class="btn" href="agents.html">♙ 역할 &amp; 직원 관리</a><a class="btn primary" href="office.html">가상 오피스 입장 <span class="arrow">↗</span></a></div></div>
 
   <section class="stats-grid">
-    <div class="stat-card"><div class="stat-head"><span>연동된 AI CLI & 에이전트</span><span class="stat-ico ico-blue">♙</span></div><div class="stat-value" id="statTotalAgents">05</div><div class="stat-foot"><span class="positive">5 CLI</span> <span>Claude · Codex · Antigravity · Gemini 2 · Grok</span></div></div>
-    <div class="stat-card"><div class="stat-head"><span>현재 파이프라인 단계</span><span class="stat-ico ico-mint">↗</span></div><div class="stat-value" id="statActivePhase" style="font-size:22px">STANDBY</div><div class="stat-foot"><span class="tiny-dot"></span><span id="statActiveSub">HEAD / BUILDER / REVIEWER 대기</span></div></div>
-    <div class="stat-card"><div class="stat-head"><span>독립 검수 (REVIEWER)</span><span class="stat-ico ico-amber">◷</span></div><div class="stat-value" id="statReviewCount">PASS</div><div class="stat-foot"><span style="color:#17a877;font-weight:700" id="statReviewFoot">Fail-Closed 검증 통과</span><span>·</span><a href="agents.html" style="color:#8493a5;text-decoration:underline">확인하기</a></div></div>
-    <div class="stat-card"><div class="stat-head"><span>Scope Guard 통과율</span><span class="stat-ico ico-purple">⌁</span></div><div class="stat-value">100<span style="font-size:15px">%</span></div><div class="stat-foot"><span class="positive">원본 무수정</span><span>격리 Git Worktree</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>연동된 AI CLI &amp; 에이전트</span><span class="stat-ico ico-blue">♙</span></div><div class="stat-value" id="statTotalAgents">20<span style="font-size:13px;color:#98a5b2;font-weight:700;margin-left:3px">명</span></div><div class="stat-foot"><span class="positive" id="statTotalAgentsBadge">동기화 중</span> <span id="statTotalAgentsDesc">활성 슬롯 · 등록 에이전트 실시간 연동</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>현재 파이프라인 단계</span><span class="stat-ico ico-mint">↗</span></div><div class="stat-value" id="statActivePhase" style="font-size:22px">STANDBY</div><div class="stat-foot"><span class="tiny-dot"></span><span id="statActiveSub">총괄팀장 · 실무 파트 대기</span></div></div>
+    <div class="stat-card"><div class="stat-head"><span>파트 상호검토 &amp; 결재</span><span class="stat-ico ico-amber">◷</span></div><div class="stat-value" id="statReviewCount">PASS</div><div class="stat-foot"><span style="color:#17a877;font-weight:700" id="statReviewFoot">파트 교차검증 · 대표 최종 승인</span><span>·</span><a href="#dashboardMyAiOfficeSection" style="color:#8493a5;text-decoration:underline">결재함</a></div></div>
+    <div class="stat-card"><div class="stat-head"><span>에이전트 타임아웃 &amp; 안전</span><span class="stat-ico ico-purple">⌁</span></div><div class="stat-value" id="statDashGuardValue" style="font-size:22px">AUTO</div><div class="stat-foot"><span class="positive" id="statDashGuardBadge">$0 무과금</span><span id="statDashGuardSub">스트림 활동 감지 자동 연장</span></div></div>
   </section>
 
-  <!-- 🏢 팀 구성 & 팀별 작업 폴더 지정 & 연결된 작업 폴더 전체 대시보드 -->
-  <section class="panel teams-ws-dashboard" id="teamsWorkspaceDashboardSection" aria-label="팀 구성 및 연결된 작업 폴더 전체 대시보드">
+  <!-- 👑 총괄팀장 통합보고 · 대표 최종 결재함 -->
+  <section class="panel" id="dashboardMyAiOfficeSection" style="margin-bottom:18px;border:1.5px solid #fcd34d;background:linear-gradient(180deg,#fffef7 0%,#ffffff 100%)" aria-label="총괄팀장 통합보고 및 대표 최종 결재함">
+    <div class="panel-head settings-panel-head" style="border-bottom:1px solid #fde68a">
+      <div>
+        <div class="eyebrow" style="color:#92400e">EXECUTIVE APPROVAL CENTER · MULTI-TEAM CONSOLIDATED REPORTS</div>
+        <div class="panel-title" style="font-size:15px;margin-top:2px">👑 총괄팀장 통합보고 · 대표 최종 결재함</div>
+        <div class="panel-sub">팀별로 동시 수행된 프로젝트 중 파트별 실무 및 파트장 상호검토가 완료되어 <b>최종 결재가 필요한 항목</b>들이 이곳에 표시됩니다. 산출물을 확인하고 <b>[✅ 최종 승인]</b> 또는 <b>[🔄 보완 재지시]</b>를 결정하세요.</div>
+      </div>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex-shrink:0">
+        <span id="dashboardApprovalCountBadge" class="status review" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d">결재 대기 0건</span>
+        <button type="button" class="btn small primary" id="btnApproveAllPendingMissions" style="display:none;height:30px;padding:0 12px;font-size:10.5px;background:#0f6848;border-color:#0f6848">✅ 대기 항목 일괄 최종 승인</button>
+        <a href="office.html" class="btn small" style="height:30px;padding:0 10px;font-size:10.5px;background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">⬡ 3D 가상 오피스 열기 ↗</a>
+      </div>
+    </div>
+    <div class="settings-panel-body" id="dashboardApprovalCardsList" style="display:flex;flex-direction:column;gap:12px">
+      <div style="padding:18px;text-align:center;color:#64748b;font-size:12px">결재 대기 중인 팀별 프로젝트 통합보고 내역을 불러오는 중입니다...</div>
+    </div>
+  </section>
+
+  <!-- 🏢 팀별 독립 프로젝트 동시 지시 & 작업 폴더 대시보드 -->
+  <section class="panel teams-ws-dashboard" id="teamsWorkspaceDashboardSection" aria-label="팀별 독립 프로젝트 동시 지시 및 작업 폴더 대시보드">
     <div class="panel-head settings-panel-head">
       <div>
-        <div class="eyebrow">TEAM COMPOSITION &amp; CONNECTED WORKSPACE DIRECTORIES</div>
-        <div class="panel-title" style="font-size:15px;margin-top:2px">🏢 팀 구성 &amp; 연결된 작업 폴더 전체 대시보드</div>
-        <div class="panel-sub">팀을 자유롭게 구성(소속 AI 직원 · 역할 · 오피스 층 연동)하고, 각 팀별 전용 로컬 폴더 및 Google Drive 클라우드 폴더와 연결된 모든 작업 폴더를 한눈에 관리합니다.</div>
+        <div class="eyebrow">MULTI-TEAM PARALLEL EXECUTION &amp; WORKSPACE DIRECTORIES</div>
+        <div class="panel-title" style="font-size:15px;margin-top:2px">🏢 팀별 독립 프로젝트 동시 지시 &amp; 작업 폴더 대시보드</div>
+        <div class="panel-sub">각 팀마다 구분된 전용 입력창에서 <b>여러 팀의 프로젝트를 동시에 실행</b>할 수 있으며, 팀별 전용 로컬 폴더 및 Google Drive 클라우드 폴더를 독립 관리합니다.</div>
       </div>
       <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
         <span id="dashTeamsCountBadge" style="background:#e6f9f1;color:#0f6848;padding:4px 10px;border-radius:999px;font-size:10.5px;font-weight:800">팀 2개</span>
-        <span id="dashWorkspacesCountBadge" style="background:#e0f2fe;color:#0369a1;padding:4px 10px;border-radius:999px;font-size:10.5px;font-weight:800">연결 폴더 2개</span>
+        <button type="button" class="btn small" id="btnRefreshTeamsDashboard" style="height:30px;padding:0 10px;font-size:10.5px">🔄 새로고침</button>
         <button type="button" class="btn small" id="btnDashOpenGdriveModal" style="background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">🔑 Google Drive 직접 연결</button>
         <button type="button" class="btn small primary" id="btnDashCreateTeam" style="background:#0f6848;border-color:#0f6848">➕ 새 팀 구성 &amp; 폴더 지정</button>
-        <a class="btn small" href="settings.html#triadGoalForm">🚀 미션 실행 ↗</a>
+        <a class="btn small" href="settings.html#triadGoalForm">🚀 상세 설정 ↗</a>
       </div>
     </div>
 
     <div class="teams-ws-body">
-      <!-- [1] 팀별 구성 & 팀 전용 작업 폴더 카드 그리드 -->
       <div class="teams-ws-grid" id="dashboardTeamsGrid">
         <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px;grid-column:1/-1">팀 및 작업 폴더 현황을 불러오는 중입니다...</div>
-      </div>
-
-      <!-- [2] 현재 연결되어 있는 작업 폴더 전체 목록 (로컬 · 마운트 드라이브 · Google Drive 클라우드 통합) -->
-      <div class="connected-ws-box">
-        <div class="connected-ws-head">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span style="background:#1e3a8a;color:#fff;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:800">📂 연결된 작업 폴더 전체 목록</span>
-            <span id="connectedWsSummaryLabel" style="font-size:11px;color:#334155;font-weight:700">팀별 지정 폴더 · 기본 폴더 · Google Drive 연결 경로 통합 현황</span>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <button type="button" class="btn small" id="btnRefreshTeamsDashboard" style="height:26px;padding:0 9px;font-size:10px">🔄 전체 새로고침</button>
-            <a class="btn small" href="settings.html#projectOutputDirBar" style="height:26px;padding:0 9px;font-size:10px">⚙ 전역 저장 설정 ↗</a>
-          </div>
-        </div>
-        <div class="connected-ws-list" id="connectedWorkspacesList"></div>
       </div>
     </div>
   </section>
 
-  <!-- 실시간 파이프라인 실행 로그 & 생성된 프로젝트 폴더 / 미션 산출물 리포트 -->
-  <section class="bottom-grid" id="dashboardPipelineAndDeliverables" style="margin-bottom:18px" aria-label="실시간 파이프라인 실행 로그 및 산출물 리포트">
+  <!-- 실시간 파이프라인 실행 로그 & 생성된 맞춤형 산출물 폴더 / 미션 리포트 (요약보기) -->
+  <section class="bottom-grid" id="dashboardPipelineAndDeliverables" style="margin-bottom:18px" aria-label="실시간 파이프라인 실행 로그 및 산출물 리포트 요약">
     <div class="panel activity-panel">
       <div class="panel-head settings-panel-head">
         <div>
           <div class="panel-title">실시간 파이프라인 실행 로그</div>
-          <div class="panel-sub">HEAD · BUILDER · REVIEWER · RESEARCHER · DIRECTOR 최근 이벤트</div>
+          <div class="panel-sub">총괄팀장(LEAD) · 실무 파트장 · 일반사원 최근 실행 이벤트</div>
         </div>
         <a href="logs.html" class="text-link">전체 로그 ↗</a>
       </div>
       <div class="activity-list" id="dashboardActivity">
-        <div class="activity-item"><div class="event-icon ico-mint">✓</div><div class="event-main"><div class="event-title">HEAD 최종 PASS 판정 · 산출물 저장 완료</div><div class="event-desc">HEAD (Claude Code CLI) · deliverables/mission-20558.md</div></div><div class="event-time">방금 전</div></div>
-        <div class="activity-item"><div class="event-icon ico-amber">◷</div><div class="event-main"><div class="event-title">REVIEWER 독립 코드 검수 통과 (P0:0, P1:0)</div><div class="event-desc">REVIEWER (OpenAI Codex CLI) · read-only 샌드박스</div></div><div class="event-time">1분 전</div></div>
-        <div class="activity-item"><div class="event-icon ico-blue">↗</div><div class="event-main"><div class="event-title">BUILDER 파이썬 코드 생성 및 실행 검증 통과</div><div class="event-desc">BUILDER (Google Antigravity CLI) · Scope Guard 통과</div></div><div class="event-time">2분 전</div></div>
-        <div class="activity-item"><div class="event-icon ico-purple">⌁</div><div class="event-main"><div class="event-title">HEAD 목표 분석 및 ORDER 작업 명세 발행</div><div class="event-desc">HEAD (Claude Code CLI) · 허용 경로 6개, diff 상한 1500줄</div></div><div class="event-time">4분 전</div></div>
+        <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px">실시간 파이프라인 실행 이벤트를 불러오는 중입니다...</div>
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="dashboardDeliverablesSummaryPanel">
       <div class="panel-head settings-panel-head">
         <div>
-          <div class="panel-title">생성된 맞춤형 산출물 폴더 &amp; 미션 리포트</div>
-          <div class="panel-sub">업무 지시 문장을 자동 분석하여 생성된 맞춤형 산출물(조사 리포트·JSON 데이터·기획서·웹 UI·실행 코드) 및 5단계 검증 리포트입니다.</div>
+          <div class="panel-title">생성된 맞춤형 산출물 폴더 &amp; 미션 리포트 <span style="font-size:11px;color:#0f6848;font-weight:800">(요약보기)</span></div>
+          <div class="panel-sub">최종 승인 완료된 프로젝트별 핵심 요약과 리포트·폴더 바로가기입니다. 필요 시 파일 목록을 펼쳐 확인할 수 있습니다.</div>
         </div>
-        <a href="logs.html" class="text-link">실행 기록 ↗</a>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span id="deliverablesSummaryBadge" class="status running" style="background:#ecfdf5;color:#0f6848;border:1px solid #86efac;font-size:10px">완료 0건</span>
+          <a href="logs.html" class="text-link">실행 기록 ↗</a>
+        </div>
       </div>
-      <div class="settings-panel-body" id="deliverablesListBox" style="display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #86efac;background:#f0fdf4;border-radius:11px">
-          <a href="deliverables/mission-90909.md" target="_blank" style="display:flex;justify-content:space-between;align-items:center;color:#0f6848;font-size:11.5px;font-weight:800">
-            <span>📄 deliverables/mission-90909.md — 파이썬 미니 가계부 프로젝트 (DEEP · 모듈 분할 PASS)</span>
-            <span style="white-space:nowrap">리포트 열기 ↗</span>
-          </a>
-          <div style="display:flex;flex-wrap:wrap;gap:5px">
-            <a href="deliverables/mission-90909_project/core_module.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/core_module.py ↗</a>
-            <a href="deliverables/mission-90909_project/app_runner.py" target="_blank" style="background:#fff;border:1px solid #bbf7d0;color:#166534;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700">📁 deliverables/mission-90909_project/app_runner.py ↗</a>
-          </div>
-        </div>
-        <a href="deliverables/mission-20558.md" target="_blank" class="settings-deliverable-card">
-          <span>📄 deliverables/mission-20558.md — 파이썬 로또 번호 5세트 자동 추천기 함수 (5/5 PASS)</span>
-          <span style="white-space:nowrap;flex-shrink:0">리포트 열기 ↗</span>
-        </a>
-        <div class="right-note" style="margin:0">
-          <strong>💡 자동 업무 의도 분석 &amp; 자동 수정 루프(Auto-Repair) 안내</strong>
-          <p>업무 지시 문장을 입력하면 <b>자료 조사·분석(`RESEARCH`)</b>, <b>기획서·실무 문서(`DOCUMENT`)</b>, <b>웹 UI(`WEB`)</b>, <b>실행 코드(`CODE`)</b> 유형을 자동 판별하여 그에 맞는 실제 산출물을 작성·검증합니다. <b>Standard</b> 모드는 최대 2회 자동 보완을 수행하며, <b>Deep</b> 모드는 목표를 2개 파트로 분할해 <b>BUILDER</b>와 <b>SUB-BUILDER</b>가 분담 작성합니다.</p>
-        </div>
+      <div class="settings-panel-body" id="deliverablesListBox" style="display:flex;flex-direction:column;gap:8px">
+        <div style="padding:16px;text-align:center;color:#64748b;font-size:11.5px">완료된 프로젝트 산출물 요약 목록을 불러오는 중입니다...</div>
       </div>
     </div>
   </section>
 
-  <!-- 나의 AI 오피스 섹션 -->
-  <section class="panel" id="dashboardMyAiOfficeSection" style="margin-bottom:18px">
-    <div class="panel-head"><div><div class="panel-title">나의 AI 오피스 (NEXUS GM Office PNG)</div><div class="panel-sub">경량 PNG로 최적화된 GM 오피스 전층 타워에서 AI 직원을 드래그 배치하세요.</div></div><a href="office.html" class="text-link">공간 열기 ↗</a></div>
-    <a href="office.html" class="office-preview" aria-label="GM 오피스 열기" style="display:block;height:260px;background:url('assets/maple-gm-office.png?v=triad39') center/cover no-repeat"><span class="preview-tag"><i class="system-dot"></i> NEXUS GM HQ · ALL FLOORS TOWER</span><span class="preview-bottom"><span id="previewActiveText">● CLI 연동 중</span><span>·</span><span>드래그 앤 드롭 &amp; 말풍선 질문</span><span>↗</span></span></a>
-  </section>
-  <section class="bottom-grid">
-    <div class="panel"><div class="panel-head"><div><div class="panel-title">현재 배치된 Triad AI 직원</div><div class="panel-sub">역할별 담당 CLI와 진행 중인 파이프라인 작업입니다.</div></div><a href="agents.html" class="text-link">역할 & 직원 전체 보기 ↗</a></div><div class="table-wrap"><table class="mini-table"><thead><tr><th>역할 / AI 직원</th><th>담당 CLI 공급자</th><th>현재 파이프라인 작업</th><th>진행률</th><th>상태</th></tr></thead><tbody id="dashboardAgentTableBody">
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#fff0eb;color:#d95d39">H</div><div><div class="agent-name">HEAD Director AI</div><div class="agent-type">HEAD · 총괄 지휘</div></div></div></td><td><span class="cli-pill claude" id="tableCliHead">Claude Code (claude)</span></td><td id="tableTaskHead">ORDER 계획 및 최종 PASS/FAIL 판정</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%"></span></div><span class="progress-label">100%</span></div></td><td><span class="status running" id="tableStatusHead">준비 완료</span></td></tr>
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#eaf2ff;color:#2b6cb0">B</div><div><div class="agent-name">Builder Dev AI</div><div class="agent-type">BUILDER · 구현 코딩 (계정 1)</div></div></div></td><td><span class="cli-pill antigravity" id="tableCliBuilder">Google Antigravity (agy)</span></td><td id="tableTaskBuilder">격리 Worktree 전체 파일 JSON 제안</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%;background:#6787e4"></span></div><span class="progress-label">100%</span></div></td><td><span class="status running" id="tableStatusBuilder">준비 완료</span></td></tr>
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#e0f2fe;color:#0369a1">M</div><div><div class="agent-name">Gemini Sub AI</div><div class="agent-type">SUB-BUILDER · 멀티 제미나이 (계정 2)</div></div></div></td><td><span class="cli-pill gemini" id="tableCliSubBuilder">Google Gemini 2 (gemini)</span></td><td id="tableTaskSubBuilder">구글 서브 계정(.gemini-acc2) 독립 실행</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%;background:#0284c7"></span></div><span class="progress-label">100%</span></div></td><td><span class="status running" id="tableStatusSubBuilder">준비 완료</span></td></tr>
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#e4faf1;color:#15805c">R</div><div><div class="agent-name">Reviewer Audit AI</div><div class="agent-type">REVIEWER · 독립 검수</div></div></div></td><td><span class="cli-pill openai" id="tableCliReviewer">OpenAI Codex (codex)</span></td><td id="tableTaskReviewer">독립 코드 리뷰 및 테스트 증거 대조</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%"></span></div><span class="progress-label">100%</span></div></td><td><span class="status review" id="tableStatusReviewer">검수 대기</span></td></tr>
-      <tr><td><div class="agent-cell"><div class="agent-avatar" style="background:#f3e8ff;color:#6b21a8">G</div><div><div class="agent-name">Grok Scout AI</div><div class="agent-type">RESEARCHER · 심층 추론</div></div></div></td><td><span class="cli-pill grok" id="tableCliResearcher">xAI Grok (grok)</span></td><td id="tableTaskResearcher">실시간 기술 탐색 및 다각도 가설 검증</td><td><div class="progress-wrap"><div class="progress-bar"><span style="width:100%;background:#9333ea"></span></div><span class="progress-label">100%</span></div></td><td><span class="status running" id="tableStatusResearcher">추론 대기</span></td></tr>
-      </tbody></table></div></div>
-    <div class="panel" id="usage"><div class="panel-head"><div><div class="panel-title">Triad CLI 호출 & 토큰 현황</div><div class="panel-sub" id="usageSubTitle">구독 로그인 세션 전용 · 종량제 API 비용 $0</div></div><button class="btn small" type="button">구독 CLI 전용 ✓</button></div><div class="chart-area"><div class="chart-y"><span>60</span><span>40</span><span>20</span><span>0</span></div><div class="chart-plot"><div class="bar-group"><span class="bar" style="height:45%"></span><span class="bar alt" style="height:35%"></span><span class="bar-label">목</span></div><div class="bar-group"><span class="bar" style="height:57%"></span><span class="bar alt" style="height:44%"></span><span class="bar-label">금</span></div><div class="bar-group"><span class="bar" style="height:48%"></span><span class="bar alt" style="height:39%"></span><span class="bar-label">토</span></div><div class="bar-group"><span class="bar" style="height:68%"></span><span class="bar alt" style="height:53%"></span><span class="bar-label">일</span></div><div class="bar-group"><span class="bar" style="height:60%"></span><span class="bar alt" style="height:50%"></span><span class="bar-label">월</span></div><div class="bar-group"><span class="bar" style="height:82%"></span><span class="bar alt" style="height:63%"></span><span class="bar-label">화</span></div><div class="bar-group"><span class="bar" style="height:90%"></span><span class="bar alt" style="height:72%"></span><span class="bar-label">수</span></div></div></div><div class="section-foot"><span id="usageTotalSummary">전체 46회 CLI 호출 · ~34.4만 토큰 (구독 세션)</span><div class="legend"><span><i class="lg1"></i>BUILDER / REVIEWER</span><span><i class="lg2"></i>HEAD 판정 통과</span></div></div></div>
+  <!-- 연동된 AI CLI · SDK & 팀별 에이전트 실시간 현황 -->
+  <section class="panel" id="dashboardAgentsRosterSection" style="margin-bottom:18px" aria-label="연동된 AI CLI 및 에이전트 실시간 현황">
+    <div class="panel-head settings-panel-head">
+      <div>
+        <div class="panel-title">🤖 연동된 AI CLI &amp; 에이전트 실시간 현황</div>
+        <div class="panel-sub" id="dashboardAgentsSubCaption">활성 연결 슬롯(<code>cli_slots.json</code>) · 구성된 팀(<code>teams.json</code>) · 에이전트 설정(<code>character_configs.json</code>) 실시간 연동</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+        <div id="dashboardAgentTeamFilters" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
+        <a href="agents.html" class="text-link" style="margin-left:4px">직원·팀 상세 관리 ↗</a>
+      </div>
+    </div>
+    <div class="table-wrap" style="max-height:380px;overflow-y:auto">
+      <table class="mini-table">
+        <thead>
+          <tr>
+            <th>에이전트 (사번 · 이름)</th>
+            <th>소속 팀 · 좌석</th>
+            <th>직급 · 담당 파트</th>
+            <th>연동 AI 엔진 · 세부 실행 모델</th>
+            <th>타임아웃 · 실시간 상태</th>
+          </tr>
+        </thead>
+        <tbody id="dashboardAgentTableBody">
+          <tr><td colspan="5" style="padding:18px;text-align:center;color:#64748b;font-size:11.5px">연동된 AI 엔진 및 에이전트 현황을 동기화하는 중입니다...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 </div>
 </main>
 </div>
-<script src="app.js?v=triad58"></script>
+<script src="app.js?v=triad75"></script>
 </body></html>

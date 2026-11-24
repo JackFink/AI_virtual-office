@@ -238,6 +238,7 @@
 .cli-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:5px;font-size:9px;font-weight:700;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
 .cli-pill.claude{background:#fff3ef;color:#c84b28;border-color:#fbd5c8}
 .cli-pill.antigravity{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+.cli-pill.antigravity_sdk{background:linear-gradient(135deg,#eef2ff,#ecfdf5);color:#0f6848;border-color:#6ee7b7;font-weight:800}
 .cli-pill.gemini{background:#e0f2fe;color:#0369a1;border-color:#bae6fd}
 .cli-pill.openai{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
 .cli-pill.grok{background:#f3e8ff;color:#6b21a8;border-color:#d8b4fe}
@@ -316,6 +317,7 @@
 .char-cli-badge{display:inline-flex;align-items:center;gap:3px;padding:1.5px 5px;border-radius:4px;font-size:7px;font-weight:800;margin-top:2px;margin-bottom:3px;border:1px solid transparent}
 .char-cli-badge.claude{background:#fff3ef;color:#c84b28;border-color:#fbd5c8}
 .char-cli-badge.antigravity{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+.char-cli-badge.antigravity_sdk{background:linear-gradient(135deg,#eef2ff,#ecfdf5);color:#0f6848;border-color:#6ee7b7}
 .char-cli-badge.gemini{background:#e0f2fe;color:#0369a1;border-color:#bae6fd}
 .char-cli-badge.openai{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
 .char-cli-badge.grok{background:#f3e8ff;color:#6b21a8;border-color:#d8b4fe}
@@ -588,6 +590,7 @@
 
 /* 팀 카드(.team-ws-card) 하단 인라인 업무지시 입력창 */
 .team-dispatch-box{margin-top:4px;padding-top:10px;border-top:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:6px}
+.team-dispatch-head-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .team-dispatch-form{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .team-dispatch-select{height:33px;border:1px solid #cbd5e1;border-radius:8px;padding:0 8px;font-size:10.5px;font-weight:700;color:#1e293b;background:#f8fafc;outline:none;cursor:pointer;flex-shrink:0}
 .team-dispatch-select:focus{border-color:#0f6848;background:#ffffff}
@@ -597,3 +600,14 @@
 .team-dispatch-btn:hover{opacity:0.92}
 .team-dispatch-btn:disabled{opacity:0.6;cursor:wait}
 .team-dispatch-status{display:none;padding:7px 10px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;color:#166534;font-size:10.5px;line-height:1.45;white-space:pre-wrap}
+
+/* 지시창 폴더 연결 모드 스위치 ([새 폴더로 시작] / [기존 폴더 이어하기]) */
+.dispatch-folder-mode-switch{display:inline-flex;align-items:center;gap:3px;padding:2px;border-radius:8px;background:#f1f5f9;border:1px solid #cbd5e1;flex-shrink:0}
+.dispatch-fmode-btn{height:25px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:#475569;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap;transition:all .14s}
+.dispatch-fmode-btn:hover{color:#0f172a;background:rgba(255,255,255,0.65)}
+.dispatch-fmode-btn.active[data-fmode="new"]{background:#0f6848;color:#ffffff;box-shadow:0 1px 2px rgba(15,104,72,0.22)}
+.dispatch-fmode-btn.active[data-fmode="continue"]{background:#0369a1;color:#ffffff;box-shadow:0 1px 2px rgba(3,105,161,0.25)}
+.dispatch-continue-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 9px;border-radius:8px;background:#f0f9ff;border:1px solid #7dd3fc}
+.dispatch-recent-folder-select{height:29px;min-width:190px;max-width:340px;flex:1;border:1px solid #7dd3fc;border-radius:7px;padding:0 8px;font-size:10.5px;font-weight:700;color:#0c4a6e;background:#ffffff;outline:none;cursor:pointer}
+.dispatch-recent-folder-select:focus{border-color:#0284c7;box-shadow:0 0 0 2px rgba(2,132,199,0.16)}
+.dispatch-picked-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;font-size:9.5px;font-weight:700;max-width:100%;word-break:break-all}

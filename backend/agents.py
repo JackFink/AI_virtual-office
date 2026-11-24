@@ -48,4 +48,28 @@ AGENT_PERSONAS: Dict[str, Dict[str, str]] = {
         "role_Binding": "reviewer",
         "desc": "Claude·Codex·Antigravity·Grok 교차 비교 및 아키텍처 리서치 분석가",
     },
+    "lead": {
+        "name": "프로젝트 총괄팀장 AI",
+        "role": "LEAD",
+        "role_Binding": "head",
+        "desc": "프로젝트 총괄 기획·파트별 업무 분장 및 사용자 결재용 통합보고 책임자",
+    },
+    "part_research": {
+        "name": "자료수집 파트 담당 AI",
+        "role": "PART_RESEARCH",
+        "role_Binding": "researcher",
+        "desc": "원천 자료·수치·위치·평판·출처 URL 수집 및 팩트 신뢰도 분류 파트 담당",
+    },
+    "part_structure": {
+        "name": "기획·구조설계 파트 담당 AI",
+        "role": "PART_STRUCTURE",
+        "role_Binding": "sub_builder",
+        "desc": "수집 자료 정제·비교표·데이터 스키마(JSON) 및 문서/화면 구조 설계 파트 담당",
+    },
+    "part_build": {
+        "name": "제작·구현 파트 담당 AI",
+        "role": "PART_BUILD",
+        "role_Binding": "builder",
+        "desc": "설계안과 수집 자료를 반영해 최종 보고서·웹 UI·실행 코드를 완성하고 검증하는 파트 담당",
+    },
 }
