@@ -1,148 +1,215 @@
 <!doctype html>
 <html lang="ko">
+
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEXUS · AI Office Dashboard (AI DEV DIRECTOR)</title><link rel="stylesheet" href="styles.css?v=triad45">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vinco · AI Office Dashboard (AI DEV DIRECTOR)</title>
+  <link rel="stylesheet" href="styles.css?v=triad50">
 </head>
+
 <body data-page="dashboard">
-<div class="app">
-<aside class="sidebar">
-  <a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI DEV DIRECTOR</div></div></a>
-  <div class="nav-label">WORKSPACE</div>
-  <nav class="nav-group">
-    <a class="nav-link active" href="index.html" aria-current="page"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a>
-    <a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">3D 가상 오피스</span><span class="nav-pill">LIVE</span></a>
-    <a class="nav-link" href="agents.html"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a>
-    <a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">AI 설정 &amp; 질문</span></a>
-    <a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a>
-  </nav>
-  <div class="nav-label" style="margin-top:30px">MANAGEMENT</div>
-  <nav class="nav-group">
-    <a class="nav-link" href="logs.html"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a>
-  </nav>
-  <div class="sidebar-bottom">
-    <div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption" id="sidebarTriadCaption">Antigravity SDK ($0 구독 공유)<br>LEAD · PART_RESEARCH · PART_STRUCTURE · PART_BUILD</div><div class="usage"><span>미션 단계 예산</span><strong id="sidebarStepUsage">7 / 7</strong></div><div class="usage-track"><span style="width:100%"></span></div></div>
-    <div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div>
+  <div class="app">
+    <aside class="sidebar">
+      <a class="brand" href="index.html">
+        <div class="brand-mark">N</div>
+        <div class="brand-copy">
+          <div class="brand-name">VINCO OFFICE</div>
+          <div class="brand-sub">AI DEV DIRECTOR</div>
+        </div>
+      </a>
+      <div class="nav-label">작업공간</div>
+      <nav class="nav-group">
+        <a class="nav-link active" href="index.html" aria-current="page"><span class="nav-icon">▦</span><span
+            class="nav-text">현황판</span></a>
+        <a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">가상 사무실</span><span
+            class="nav-pill">LIVE</span></a>
+        <a class="nav-link" href="agents.html"><span class="nav-icon">♙</span><span class="nav-text">직원 관리</span></a>
+        <a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">설정</span></a>
+        <a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a>
+      </nav>
+      <div class="nav-label" style="margin-top:30px">MANAGEMENT</div>
+      <nav class="nav-group">
+        <a class="nav-link" href="logs.html"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="workspace-card">
+          <div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div>
+          <div class="workspace-caption" id="sidebarTriadCaption">Antigravity SDK ($0 구독 공유)<br>LEAD · PART_RESEARCH ·
+            PART_STRUCTURE · PART_BUILD</div>
+          <div class="usage"><span>미션 단계 예산</span><strong id="sidebarStepUsage">7 / 7</strong></div>
+          <div class="usage-track"><span style="width:100%"></span></div>
+        </div>
+        <div class="profile">
+          <div class="avatar-sm">팀장</div>
+          <div class="profile-copy">
+            <div class="profile-name">Workspace Admin</div>
+            <div class="profile-role">Director · Subscription CLI</div>
+          </div><span class="profile-more">···</span>
+        </div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>Overview · Multi-Team
+            AI Office</strong></div>
+        <div class="top-actions">
+          <div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">STANDBY
+              · 구독 SDK/CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span
+              class="notify"></span></button>
+          <div class="top-user">팀장</div>
+        </div>
+      </header>
+      <div class="content">
+        <div class="page-heading">
+          <div>
+            <div class="eyebrow">AI DEV DIRECTOR × NEXUS VIRTUAL OFFICE</div>
+            <h1>좋은 저녁입니다, 팀장님 <span style="font-size:23px">✦</span></h1>
+            <p id="dashboardHeroSubtitle">현재 연동된 활성 AI 엔진 슬롯과 구성된 팀별 전담 AI 에이전트 편제가 실시간으로 동기화되어 협업하고 있습니다.</p>
+          </div>
+          <div class="heading-actions"><a class="btn" href="settings.html">⚙ AI 설정 &amp; 질문</a><a class="btn"
+              href="agents.html">♙ 역할 &amp; 직원 관리</a><a class="btn primary" href="office.html">가상 오피스 입장 <span
+                class="arrow">↗</span></a></div>
+        </div>
+
+        <!-- 👑 총괄팀장 통합보고 · 대표 최종 결재함 -->
+        <section class="panel" id="dashboardMyAiOfficeSection"
+          style="margin-bottom:18px;border:1.5px solid #fcd34d;background:linear-gradient(180deg,#fffef7 0%,#ffffff 100%)"
+          aria-label="총괄팀장 통합보고 및 대표 최종 결재함">
+          <div class="panel-head settings-panel-head" style="border-bottom:1px solid #fde68a">
+            <div>
+              <div class="eyebrow" style="color:#92400e">EXECUTIVE APPROVAL CENTER · MULTI-TEAM CONSOLIDATED REPORTS
+              </div>
+              <div class="panel-title" style="font-size:15px;margin-top:2px">👑 총괄팀장 통합보고 · 대표 최종 결재함</div>
+              <div class="panel-sub">팀별로 동시 수행된 프로젝트 중 파트별 실무 및 파트장 상호검토가 완료되어 <b>최종 결재가 필요한 항목</b>들이 이곳에 표시됩니다. 산출물을
+                확인하고 <b>[✅ 최종 승인]</b> 또는 <b>[🔄 보완 재지시]</b>를 결정하세요.</div>
+            </div>
+            <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex-shrink:0">
+              <span id="dashboardApprovalCountBadge" class="status review"
+                style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d">결재 대기 0건</span>
+              <button type="button" class="btn small primary" id="btnApproveAllPendingMissions"
+                style="display:none;height:30px;padding:0 12px;font-size:10.5px;background:#0f6848;border-color:#0f6848">✅
+                대기 항목 일괄 최종 승인</button>
+              <a href="office.html" class="btn small"
+                style="height:30px;padding:0 10px;font-size:10.5px;background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">⬡
+                3D 가상 오피스 열기 ↗</a>
+            </div>
+          </div>
+          <div class="settings-panel-body" id="dashboardApprovalCardsList"
+            style="display:flex;flex-direction:column;gap:12px">
+            <div style="padding:18px;text-align:center;color:#64748b;font-size:12px">결재 대기 중인 팀별 프로젝트 통합보고 내역을 불러오는
+              중입니다...</div>
+          </div>
+        </section>
+
+        <!-- 🏢 팀별 독립 프로젝트 동시 지시 & 작업 폴더 대시보드 -->
+        <section class="panel teams-ws-dashboard" id="teamsWorkspaceDashboardSection"
+          aria-label="팀별 독립 프로젝트 동시 지시 및 작업 폴더 대시보드">
+          <div class="panel-head settings-panel-head">
+            <div>
+              <div class="eyebrow">MULTI-TEAM PARALLEL EXECUTION &amp; WORKSPACE DIRECTORIES</div>
+              <div class="panel-title" style="font-size:15px;margin-top:2px">🏢 팀별 독립 프로젝트 동시 지시 &amp; 작업 폴더 대시보드</div>
+              <div class="panel-sub">각 팀마다 구분된 전용 입력창에서 <b>여러 팀의 프로젝트를 동시에 실행</b>할 수 있으며, 팀별 전용 로컬 폴더 및 Google Drive
+                클라우드 폴더를 독립 관리합니다.</div>
+            </div>
+            <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+              <span id="dashTeamsCountBadge"
+                style="background:#e6f9f1;color:#0f6848;padding:4px 10px;border-radius:999px;font-size:10.5px;font-weight:800">팀
+                2개</span>
+              <button type="button" class="btn small" id="btnRefreshTeamsDashboard"
+                style="height:30px;padding:0 10px;font-size:10.5px">🔄 새로고침</button>
+              <button type="button" class="btn small" id="btnDashOpenGdriveModal"
+                style="background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">🔑 Google Drive 직접 연결</button>
+              <button type="button" class="btn small primary" id="btnDashCreateTeam"
+                style="background:#0f6848;border-color:#0f6848">➕ 새 팀 구성 &amp; 폴더 지정</button>
+              <a class="btn small" href="settings.html#triadGoalForm">🚀 상세 설정 ↗</a>
+            </div>
+          </div>
+
+          <div class="teams-ws-body">
+            <div class="teams-ws-grid" id="dashboardTeamsGrid">
+              <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px;grid-column:1/-1">팀 및 작업 폴더 현황을
+                불러오는 중입니다...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 실시간 파이프라인 실행 로그 & 생성된 맞춤형 산출물 폴더 / 미션 리포트 (요약보기) -->
+        <section class="bottom-grid" id="dashboardPipelineAndDeliverables" style="margin-bottom:18px"
+          aria-label="실시간 파이프라인 실행 로그 및 산출물 리포트 요약">
+          <div class="panel activity-panel">
+            <div class="panel-head settings-panel-head">
+              <div>
+                <div class="panel-title">실시간 파이프라인 실행 로그</div>
+                <div class="panel-sub">총괄팀장(LEAD) · 실무 파트장 · 일반사원 최근 실행 이벤트</div>
+              </div>
+              <a href="logs.html" class="text-link">전체 로그 ↗</a>
+            </div>
+            <div class="activity-list" id="dashboardActivity">
+              <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px">실시간 파이프라인 실행 이벤트를 불러오는 중입니다...
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" id="dashboardDeliverablesSummaryPanel">
+            <div class="panel-head settings-panel-head">
+              <div>
+                <div class="panel-title">생성된 맞춤형 산출물 폴더 &amp; 미션 리포트 <span
+                    style="font-size:11px;color:#0f6848;font-weight:800">(요약보기)</span></div>
+                <div class="panel-sub">최종 승인 완료된 프로젝트별 핵심 요약과 리포트·폴더 바로가기입니다. 필요 시 파일 목록을 펼쳐 확인할 수 있습니다.</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                <span id="deliverablesSummaryBadge" class="status running"
+                  style="background:#ecfdf5;color:#0f6848;border:1px solid #86efac;font-size:10px">완료 0건</span>
+                <a href="logs.html" class="text-link">실행 기록 ↗</a>
+              </div>
+            </div>
+            <div class="settings-panel-body" id="deliverablesListBox"
+              style="display:flex;flex-direction:column;gap:8px">
+              <div style="padding:16px;text-align:center;color:#64748b;font-size:11.5px">완료된 프로젝트 산출물 요약 목록을 불러오는
+                중입니다...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 연동된 AI CLI · SDK & 팀별 에이전트 실시간 현황 -->
+        <section class="panel" id="dashboardAgentsRosterSection" style="margin-bottom:18px"
+          aria-label="연동된 AI CLI 및 에이전트 실시간 현황">
+          <div class="panel-head settings-panel-head">
+            <div>
+              <div class="panel-title">🤖 연동된 AI CLI &amp; 에이전트 실시간 현황</div>
+              <div class="panel-sub" id="dashboardAgentsSubCaption">활성 연결 슬롯(<code>cli_slots.json</code>) · 구성된
+                팀(<code>teams.json</code>) · 에이전트 설정(<code>character_configs.json</code>) 실시간 연동</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <div id="dashboardAgentTeamFilters" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
+              <a href="agents.html" class="text-link" style="margin-left:4px">직원·팀 상세 관리 ↗</a>
+            </div>
+          </div>
+          <div class="table-wrap" style="max-height:380px;overflow-y:auto">
+            <table class="mini-table">
+              <thead>
+                <tr>
+                  <th>에이전트 (사번 · 이름)</th>
+                  <th>소속 팀 · 좌석</th>
+                  <th>직급 · 담당 파트</th>
+                  <th>연동 AI 엔진 · 세부 실행 모델</th>
+                  <th>타임아웃 · 실시간 상태</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardAgentTableBody">
+                <tr>
+                  <td colspan="5" style="padding:18px;text-align:center;color:#64748b;font-size:11.5px">연동된 AI 엔진 및 에이전트
+                    현황을 동기화하는 중입니다...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
   </div>
-</aside>
-<main class="main">
-<header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>Overview · Multi-Team AI Office</strong></div><div class="top-actions"><div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">STANDBY · 구독 SDK/CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
-<div class="content">
-  <div class="page-heading"><div><div class="eyebrow">AI DEV DIRECTOR × NEXUS VIRTUAL OFFICE</div><h1>좋은 저녁입니다, 팀장님 <span style="font-size:23px">✦</span></h1><p id="dashboardHeroSubtitle">현재 연동된 활성 AI 엔진 슬롯과 구성된 팀별 전담 AI 에이전트 편제가 실시간으로 동기화되어 협업하고 있습니다.</p></div><div class="heading-actions"><a class="btn" href="settings.html">⚙ AI 설정 &amp; 질문</a><a class="btn" href="agents.html">♙ 역할 &amp; 직원 관리</a><a class="btn primary" href="office.html">가상 오피스 입장 <span class="arrow">↗</span></a></div></div>
+  <script src="app.js?v=triad81"></script>
+</body>
 
-  <section class="stats-grid">
-    <div class="stat-card"><div class="stat-head"><span>연동된 AI CLI &amp; 에이전트</span><span class="stat-ico ico-blue">♙</span></div><div class="stat-value" id="statTotalAgents">20<span style="font-size:13px;color:#98a5b2;font-weight:700;margin-left:3px">명</span></div><div class="stat-foot"><span class="positive" id="statTotalAgentsBadge">동기화 중</span> <span id="statTotalAgentsDesc">활성 슬롯 · 등록 에이전트 실시간 연동</span></div></div>
-    <div class="stat-card"><div class="stat-head"><span>현재 파이프라인 단계</span><span class="stat-ico ico-mint">↗</span></div><div class="stat-value" id="statActivePhase" style="font-size:22px">STANDBY</div><div class="stat-foot"><span class="tiny-dot"></span><span id="statActiveSub">총괄팀장 · 실무 파트 대기</span></div></div>
-    <div class="stat-card"><div class="stat-head"><span>파트 상호검토 &amp; 결재</span><span class="stat-ico ico-amber">◷</span></div><div class="stat-value" id="statReviewCount">PASS</div><div class="stat-foot"><span style="color:#17a877;font-weight:700" id="statReviewFoot">파트 교차검증 · 대표 최종 승인</span><span>·</span><a href="#dashboardMyAiOfficeSection" style="color:#8493a5;text-decoration:underline">결재함</a></div></div>
-    <div class="stat-card"><div class="stat-head"><span>에이전트 타임아웃 &amp; 안전</span><span class="stat-ico ico-purple">⌁</span></div><div class="stat-value" id="statDashGuardValue" style="font-size:22px">AUTO</div><div class="stat-foot"><span class="positive" id="statDashGuardBadge">$0 무과금</span><span id="statDashGuardSub">스트림 활동 감지 자동 연장</span></div></div>
-  </section>
-
-  <!-- 👑 총괄팀장 통합보고 · 대표 최종 결재함 -->
-  <section class="panel" id="dashboardMyAiOfficeSection" style="margin-bottom:18px;border:1.5px solid #fcd34d;background:linear-gradient(180deg,#fffef7 0%,#ffffff 100%)" aria-label="총괄팀장 통합보고 및 대표 최종 결재함">
-    <div class="panel-head settings-panel-head" style="border-bottom:1px solid #fde68a">
-      <div>
-        <div class="eyebrow" style="color:#92400e">EXECUTIVE APPROVAL CENTER · MULTI-TEAM CONSOLIDATED REPORTS</div>
-        <div class="panel-title" style="font-size:15px;margin-top:2px">👑 총괄팀장 통합보고 · 대표 최종 결재함</div>
-        <div class="panel-sub">팀별로 동시 수행된 프로젝트 중 파트별 실무 및 파트장 상호검토가 완료되어 <b>최종 결재가 필요한 항목</b>들이 이곳에 표시됩니다. 산출물을 확인하고 <b>[✅ 최종 승인]</b> 또는 <b>[🔄 보완 재지시]</b>를 결정하세요.</div>
-      </div>
-      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex-shrink:0">
-        <span id="dashboardApprovalCountBadge" class="status review" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d">결재 대기 0건</span>
-        <button type="button" class="btn small primary" id="btnApproveAllPendingMissions" style="display:none;height:30px;padding:0 12px;font-size:10.5px;background:#0f6848;border-color:#0f6848">✅ 대기 항목 일괄 최종 승인</button>
-        <a href="office.html" class="btn small" style="height:30px;padding:0 10px;font-size:10.5px;background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">⬡ 3D 가상 오피스 열기 ↗</a>
-      </div>
-    </div>
-    <div class="settings-panel-body" id="dashboardApprovalCardsList" style="display:flex;flex-direction:column;gap:12px">
-      <div style="padding:18px;text-align:center;color:#64748b;font-size:12px">결재 대기 중인 팀별 프로젝트 통합보고 내역을 불러오는 중입니다...</div>
-    </div>
-  </section>
-
-  <!-- 🏢 팀별 독립 프로젝트 동시 지시 & 작업 폴더 대시보드 -->
-  <section class="panel teams-ws-dashboard" id="teamsWorkspaceDashboardSection" aria-label="팀별 독립 프로젝트 동시 지시 및 작업 폴더 대시보드">
-    <div class="panel-head settings-panel-head">
-      <div>
-        <div class="eyebrow">MULTI-TEAM PARALLEL EXECUTION &amp; WORKSPACE DIRECTORIES</div>
-        <div class="panel-title" style="font-size:15px;margin-top:2px">🏢 팀별 독립 프로젝트 동시 지시 &amp; 작업 폴더 대시보드</div>
-        <div class="panel-sub">각 팀마다 구분된 전용 입력창에서 <b>여러 팀의 프로젝트를 동시에 실행</b>할 수 있으며, 팀별 전용 로컬 폴더 및 Google Drive 클라우드 폴더를 독립 관리합니다.</div>
-      </div>
-      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-        <span id="dashTeamsCountBadge" style="background:#e6f9f1;color:#0f6848;padding:4px 10px;border-radius:999px;font-size:10.5px;font-weight:800">팀 2개</span>
-        <button type="button" class="btn small" id="btnRefreshTeamsDashboard" style="height:30px;padding:0 10px;font-size:10.5px">🔄 새로고침</button>
-        <button type="button" class="btn small" id="btnDashOpenGdriveModal" style="background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">🔑 Google Drive 직접 연결</button>
-        <button type="button" class="btn small primary" id="btnDashCreateTeam" style="background:#0f6848;border-color:#0f6848">➕ 새 팀 구성 &amp; 폴더 지정</button>
-        <a class="btn small" href="settings.html#triadGoalForm">🚀 상세 설정 ↗</a>
-      </div>
-    </div>
-
-    <div class="teams-ws-body">
-      <div class="teams-ws-grid" id="dashboardTeamsGrid">
-        <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px;grid-column:1/-1">팀 및 작업 폴더 현황을 불러오는 중입니다...</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 실시간 파이프라인 실행 로그 & 생성된 맞춤형 산출물 폴더 / 미션 리포트 (요약보기) -->
-  <section class="bottom-grid" id="dashboardPipelineAndDeliverables" style="margin-bottom:18px" aria-label="실시간 파이프라인 실행 로그 및 산출물 리포트 요약">
-    <div class="panel activity-panel">
-      <div class="panel-head settings-panel-head">
-        <div>
-          <div class="panel-title">실시간 파이프라인 실행 로그</div>
-          <div class="panel-sub">총괄팀장(LEAD) · 실무 파트장 · 일반사원 최근 실행 이벤트</div>
-        </div>
-        <a href="logs.html" class="text-link">전체 로그 ↗</a>
-      </div>
-      <div class="activity-list" id="dashboardActivity">
-        <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px">실시간 파이프라인 실행 이벤트를 불러오는 중입니다...</div>
-      </div>
-    </div>
-
-    <div class="panel" id="dashboardDeliverablesSummaryPanel">
-      <div class="panel-head settings-panel-head">
-        <div>
-          <div class="panel-title">생성된 맞춤형 산출물 폴더 &amp; 미션 리포트 <span style="font-size:11px;color:#0f6848;font-weight:800">(요약보기)</span></div>
-          <div class="panel-sub">최종 승인 완료된 프로젝트별 핵심 요약과 리포트·폴더 바로가기입니다. 필요 시 파일 목록을 펼쳐 확인할 수 있습니다.</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-          <span id="deliverablesSummaryBadge" class="status running" style="background:#ecfdf5;color:#0f6848;border:1px solid #86efac;font-size:10px">완료 0건</span>
-          <a href="logs.html" class="text-link">실행 기록 ↗</a>
-        </div>
-      </div>
-      <div class="settings-panel-body" id="deliverablesListBox" style="display:flex;flex-direction:column;gap:8px">
-        <div style="padding:16px;text-align:center;color:#64748b;font-size:11.5px">완료된 프로젝트 산출물 요약 목록을 불러오는 중입니다...</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 연동된 AI CLI · SDK & 팀별 에이전트 실시간 현황 -->
-  <section class="panel" id="dashboardAgentsRosterSection" style="margin-bottom:18px" aria-label="연동된 AI CLI 및 에이전트 실시간 현황">
-    <div class="panel-head settings-panel-head">
-      <div>
-        <div class="panel-title">🤖 연동된 AI CLI &amp; 에이전트 실시간 현황</div>
-        <div class="panel-sub" id="dashboardAgentsSubCaption">활성 연결 슬롯(<code>cli_slots.json</code>) · 구성된 팀(<code>teams.json</code>) · 에이전트 설정(<code>character_configs.json</code>) 실시간 연동</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-        <div id="dashboardAgentTeamFilters" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
-        <a href="agents.html" class="text-link" style="margin-left:4px">직원·팀 상세 관리 ↗</a>
-      </div>
-    </div>
-    <div class="table-wrap" style="max-height:380px;overflow-y:auto">
-      <table class="mini-table">
-        <thead>
-          <tr>
-            <th>에이전트 (사번 · 이름)</th>
-            <th>소속 팀 · 좌석</th>
-            <th>직급 · 담당 파트</th>
-            <th>연동 AI 엔진 · 세부 실행 모델</th>
-            <th>타임아웃 · 실시간 상태</th>
-          </tr>
-        </thead>
-        <tbody id="dashboardAgentTableBody">
-          <tr><td colspan="5" style="padding:18px;text-align:center;color:#64748b;font-size:11.5px">연동된 AI 엔진 및 에이전트 현황을 동기화하는 중입니다...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-</div>
-</main>
-</div>
-<script src="app.js?v=triad75"></script>
-</body></html>
+</html>

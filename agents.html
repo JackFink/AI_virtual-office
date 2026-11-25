@@ -1,8 +1,44 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · AI 직원 & Triad 역할 관리</title><link rel="stylesheet" href="styles.css?v=triad45"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NEXUS · AI 직원 & Triad 역할 관리</title><link rel="stylesheet" href="styles.css?v=triad50"></head>
 <body data-page="agents">
-<div class="app"><aside class="sidebar"><a class="brand" href="index.html"><div class="brand-mark">N</div><div class="brand-copy"><div class="brand-name">NEXUS OFFICE</div><div class="brand-sub">AI DEV DIRECTOR</div></div></a><div class="nav-label">WORKSPACE</div><nav class="nav-group"><a class="nav-link" href="index.html"><span class="nav-icon">▦</span><span class="nav-text">Overview</span></a><a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">3D 가상 오피스</span><span class="nav-pill">LIVE</span></a><a class="nav-link active" href="agents.html" aria-current="page"><span class="nav-icon">♙</span><span class="nav-text">AI 직원 관리</span></a><a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">AI 설정 & 질문</span></a><a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a></nav><div class="nav-label" style="margin-top:30px">MANAGEMENT</div><nav class="nav-group"><a class="nav-link" href="logs.html"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a></nav><div class="sidebar-bottom"><div class="workspace-card"><div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div><div class="workspace-caption">Antigravity SDK ($0 구독 공유)<br>LEAD · PART_RESEARCH · PART_STRUCTURE · PART_BUILD</div><div class="usage"><span>미션 단계 예산</span><strong>7 / 7</strong></div><div class="usage-track"><span style="width:100%"></span></div></div><div class="profile"><div class="avatar-sm">팀장</div><div class="profile-copy"><div class="profile-name">Workspace Admin</div><div class="profile-role">Director · Subscription CLI</div></div><span class="profile-more">···</span></div></div></aside>
+<div class="app">
+<aside class="sidebar">
+  <a class="brand" href="index.html">
+    <div class="brand-mark">N</div>
+    <div class="brand-copy">
+      <div class="brand-name">VINCO OFFICE</div>
+      <div class="brand-sub">AI DEV DIRECTOR</div>
+    </div>
+  </a>
+  <div class="nav-label">작업공간</div>
+  <nav class="nav-group">
+    <a class="nav-link" href="index.html"><span class="nav-icon">▦</span><span class="nav-text">현황판</span></a>
+    <a class="nav-link" href="office.html"><span class="nav-icon">⬡</span><span class="nav-text">가상 사무실</span><span class="nav-pill">LIVE</span></a>
+    <a class="nav-link active" href="agents.html" aria-current="page"><span class="nav-icon">♙</span><span class="nav-text">직원 관리</span></a>
+    <a class="nav-link" href="settings.html"><span class="nav-icon">⚙</span><span class="nav-text">설정</span></a>
+    <a class="nav-link" href="logs.html"><span class="nav-icon">≋</span><span class="nav-text">업무 활동 로그</span></a>
+  </nav>
+  <div class="nav-label" style="margin-top:30px">MANAGEMENT</div>
+  <nav class="nav-group">
+    <a class="nav-link" href="logs.html"><span class="nav-icon">◷</span><span class="nav-text">실행 기록</span></a>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="workspace-card">
+      <div class="workspace-top"><span class="pulse"></span>Triad CLI Status</div>
+      <div class="workspace-caption" id="sidebarTriadCaption">Antigravity SDK ($0 구독 공유)<br>LEAD · PART_RESEARCH · PART_STRUCTURE · PART_BUILD</div>
+      <div class="usage"><span>미션 단계 예산</span><strong id="sidebarStepUsage">7 / 7</strong></div>
+      <div class="usage-track"><span style="width:100%"></span></div>
+    </div>
+    <div class="profile">
+      <div class="avatar-sm">팀장</div>
+      <div class="profile-copy">
+        <div class="profile-name">Workspace Admin</div>
+        <div class="profile-role">Director · Subscription CLI</div>
+      </div><span class="profile-more">···</span>
+    </div>
+  </div>
+</aside>
 <main class="main"><header class="topbar"><div class="crumbs">Workspace <span style="padding:0 7px;color:#c2cbd4">/</span> <strong>AI 직원 관리 · 팀 &amp; 파트 편제</strong></div><div class="top-actions"><div class="system-pill" id="topSystemPill"><span class="system-dot"></span> <span id="topSystemText">TRIAD STANDBY · 구독 CLI 전용</span></div><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="top-user">팀장</div></div></header>
 <div class="content"><div class="page-heading"><div><div class="eyebrow">TRIAD AGENT CONTROL CENTER</div><h1>AI 직원 &amp; 팀 편제 · 캐릭터 스튜디오 관리</h1><p>현재 연결된 활성 AI 엔진 슬롯(<code>cli_slots.json</code>) 및 팀 설정(<code>teams.json</code> · <code>character_configs.json</code>)과 실시간 동기화되는 AI 직원·팀 편제 및 캐릭터 시뮬레이터를 관리합니다.</p></div><div class="heading-actions"><button type="button" class="btn" id="btnOpenTeamModalFromAgents" style="background:#f0fdf4;color:#0f6848;border-color:#86efac">🏢 팀 구성 &amp; 폴더 관리</button><a class="btn" href="index.html#teamsWorkspaceDashboardSection">📂 작업폴더 현황판 ↗</a><a class="btn" href="settings.html">⚙ AI 설정 &amp; 질문</a><a class="btn" href="office.html">⬡ 가상 오피스</a><a class="btn primary" href="#characterSimulatorSection">🍁 캐릭터 시뮬레이터</a></div></div>
 
@@ -35,75 +71,25 @@
   </div>
 </section>
 
-<!-- [실시간 설정 100% 동기화] 전체 등록 AI 직원 현황 목록 -->
-<div class="agents-layout" style="grid-template-columns:1fr;margin-bottom:18px">
-  <section class="panel" id="agentsRosterPanel">
-    <div class="panel-head">
-      <div>
-        <div class="panel-title">👥 등록된 전체 AI 직원 목록 (실제 설정 실시간 동기화)</div>
-        <div class="panel-sub">저장된 직원 설정(직급 · 소속 파트 · 소속 팀 · AI 엔진 및 세부 실행 모델 · Auto 타임아웃)과 100% 일치하여 표시됩니다.</div>
-      </div>
-      <span class="status running" id="agentsRosterSyncBadge">LIVE SYNCED</span>
-    </div>
-    <div class="agents-toolbar">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <small id="agentsRosterSubCaption">총괄팀장(LEAD) · 파트장(PART_LEAD) · 일반사원(STAFF) 통합 로스터</small>
-      </div>
-      <label class="search-box"><span>⌕</span><input id="agentSearch" type="search" placeholder="사번, 이름, 파트, 팀명, 세부 모델(opus/argon/flash 등) 검색..."></label>
-    </div>
-    <div class="filter-row" id="filters">
-      <button class="filter-chip active" data-filter="all">전체</button>
-      <button class="filter-chip" data-filter="RANK_LEAD">👑 총괄팀장</button>
-      <button class="filter-chip" data-filter="RANK_PART_LEAD">⭐ 파트장</button>
-      <button class="filter-chip" data-filter="RANK_STAFF">👤 일반사원</button>
-    </div>
-    <div class="agent-list" id="agentList">
-      <div style="padding:18px;text-align:center;color:#64748b;font-size:12px">서버에 저장된 AI 직원 목록을 동기화하는 중입니다...</div>
-    </div>
-    <div class="section-foot"><span id="agentCount">등록 AI 직원 동기화 중...</span><span>타임아웃 기본: AUTO (스트림 활동 감지 자동 연장) · $0 구독/SDK 모드</span></div>
-  </section>
-</div>
-
   <!-- [신규 핵심 섹션] 프로젝트 총괄팀장 & 파트별 담당 구성 · 파이프라인 단계 편집 보드 -->
   <section class="panel teams-ws-dashboard" id="partRolesManagerSection" style="margin-bottom:18px" aria-label="총괄팀장 및 파트별 담당 구성 편집">
     <div class="panel-head settings-panel-head" style="background:linear-gradient(135deg,#ecfdf5 0%,#f0f9ff 100%);border-bottom:1px solid #86efac">
       <div style="flex:1;min-width:260px">
         <div class="eyebrow" style="color:#0f6848">PROJECT LEAD &amp; DYNAMIC PART ROLES · PEER REVIEW &amp; USER FINAL APPROVAL</div>
-        <div class="panel-title" style="font-size:15px;margin-top:2px">👑 프로젝트 총괄팀장 &amp; 파트별 담당 구성 편집 (자료수집 → 기획·구조 → 제작·구현 → 파트 상호검토 → 통합보고 → 내 최종 승인)</div>
-        <div class="panel-sub">고정된 역할을 없애고 실무 파트를 자유롭게 <b>추가 · 이름/지침 수정 · 실행 순서 변경(▲/▼) · 활성(ON/OFF) · 삭제</b>할 수 있습니다. 검증·검토는 파트 담당들이 상호 수행하며, 총괄팀장이 통합보고를 올리면 대표님(사용자)께서 최종 승인합니다.</div>
+        <div class="panel-title" style="font-size:15px;margin-top:2px">👑 팀별 프로젝트 총괄팀장 &amp; 파트 담당 구성 편집 (모든 팀의 독립 파트 구성 한눈에 보기)</div>
+        <div class="panel-sub">구성된 <b>모든 팀 각각의 총괄팀장과 실무 파트 구성이 팀별 전용 보드로 분리되어 동시에 표시</b>됩니다. 팀마다 서로 다른 실무 파트를 자유롭게 <b>추가 · 이름/지침 수정 · 실행 순서 변경(▲/▼) · 활성(ON/OFF) · 삭제 · 사원 병렬/순차 방식 설정</b>할 수 있습니다.</div>
       </div>
       <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex-shrink:0">
-        <span id="partRolesCountBadge" class="status running">총괄 1 · 실무 파트 3개</span>
-        <select id="staffExecModeSelect" class="triad-cli-select" style="height:28px;font-size:10.5px;font-weight:800;background:#ecfdf5;color:#0f6848;border-color:#6ee7b7" title="파트 내 일반 사원이 2명 이상일 때 실행 방식 선택 (기본: 동시 병렬수행)">
-          <option value="parallel" selected>⚡ 사원 2인↑ 동시 병렬수행 (기본 · 사원1 ∥ 사원2 → 파트장)</option>
-          <option value="sequential">🔄 사원 순차 이어받기 (사원1 → 사원2 → 파트장)</option>
-        </select>
-        <button type="button" class="btn small" id="btnApplySdkSquadPreset" style="background:#ecfdf5;color:#0f6848;border-color:#6ee7b7;font-weight:800" title="총괄팀장 1명 + 파트별 [파트장 1명 + 일반사원 2명] 총 10인을 Antigravity SDK 고정 및 서로 다른 세부 모델로 일괄 구성합니다">🤖 SDK 10인 표준 편제 적용 (파트장+사원2)</button>
-        <button type="button" class="btn small" id="btnResetPartRoles" title="총괄팀장 + 기본 3대 실무 파트(자료수집·기획구조·제작구현)로 초기화">↺ 기본 파트 구성 복원</button>
+        <span id="partRolesCountBadge" class="status running">팀별 파트 동기화 중</span>
         <a class="btn small primary" href="settings.html#triadGoalForm" style="background:#0f6848;border-color:#0f6848">🚀 미션 지시 &amp; 결재함 ↗</a>
       </div>
     </div>
 
-    <div class="teams-ws-body" style="gap:12px">
-      <form id="partRoleAddForm" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:11px 13px;border-radius:11px;background:#f8fafc;border:1px solid #cbd5e1">
-        <span class="triad-role-badge role-builder" style="background:#dcfce7;color:#166534;white-space:nowrap">➕ 새 파트 담당 추가</span>
-        <select id="newPartIconSelect" class="triad-cli-select" style="height:34px;width:68px;background:#fff" aria-label="파트 아이콘">
-          <option value="🧩" selected>🧩</option>
-          <option value="🔎">🔎</option>
-          <option value="📊">📊</option>
-          <option value="🎨">🎨</option>
-          <option value="✍️">✍️</option>
-          <option value="🛡️">🛡️</option>
-          <option value="🌐">🌐</option>
-        </select>
-        <input type="text" id="newPartNameInput" class="triad-goal-input" style="height:34px;font-size:11.5px;min-width:170px;flex:0.8;background:#fff" placeholder="파트 담당명 (예: 디자인·시각화 파트 담당)" required>
-        <input type="text" id="newPartStageInput" class="triad-goal-input" style="height:34px;font-size:11.5px;min-width:140px;flex:0.6;background:#fff" placeholder="단계 표시명 (예: UI/차트 시각화)">
-        <input type="text" id="newPartInstInput" class="triad-goal-input" style="height:34px;font-size:11.5px;min-width:240px;flex:1.6;background:#fff" placeholder="이 파트 담당이 수행·검증할 구체적 업무 지침 (비워두면 자동 생성)">
-        <button type="submit" class="btn small primary" id="btnAddPartRoleSubmit" style="height:34px;padding:0 14px;background:#0f6848;border-color:#0f6848;white-space:nowrap">➕ 파트 추가</button>
-      </form>
+    <div class="teams-ws-body" style="gap:14px">
+      <div id="partRolesTeamJumpChips" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"></div>
       <div id="partRolesFeedbackBar" style="display:none;padding:8px 12px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;color:#15803d;font-size:11px;font-weight:700"></div>
-      <div id="partRolesCardsGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px">
-        <div style="grid-column:1/-1;padding:14px;text-align:center;color:#64748b;font-size:11.5px">총괄팀장 및 파트별 담당 구성을 불러오는 중입니다...</div>
+      <div id="partRolesByTeamBoardsList" style="display:flex;flex-direction:column;gap:16px">
+        <div style="padding:16px;text-align:center;color:#64748b;font-size:11.5px">각 팀별 총괄팀장 및 파트 담당 구성을 불러오는 중입니다...</div>
       </div>
     </div>
   </section>
@@ -127,24 +113,9 @@
     <div class="teams-ws-body">
       <div id="agentsPlacementFeedbackBar" style="display:none;padding:8px 12px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;color:#15803d;font-size:11px;font-weight:700"></div>
 
-      <!-- [1] 팀별 카드 & 드래그 앤 드롭 직원 편성 그리드 -->
+      <!-- [1] 팀별 카드 & 개별 분리된 팀원 드롭존 카드 그리드 -->
       <div class="teams-ws-grid" id="agentsTeamCardsBoard">
         <div style="padding:18px;text-align:center;color:#64748b;font-size:11.5px;grid-column:1/-1">팀 및 직원 배치 현황을 불러오는 중입니다...</div>
-      </div>
-
-      <!-- [2] 전체 AI 직원 팀 배정 일괄 배치표 -->
-      <div class="placement-table-wrap">
-        <table class="placement-table" aria-label="AI 직원별 소속 팀 배치표">
-          <thead>
-            <tr>
-              <th>AI 직원 (드래그하여 위 팀 카드에 놓기 가능)</th>
-              <th>역할 · 담당 CLI &amp; 실제 실행 모델</th>
-              <th>소속 팀 배정</th>
-              <th>빠른 이동</th>
-            </tr>
-          </thead>
-          <tbody id="agentsPlacementTableBody"></tbody>
-        </table>
       </div>
     </div>
   </section>
@@ -554,5 +525,34 @@
         </div>
       </div>
     </div>
-  </section></div>
-</main></div><script src="character-images/data/data.js?v=393"></script><script src="app.js?v=triad75"></script></body></html>
+  </section>
+
+  <!-- [최하단 배치 · 실시간 설정 100% 동기화] 전체 등록 AI 직원 현황 목록 -->
+  <div class="agents-layout" style="grid-template-columns:1fr;margin-top:18px">
+    <section class="panel" id="agentsRosterPanel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">👥 등록된 전체 AI 직원 목록 (실제 설정 실시간 동기화)</div>
+          <div class="panel-sub">저장된 직원 설정(직급 · 소속 파트 · 소속 팀 · AI 엔진 및 세부 실행 모델 · Auto 타임아웃)과 100% 일치하여 표시됩니다.</div>
+        </div>
+        <span class="status running" id="agentsRosterSyncBadge">LIVE SYNCED</span>
+      </div>
+      <div class="agents-toolbar">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <small id="agentsRosterSubCaption">총괄팀장(LEAD) · 파트장(PART_LEAD) · 일반사원(STAFF) 통합 로스터</small>
+        </div>
+        <label class="search-box"><span>⌕</span><input id="agentSearch" type="search" placeholder="사번, 이름, 파트, 팀명, 세부 모델(opus/argon/flash 등) 검색..."></label>
+      </div>
+      <div class="filter-row" id="filters">
+        <button class="filter-chip active" data-filter="all">전체</button>
+        <button class="filter-chip" data-filter="RANK_LEAD">👑 총괄팀장</button>
+        <button class="filter-chip" data-filter="RANK_PART_LEAD">⭐ 파트장</button>
+        <button class="filter-chip" data-filter="RANK_STAFF">👤 일반사원</button>
+      </div>
+      <div class="agent-list" id="agentList">
+        <div style="padding:18px;text-align:center;color:#64748b;font-size:12px">서버에 저장된 AI 직원 목록을 동기화하는 중입니다...</div>
+      </div>
+      <div class="section-foot"><span id="agentCount">등록 AI 직원 동기화 중...</span><span>타임아웃 기본: AUTO (스트림 활동 감지 자동 연장) · $0 구독/SDK 모드</span></div>
+    </section>
+  </div></div>
+</main></div><script src="character-images/data/data.js?v=393"></script><script src="app.js?v=triad81"></script></body></html>

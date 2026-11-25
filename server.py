@@ -51,6 +51,7 @@ from backend.part_roles import (
     build_assignable_roles,
     build_pipeline_stage_descriptors,
     build_sdk_squad_character_configs,
+    copy_team_part_roles,
     delete_part_role,
     load_part_roles_config,
     reorder_part_role,
@@ -3421,21 +3422,139 @@ def save_character_configs(configs: Dict[str, Any]) -> Dict[str, Any]:
 
 def apply_sdk_squad_preset_to_workspace(target_team_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    Applies the 10-employee Antigravity SDK standard squad (#01 LEAD + 3 Parts × [1 PART_LEAD + 2 STAFF]),
-    fixing cliProvider='antigravity_sdk' with distinct unlocked cliModels while preserving user Maple avatars
-    and existing team Google Drive / output_dir workspace bindings.
+    Applies a team-isolated Antigravity SDK squad (1 LEAD + enabled Parts × [1 PART_LEAD + 2 STAFF])
+    to the specified team WITHOUT overwriting or stealing employees belonging to other teams.
     """
-    part_cfg = load_part_roles_config()
-    existing_part_ids = {p["id"] for p in (part_cfg.get("parts") or [])}
-    if not {"PART_RESEARCH", "PART_STRUCTURE", "PART_BUILD"}.issubset(existing_part_ids):
-        part_cfg = reset_part_roles()
-
-    merged_chars = build_sdk_squad_character_configs(load_character_configs())
-    saved_chars = save_character_configs(merged_chars)
-
     teams_doc = load_teams_config()
     eff_tid = str(target_team_id or teams_doc.get("active_team_id") or "team-core").strip()
-    squad_ids = [spec["id"] for spec in DEFAULT_SDK_SQUAD_10]
+    target_team = next((t for t in (teams_doc.get("teams") or []) if t.get("id") == eff_tid), None)
+    if target_team is None and (teams_doc.get("teams") or []):
+        target_team = teams_doc["teams"][0]
+        eff_tid = str(target_team["id"])
+
+    part_cfg = load_part_roles_config(team_id=eff_tid)
+    enabled_parts = [p for p in (part_cfg.get("parts") or []) if p.get("enabled", True)]
+    if not enabled_parts:
+        part_cfg = reset_part_roles(team_id=eff_tid)
+        enabled_parts = [p for p in (part_cfg.get("parts") or []) if p.get("enabled", True)]
+
+    cur_chars = load_character_configs()
+    other_team_ids = {
+        str(m)
+        for t in (teams_doc.get("teams") or [])
+        if t.get("id") != eff_tid
+        for m in (t.get("member_ids") or [])
+    }
+    needed_slots = 1 + (len(enabled_parts) * 3)
+    team_member_ids: List[str] = [str(m) for m in ((target_team or {}).get("member_ids") or []) if str(m) not in other_team_ids]
+
+    for n in range(1, 61):
+        if len(team_member_ids) >= needed_slots:
+            break
+        cand = f"{n:02d}"
+        if cand not in team_member_ids and cand not in other_team_ids:
+            team_member_ids.append(cand)
+
+    lead_models = ["claude-opus-5-5-high", "gemini-4-carbon-high"]
+    part_lead_models = ["gemini-4-argon-high", "gemini-4-hydrogen-xhigh", "claude-sonnet-5-5-high", "gemini-4-carbon-high"]
+    staff_models = list(RECOMMENDED_SDK_STAFF_MODELS)
+    team_floor = str((target_team or {}).get("floor") or "1F")
+    team_short = str((target_team or {}).get("name") or eff_tid).replace(" 개발팀", "팀").replace("신규 서비스 ", "").strip()
+    now_str = utc_now_iso()
+
+    def _upsert_slot(
+        cid: str,
+        default_name: str,
+        role_id: str,
+        rank: str,
+        s_order: int,
+        mod_id: str,
+        s_mode: str,
+        skills: List[str],
+        sys_p: str,
+    ) -> None:
+        idx_num = int(re.sub(r"[^0-9]", "", cid) or "1")
+        prev = cur_chars.get(cid) if isinstance(cur_chars.get(cid), dict) else {}
+        maple_eq = (
+            dict(prev["mapleEquipped"])
+            if isinstance(prev.get("mapleEquipped"), dict) and prev.get("mapleEquipped")
+            else dict(DEFAULT_SDK_SQUAD_10[(idx_num - 1) % len(DEFAULT_SDK_SQUAD_10)]["defaultMaple"])
+        )
+        cur_chars[cid] = {
+            **prev,
+            "id": cid,
+            "name": str(prev.get("name") or "").strip() if (prev.get("triadRole") == role_id and prev.get("orgRank") == rank) else default_name,
+            "floor": str(prev.get("floor") or team_floor),
+            "dept": f"{role_id} ({rank}) · Antigravity SDK ({mod_id})",
+            "triadRole": role_id,
+            "orgRank": rank,
+            "staffOrder": s_order,
+            "cliProvider": "antigravity_sdk",
+            "cliModel": mod_id,
+            "sandboxMode": s_mode,
+            "timeoutSec": "auto",
+            "mapleEquipped": maple_eq,
+            "mapleAnim": prev.get("mapleAnim") or "stand1",
+            "mapleAnimated": bool(prev.get("mapleAnimated", False)),
+            "mapleFlipped": bool(prev.get("mapleFlipped", False)),
+            "skills": list(skills),
+            "systemPrompt": sys_p,
+            "updatedAt": now_str,
+        }
+
+    cursor = 0
+    if cursor < len(team_member_ids):
+        l_cid = team_member_ids[cursor]
+        cursor += 1
+        _upsert_slot(
+            l_cid,
+            f"{team_short} 총괄팀장 AI",
+            "LEAD",
+            "LEAD",
+            0,
+            lead_models[0],
+            "read-only",
+            ["프로젝트 업무분장", "파트 통합조율", "최종 결재 통합보고"],
+            part_cfg["lead"].get("instruction") or "프로젝트 총괄팀장으로서 파트별 분장 및 통합보고를 수행합니다.",
+        )
+
+    for p_idx, p_def in enumerate(enabled_parts):
+        pid = p_def["id"]
+        p_short = p_def["name"].replace(" 담당", "").strip()
+        is_build = p_def.get("part_kind") == "build"
+        s_mode = "proposal" if is_build else "read-only"
+        if cursor < len(team_member_ids):
+            pl_cid = team_member_ids[cursor]
+            cursor += 1
+            _upsert_slot(
+                pl_cid,
+                f"{p_short} 파트장 AI",
+                pid,
+                "PART_LEAD",
+                0,
+                part_lead_models[p_idx % len(part_lead_models)],
+                s_mode,
+                [f"{p_short} 취합·검증", "파트 상호 교차검토"],
+                p_def.get("instruction") or f"{p_def['name']} 파트장으로서 소속 사원 보고를 취합·검증합니다.",
+            )
+        for st_ord in (1, 2):
+            if cursor < len(team_member_ids):
+                st_cid = team_member_ids[cursor]
+                cursor += 1
+                st_mod = staff_models[(p_idx * 2 + st_ord - 1) % len(staff_models)]
+                _upsert_slot(
+                    st_cid,
+                    f"{p_short} 사원 {st_ord}",
+                    pid,
+                    "STAFF",
+                    st_ord,
+                    st_mod,
+                    s_mode,
+                    [f"{p_short} 실무 #{st_ord}", "파트장 보좌"],
+                    f"'{p_def['name']}' 소속 일반 사원 #{st_ord}로서 전담 실무를 수행해 파트장에게 보고합니다.",
+                )
+
+    saved_chars = save_character_configs(cur_chars)
     sdk_roles = {
         "head": "antigravity_sdk",
         "builder": "antigravity_sdk",
@@ -3443,26 +3562,21 @@ def apply_sdk_squad_preset_to_workspace(target_team_id: Optional[str] = None) ->
         "reviewer": "antigravity_sdk",
         "researcher": "antigravity_sdk",
     }
-    now_str = utc_now_iso()
-    for t in teams_doc.get("teams") or []:
-        if t.get("id") == eff_tid:
-            extra_ids = [m for m in (t.get("member_ids") or []) if m not in squad_ids]
-            t["member_ids"] = squad_ids + extra_ids
-            t["roles"] = dict(sdk_roles)
-            t["updated_at"] = now_str
-            break
-    CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_t = TEAMS_CONFIG_FILE.with_suffix(".tmp")
-    tmp_t.write_text(json.dumps(teams_doc, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp_t, TEAMS_CONFIG_FILE)
-    save_roles(sdk_roles)
+    if target_team is not None:
+        target_team["member_ids"] = team_member_ids
+        target_team["roles"] = dict(sdk_roles)
+        target_team["updated_at"] = now_str
+        CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_t = TEAMS_CONFIG_FILE.with_suffix(".tmp")
+        tmp_t.write_text(json.dumps(teams_doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp_t, TEAMS_CONFIG_FILE)
 
     return {
         "part_roles": part_cfg,
         "character_configs": saved_chars,
         "teams_summary": get_teams_payload(force_gdrive_refresh=False),
         "applied_team_id": eff_tid,
-        "squad_count": len(squad_ids),
+        "squad_count": len(team_member_ids),
     }
 
 
@@ -3472,34 +3586,39 @@ def recruit_sdk_staff_for_part(
     custom_name: str = "",
     custom_model: str = "",
 ) -> Dict[str, Any]:
-    """Recruits a new subordinate staff (orgRank='STAFF', cliProvider='antigravity_sdk') into a specific part."""
-    part_cfg = load_part_roles_config()
+    """Recruits a new subordinate staff (orgRank='STAFF', cliProvider='antigravity_sdk') into a specific team's part without overwriting other teams' members."""
+    teams_doc = load_teams_config()
+    eff_tid = str(target_team_id or teams_doc.get("active_team_id") or "team-core").strip()
+    part_cfg = load_part_roles_config(team_id=eff_tid)
     rid = resolve_canonical_part_role(part_id, part_cfg)
     part_obj = next((p for p in (part_cfg.get("parts") or []) if p["id"] == rid), None)
     if not part_obj:
         raise ValueError(f"존재하지 않는 파트 ID입니다: {part_id}")
 
     cur_chars = load_character_configs()
-    teams_doc = load_teams_config()
-    eff_tid = str(target_team_id or teams_doc.get("active_team_id") or "team-core").strip()
     target_team = next((t for t in (teams_doc.get("teams") or []) if t.get("id") == eff_tid), None)
     team_members = list((target_team or {}).get("member_ids") or [])
+    all_assigned_ids = {
+        str(m)
+        for t in (teams_doc.get("teams") or [])
+        for m in (t.get("member_ids") or [])
+    }
 
-    # Find next available character ID in 01..20 not yet active in this team
+    # Find next available character ID (never overwrite an employee already assigned to ANY team)
     chosen_cid: Optional[str] = None
-    for n in range(1, 21):
+    for n in range(1, 61):
         cand = f"{n:02d}"
-        if cand not in team_members and cand not in cur_chars:
+        if cand not in all_assigned_ids and cand not in cur_chars:
             chosen_cid = cand
             break
     if not chosen_cid:
-        for n in range(1, 21):
+        for n in range(1, 61):
             cand = f"{n:02d}"
-            if cand not in team_members:
+            if cand not in all_assigned_ids:
                 chosen_cid = cand
                 break
     if not chosen_cid:
-        raise ValueError("최대 20명의 AI 직원 슬롯이 모두 현재 팀에 배정되어 있습니다.")
+        raise ValueError("추가 충원 가능한 AI 직원 슬롯(최대 60명)이 모두 사용 중입니다.")
 
     existing_part_staff = [
         mc
@@ -3538,7 +3657,7 @@ def recruit_sdk_staff_for_part(
         **prev,
         "id": chosen_cid,
         "name": staff_name,
-        "floor": "1F" if idx_num <= 6 else ("2F" if idx_num <= 12 else "3F"),
+        "floor": str((target_team or {}).get("floor") or ("1F" if idx_num <= 10 else "3F")),
         "dept": f"{rid} (STAFF) · Antigravity SDK ({picked_model})",
         "triadRole": rid,
         "orgRank": "STAFF",
@@ -5846,7 +5965,7 @@ def _run_mission_pipeline(
     team_roles = team_obj.get("roles") or {}
     team_ws = team_obj.get("workspace") or {}
 
-    part_cfg = load_part_roles_config()
+    part_cfg = load_part_roles_config(team_id=eff_team_id)
     lead_def = part_cfg["lead"]
     enabled_parts: List[Dict[str, Any]] = [p for p in (part_cfg.get("parts") or []) if p.get("enabled", True)]
     if not enabled_parts:
@@ -8294,7 +8413,9 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
         if path == "/ops/roles":
             return self._send_json({"roles": load_roles(), "part_roles": load_part_roles_config(), "csrf": _BRIDGE_TOKEN, "providers": PROVIDER_META})
         if path == "/ops/part-roles":
-            return self._send_json({"ok": True, "part_roles": load_part_roles_config()})
+            qs = parse_qs(parsed.query)
+            req_tid = (qs.get("team_id", [""])[0] or "").strip() or None
+            return self._send_json({"ok": True, "part_roles": load_part_roles_config(team_id=req_tid)})
         if path == "/ops/activity":
             return self._send_json(build_activity_payload())
         if path == "/status":
@@ -9464,6 +9585,8 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                                 )
                         except Exception:
                             pass
+                    team_part_cfg = load_part_roles_config(team_id=target_team["id"])
+                    team_max_steps = len(team_part_cfg.get("pipeline_stages") or []) or 5
                     new_mission = {
                         "mission_id": mission_id,
                         "goal": goal,
@@ -9484,7 +9607,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         "profile": profile,
                         "orchestrator_mode": req_orch or "standard",
                         "source": "virtual-office",
-                        "max_steps": 5,
+                        "max_steps": team_max_steps,
                         "passed_steps": 0,
                         "updated_at": utc_now_iso(),
                         "deliverable": True,
@@ -9549,6 +9672,13 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
             try:
                 payload = json.loads(raw.decode("utf-8") or "{}") if raw else {}
                 action = str((payload or {}).get("action") or "add").lower().strip()
+                req_tid = str((payload or {}).get("team_id") or "").strip() or None
+                t_label = ""
+                if req_tid:
+                    try:
+                        t_label = f"[{get_team_by_id(req_tid)['name']}] "
+                    except Exception:
+                        t_label = f"[{req_tid}] "
                 if action == "add":
                     saved_cfg = add_part_role(
                         name=str(payload.get("name") or ""),
@@ -9556,6 +9686,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         icon=str(payload.get("icon") or "🧩"),
                         instruction=str(payload.get("instruction") or ""),
                         default_cli_role=str(payload.get("default_cli_role") or "builder"),
+                        team_id=req_tid,
                     )
                     added_p = saved_cfg.get("added_part") or {}
                     with _STATE_LOCK:
@@ -9565,31 +9696,35 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                                 "at": utc_now_iso(),
                                 "run_id": f"part-add-{int(time.time())}",
                                 "to_state": "PART_ROLE_ADD",
-                                "state_ko": f"➕ 새 실무 파트 담당 추가: {added_p.get('icon', '🧩')} {added_p.get('name', '')} ({added_p.get('id', '')})",
+                                "state_ko": f"➕ {t_label}새 실무 파트 담당 추가: {added_p.get('icon', '🧩')} {added_p.get('name', '')} ({added_p.get('id', '')})",
                                 "project": STATE["project_name"],
                                 "role": "LEAD",
                             },
                         )
-                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"[{added_p.get('name')}] 파트가 파이프라인에 추가되었습니다."})
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"{t_label}[{added_p.get('name')}] 파트가 파이프라인에 추가되었습니다."})
                 if action == "update":
                     rid = str(payload.get("id") or payload.get("role_id") or "")
-                    saved_cfg = update_part_role(rid, payload)
-                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": "파트 담당 설정이 저장되었습니다."})
+                    saved_cfg = update_part_role(rid, payload, team_id=req_tid)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"{t_label}파트 담당 설정이 저장되었습니다."})
                 if action == "delete":
                     rid = str(payload.get("id") or payload.get("role_id") or "")
-                    saved_cfg = delete_part_role(rid)
-                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"[{rid}] 파트가 삭제되었습니다."})
+                    saved_cfg = delete_part_role(rid, team_id=req_tid)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"{t_label}[{rid}] 파트가 삭제되었습니다."})
                 if action == "reorder":
                     rid = str(payload.get("id") or payload.get("role_id") or "")
                     direction = str(payload.get("direction") or "up").lower().strip()
-                    saved_cfg = reorder_part_role(rid, direction)
-                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": "파트 실행 순서가 변경되었습니다."})
+                    saved_cfg = reorder_part_role(rid, direction, team_id=req_tid)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"{t_label}파트 실행 순서가 변경되었습니다."})
                 if action == "reset":
-                    saved_cfg = reset_part_roles()
-                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": "기본 총괄팀장 + 3대 실무 파트(자료수집·기획구조·제작구현) 구성으로 복원되었습니다."})
+                    saved_cfg = reset_part_roles(team_id=req_tid)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"{t_label}기본 총괄팀장 + 3대 실무 파트(자료수집·기획구조·제작구현) 구성으로 복원되었습니다."})
+                if action == "copy_from_team":
+                    src_tid = str(payload.get("source_team_id") or "").strip()
+                    dst_tid = req_tid or str(payload.get("target_team_id") or "").strip()
+                    saved_cfg = copy_team_part_roles(src_tid, dst_tid)
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"{t_label}선택한 원본 팀의 파트 구성을 그대로 복제하여 적용했습니다."})
                 if action == "apply_sdk_squad":
-                    tid = str(payload.get("team_id") or "").strip() or None
-                    applied = apply_sdk_squad_preset_to_workspace(target_team_id=tid)
+                    applied = apply_sdk_squad_preset_to_workspace(target_team_id=req_tid)
                     with _STATE_LOCK:
                         STATE["events"].insert(
                             0,
@@ -9597,7 +9732,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                                 "at": utc_now_iso(),
                                 "run_id": f"sdk-squad-{int(time.time())}",
                                 "to_state": "SDK_SQUAD_APPLIED",
-                                "state_ko": f"🤖 [10인 SDK 표준 편제 적용] 총괄팀장 1명 + 3개 파트별 [파트장 1명 + 일반사원 2명] 전원 Antigravity SDK 고정 및 세부 모델 배정 완료",
+                                "state_ko": f"🤖 {t_label}[팀 전용 SDK 편제 적용] 총괄팀장 1명 + 활성 파트별 [파트장 1명 + 일반사원 2명] Antigravity SDK 배정 완료",
                                 "project": STATE["project_name"],
                                 "role": "LEAD",
                             },
@@ -9606,15 +9741,14 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         {
                             "ok": True,
                             **applied,
-                            "message": "총괄팀장 1명 + 파트별 [파트장 1명 + 부하직원 2명] 총 10인 Antigravity SDK 표준 편제가 적용되었습니다.",
+                            "message": f"{t_label}총괄팀장 1명 + 활성 파트별 [파트장 1명 + 부하직원 2명] Antigravity SDK 표준 편제가 적용되었습니다.",
                         }
                     )
                 if action == "recruit_staff":
                     pid = str(payload.get("part_id") or payload.get("id") or "").strip()
-                    tid = str(payload.get("team_id") or "").strip() or None
                     cname = str(payload.get("name") or "").strip()
                     cmod = str(payload.get("model") or "").strip()
-                    rec = recruit_sdk_staff_for_part(part_id=pid, target_team_id=tid, custom_name=cname, custom_model=cmod)
+                    rec = recruit_sdk_staff_for_part(part_id=pid, target_team_id=req_tid, custom_name=cname, custom_model=cmod)
                     ag_info = rec["recruited_agent"]
                     with _STATE_LOCK:
                         STATE["events"].insert(
@@ -9623,7 +9757,7 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                                 "at": utc_now_iso(),
                                 "run_id": f"recruit-staff-{int(time.time())}",
                                 "to_state": "PART_STAFF_RECRUIT",
-                                "state_ko": f"👤 [{pid}] 부하직원 충원: #{ag_info['id']} {ag_info['name']} (Antigravity SDK · {ag_info['cliModel']})",
+                                "state_ko": f"👤 {t_label}[{pid}] 부하직원 충원: #{ag_info['id']} {ag_info['name']} (Antigravity SDK · {ag_info['cliModel']})",
                                 "project": STATE["project_name"],
                                 "role": pid,
                             },
@@ -9632,14 +9766,14 @@ class VirtualOfficeHandler(SimpleHTTPRequestHandler):
                         {
                             "ok": True,
                             **rec,
-                            "message": f"[#{ag_info['id']} {ag_info['name']}] 일반 사원이 Antigravity SDK ({ag_info['cliModel']})로 파견·배치되었습니다.",
+                            "message": f"{t_label}[#{ag_info['id']} {ag_info['name']}] 일반 사원이 Antigravity SDK ({ag_info['cliModel']})로 파견·배치되었습니다.",
                         }
                     )
                 if action == "set_staff_mode":
                     mode_val = str(payload.get("mode") or "parallel").strip().lower()
-                    saved_cfg = set_staff_execution_mode(mode_val)
+                    saved_cfg = set_staff_execution_mode(mode_val, team_id=req_tid)
                     mode_ko = "동시 병렬 수행 (사원1 ∥ 사원2 → 파트장)" if saved_cfg.get("staff_execution_mode") == "parallel" else "순차 이어받기 (사원1 → 사원2 → 파트장)"
-                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"파트 사원 실행 방식이 [{mode_ko}] 모드로 저장되었습니다."})
+                    return self._send_json({"ok": True, "part_roles": saved_cfg, "message": f"{t_label}파트 사원 실행 방식이 [{mode_ko}] 모드로 저장되었습니다."})
                 return self._send_json({"ok": False, "error": f"지원하지 않는 action입니다: {action}"}, 400)
             except ValueError as exc:
                 return self._send_json({"ok": False, "error": str(exc)}, 400)

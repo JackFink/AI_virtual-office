@@ -13,9 +13,9 @@ import json
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from backend.config_paths import CLI_CONFIG_DIR, PART_ROLES_FILE
+from backend.config_paths import CLI_CONFIG_DIR, PART_ROLES_FILE, TEAMS_CONFIG_FILE
 
 
 def _utc_now() -> str:
@@ -89,6 +89,35 @@ DEFAULT_PART_ROLES: List[Dict[str, Any]] = [
     },
 ]
 
+RND_PROTOTYPE_PART_ROLE: Dict[str, Any] = {
+    "id": "PART_RND_PROTOTYPE",
+    "name": "프로토타입 실험·검증 파트 담당",
+    "stage_label": "프로토타입 실험·검증",
+    "icon": "🧪",
+    "part_kind": "custom",
+    "is_lead": False,
+    "enabled": True,
+    "removable": True,
+    "default_cli_role": "builder",
+    "legacy_aliases": ["PART_RND_PROTOTYPE"],
+    "instruction": (
+        "선행 자료수집·기획구조안을 바탕으로 핵심 기술 가설 검증(PoC), 프로토타입 실험 시나리오 및 "
+        "성능·안정성·엣지케이스 검증 기준을 구체화하여 제작·구현 파트에 전달합니다."
+    ),
+}
+
+
+def get_default_part_roles_for_team(team_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    tid = str(team_id or "").strip().lower()
+    if tid == "team-rnd" or "rnd" in tid:
+        return [
+            DEFAULT_PART_ROLES[0],
+            DEFAULT_PART_ROLES[1],
+            RND_PROTOTYPE_PART_ROLE,
+            DEFAULT_PART_ROLES[2],
+        ]
+    return list(DEFAULT_PART_ROLES)
+
 LEGACY_ROLE_TO_CANONICAL: Dict[str, str] = {
     "HEAD": "LEAD",
     "LEAD": "LEAD",
@@ -161,84 +190,154 @@ def _normalize_lead_item(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return base
 
 
-def load_part_roles_config() -> Dict[str, Any]:
-    if PART_ROLES_FILE.exists():
+def _read_known_teams() -> Tuple[str, List[str]]:
+    """Reads active_team_id and registered team IDs from teams.json (safe fallback to team-core / team-rnd)."""
+    active_tid = "team-core"
+    team_ids: List[str] = []
+    if TEAMS_CONFIG_FILE.exists():
         try:
-            raw = json.loads(PART_ROLES_FILE.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and isinstance(raw.get("parts"), list) and len(raw["parts"]) >= 1:
-                lead = _normalize_lead_item(raw.get("lead"))
-                parts: List[Dict[str, Any]] = []
-                seen_ids = {"LEAD"}
-                for idx, item in enumerate(raw["parts"]):
-                    if not isinstance(item, dict):
-                        continue
-                    norm = _normalize_part_item(item, idx + 1)
-                    if norm["id"] in seen_ids:
-                        continue
-                    seen_ids.add(norm["id"])
-                    parts.append(norm)
-                if parts:
-                    if not any(p["enabled"] for p in parts):
-                        parts[-1]["enabled"] = True
-                    raw_sm = str(raw.get("staff_execution_mode") or "parallel").strip().lower()
-                    doc = {
-                        "lead": lead,
-                        "parts": parts,
-                        "staff_execution_mode": "sequential" if raw_sm == "sequential" else "parallel",
-                        "require_user_approval": bool(raw.get("require_user_approval", True)),
-                        "updated_at": str(raw.get("updated_at") or _utc_now()),
-                    }
-                    doc["assignable_roles"] = build_assignable_roles(doc)
-                    doc["pipeline_stages"] = build_pipeline_stage_descriptors(doc)
-                    return doc
+            td = json.loads(TEAMS_CONFIG_FILE.read_text(encoding="utf-8"))
+            if isinstance(td, dict):
+                raw_act = str(td.get("active_team_id") or "").strip()
+                if raw_act:
+                    active_tid = raw_act
+                for t in td.get("teams") or []:
+                    if isinstance(t, dict) and str(t.get("id") or "").strip():
+                        tid_s = str(t["id"]).strip()
+                        if tid_s not in team_ids:
+                            team_ids.append(tid_s)
         except Exception:
             pass
-
-    default_doc = {
-        "lead": _normalize_lead_item(DEFAULT_LEAD_ROLE),
-        "parts": [_normalize_part_item(p, i + 1) for i, p in enumerate(DEFAULT_PART_ROLES)],
-        "staff_execution_mode": "parallel",
-        "require_user_approval": True,
-        "updated_at": _utc_now(),
-    }
-    return save_part_roles_config(default_doc)
+    if not team_ids:
+        team_ids = ["team-core", "team-rnd"]
+    if active_tid not in team_ids:
+        active_tid = team_ids[0]
+    return active_tid, team_ids
 
 
-def save_part_roles_config(doc: Dict[str, Any]) -> Dict[str, Any]:
-    lead = _normalize_lead_item((doc or {}).get("lead"))
-    raw_parts = (doc or {}).get("parts") or []
+def _normalize_single_team_doc(raw: Optional[Dict[str, Any]], team_id: Optional[str] = None) -> Dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    lead = _normalize_lead_item(src.get("lead"))
+    raw_parts = src.get("parts")
     parts: List[Dict[str, Any]] = []
-    seen = {"LEAD"}
-    for idx, p in enumerate(raw_parts):
-        if not isinstance(p, dict):
-            continue
-        norm = _normalize_part_item(p, idx + 1)
-        if norm["id"] in seen:
-            continue
-        seen.add(norm["id"])
-        parts.append(norm)
+    seen_ids = {"LEAD"}
+    if isinstance(raw_parts, list):
+        for idx, item in enumerate(raw_parts):
+            if not isinstance(item, dict):
+                continue
+            norm = _normalize_part_item(item, idx + 1)
+            if norm["id"] in seen_ids:
+                continue
+            seen_ids.add(norm["id"])
+            parts.append(norm)
     if not parts:
-        parts = [_normalize_part_item(p, i + 1) for i, p in enumerate(DEFAULT_PART_ROLES)]
-    if not any(p["enabled"] for p in parts):
+        default_src = get_default_part_roles_for_team(team_id)
+        parts = [_normalize_part_item(p, i + 1) for i, p in enumerate(default_src)]
+    if not any(p.get("enabled") for p in parts):
         parts[-1]["enabled"] = True
-
-    raw_sm = str((doc or {}).get("staff_execution_mode") or "parallel").strip().lower()
-    persisted = {
+    raw_sm = str(src.get("staff_execution_mode") or "parallel").strip().lower()
+    return {
         "lead": lead,
         "parts": parts,
         "staff_execution_mode": "sequential" if raw_sm == "sequential" else "parallel",
-        "require_user_approval": bool((doc or {}).get("require_user_approval", True)),
+        "require_user_approval": bool(src.get("require_user_approval", True)),
+        "updated_at": str(src.get("updated_at") or _utc_now()),
+    }
+
+
+def _enrich_team_part_doc(tid: str, tdoc: Dict[str, Any]) -> Dict[str, Any]:
+    out = json.loads(json.dumps(tdoc))
+    out["team_id"] = tid
+    out["assignable_roles"] = build_assignable_roles(tdoc)
+    out["pipeline_stages"] = build_pipeline_stage_descriptors(tdoc)
+    return out
+
+
+def _load_persisted_store() -> Tuple[str, List[str], Dict[str, Dict[str, Any]]]:
+    active_tid, known_tids = _read_known_teams()
+    base_template = _normalize_single_team_doc(None)
+    team_configs: Dict[str, Dict[str, Any]] = {}
+
+    if PART_ROLES_FILE.exists():
+        try:
+            raw = json.loads(PART_ROLES_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                if isinstance(raw.get("parts"), list) and len(raw["parts"]) >= 1:
+                    base_template = _normalize_single_team_doc(raw)
+                raw_tc = raw.get("team_configs")
+                if isinstance(raw_tc, dict):
+                    for k, v in raw_tc.items():
+                        clean_k = str(k or "").strip()
+                        if clean_k and isinstance(v, dict):
+                            team_configs[clean_k] = _normalize_single_team_doc(v, team_id=clean_k)
+        except Exception:
+            pass
+
+    dirty = not PART_ROLES_FILE.exists()
+    for tid in known_tids:
+        if tid not in team_configs:
+            if tid == "team-rnd" or "rnd" in tid.lower():
+                team_configs[tid] = _normalize_single_team_doc(None, team_id=tid)
+            else:
+                team_configs[tid] = json.loads(json.dumps(base_template))
+            dirty = True
+
+    if dirty:
+        _write_persisted_store(active_tid, team_configs)
+
+    return active_tid, known_tids, team_configs
+
+
+def _write_persisted_store(active_tid: str, team_configs: Dict[str, Dict[str, Any]]) -> None:
+    primary_doc = team_configs.get(active_tid) or next(iter(team_configs.values()), _normalize_single_team_doc(None))
+    persisted = {
+        "lead": primary_doc["lead"],
+        "parts": primary_doc["parts"],
+        "staff_execution_mode": primary_doc["staff_execution_mode"],
+        "require_user_approval": primary_doc["require_user_approval"],
         "updated_at": _utc_now(),
+        "team_configs": team_configs,
     }
     CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     tmp = PART_ROLES_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(persisted, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, PART_ROLES_FILE)
 
-    out = dict(persisted)
-    out["assignable_roles"] = build_assignable_roles(persisted)
-    out["pipeline_stages"] = build_pipeline_stage_descriptors(persisted)
-    return out
+
+def _build_full_response_payload(selected_tid: str, team_configs: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    if selected_tid not in team_configs:
+        base_seed = next(iter(team_configs.values()), _normalize_single_team_doc(None))
+        team_configs[selected_tid] = json.loads(json.dumps(base_seed))
+    by_team: Dict[str, Dict[str, Any]] = {}
+    all_roles_map: Dict[str, Dict[str, Any]] = {}
+    for tid, tdoc in team_configs.items():
+        enriched = _enrich_team_part_doc(tid, tdoc)
+        by_team[tid] = enriched
+        for r in enriched["assignable_roles"]:
+            if r["id"] not in all_roles_map:
+                all_roles_map[r["id"]] = dict(r)
+    selected_out = dict(by_team[selected_tid])
+    selected_out["by_team"] = by_team
+    selected_out["all_assignable_roles"] = list(all_roles_map.values())
+    return selected_out
+
+
+def load_part_roles_config(team_id: Optional[str] = None) -> Dict[str, Any]:
+    active_tid, _, team_configs = _load_persisted_store()
+    eff_tid = str(team_id or "").strip() or active_tid
+    if eff_tid not in team_configs:
+        team_configs[eff_tid] = _normalize_single_team_doc(None, team_id=eff_tid)
+        _write_persisted_store(active_tid, team_configs)
+    return _build_full_response_payload(eff_tid, team_configs)
+
+
+def save_part_roles_config(doc: Dict[str, Any], team_id: Optional[str] = None) -> Dict[str, Any]:
+    active_tid, _, team_configs = _load_persisted_store()
+    eff_tid = str(team_id or (doc or {}).get("team_id") or "").strip() or active_tid
+    norm_doc = _normalize_single_team_doc({**(doc or {}), "updated_at": _utc_now()}, team_id=eff_tid)
+    team_configs[eff_tid] = norm_doc
+    _write_persisted_store(active_tid, team_configs)
+    return _build_full_response_payload(eff_tid, team_configs)
 
 
 def build_assignable_roles(doc: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -357,11 +456,13 @@ def add_part_role(
     instruction: str = "",
     default_cli_role: str = "builder",
     insert_before_build: bool = True,
+    team_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     clean_name = str(name or "").strip()
     if not clean_name:
         raise ValueError("추가할 파트 담당 이름을 입력해 주세요.")
-    cfg = load_part_roles_config()
+    cfg = load_part_roles_config(team_id=team_id)
+    eff_tid = cfg["team_id"]
     parts = list(cfg.get("parts") or [])
     existing_ids = {"LEAD"} | {p["id"] for p in parts}
     slug = re.sub(r"[^A-Z0-9]+", "_", clean_name.upper()).strip("_")
@@ -393,21 +494,22 @@ def add_part_role(
     else:
         parts.append(new_item)
     cfg["parts"] = parts
-    saved = save_part_roles_config(cfg)
+    saved = save_part_roles_config(cfg, team_id=eff_tid)
     saved["added_part"] = new_item
     return saved
 
 
-def update_part_role(role_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+def update_part_role(role_id: str, updates: Dict[str, Any], team_id: Optional[str] = None) -> Dict[str, Any]:
     rid = str(role_id or "").strip().upper()
-    cfg = load_part_roles_config()
+    cfg = load_part_roles_config(team_id=team_id)
+    eff_tid = cfg["team_id"]
     if rid == "LEAD":
         lead = dict(cfg["lead"])
         for k in ("name", "stage_label", "icon", "instruction"):
             if k in updates and updates[k] is not None and str(updates[k]).strip():
                 lead[k] = str(updates[k]).strip()
         cfg["lead"] = lead
-        return save_part_roles_config(cfg)
+        return save_part_roles_config(cfg, team_id=eff_tid)
 
     parts = list(cfg.get("parts") or [])
     matched = False
@@ -427,14 +529,15 @@ def update_part_role(role_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
     if not any(p.get("enabled") for p in parts):
         raise ValueError("최소 1개 이상의 실무 파트는 활성화(ON) 상태여야 합니다.")
     cfg["parts"] = parts
-    return save_part_roles_config(cfg)
+    return save_part_roles_config(cfg, team_id=eff_tid)
 
 
-def delete_part_role(role_id: str) -> Dict[str, Any]:
+def delete_part_role(role_id: str, team_id: Optional[str] = None) -> Dict[str, Any]:
     rid = str(role_id or "").strip().upper()
     if rid == "LEAD":
         raise ValueError("프로젝트 총괄팀장(LEAD) 역할은 삭제할 수 없습니다 (이름·지침 수정은 가능합니다).")
-    cfg = load_part_roles_config()
+    cfg = load_part_roles_config(team_id=team_id)
+    eff_tid = cfg["team_id"]
     parts = list(cfg.get("parts") or [])
     if len(parts) <= 1:
         raise ValueError("최소 1개 이상의 실무 파트 담당은 유지되어야 합니다.")
@@ -444,12 +547,13 @@ def delete_part_role(role_id: str) -> Dict[str, Any]:
     if not any(p.get("enabled") for p in next_parts):
         next_parts[-1]["enabled"] = True
     cfg["parts"] = next_parts
-    return save_part_roles_config(cfg)
+    return save_part_roles_config(cfg, team_id=eff_tid)
 
 
-def reorder_part_role(role_id: str, direction: str) -> Dict[str, Any]:
+def reorder_part_role(role_id: str, direction: str, team_id: Optional[str] = None) -> Dict[str, Any]:
     rid = str(role_id or "").strip().upper()
-    cfg = load_part_roles_config()
+    cfg = load_part_roles_config(team_id=team_id)
+    eff_tid = cfg["team_id"]
     parts = list(cfg.get("parts") or [])
     idx = next((i for i, p in enumerate(parts) if p["id"] == rid), -1)
     if idx < 0:
@@ -459,24 +563,42 @@ def reorder_part_role(role_id: str, direction: str) -> Dict[str, Any]:
     elif direction == "down" and idx < len(parts) - 1:
         parts[idx + 1], parts[idx] = parts[idx], parts[idx + 1]
     cfg["parts"] = parts
-    return save_part_roles_config(cfg)
+    return save_part_roles_config(cfg, team_id=eff_tid)
 
 
-def reset_part_roles() -> Dict[str, Any]:
+def reset_part_roles(team_id: Optional[str] = None) -> Dict[str, Any]:
+    default_src = get_default_part_roles_for_team(team_id)
     default_doc = {
         "lead": _normalize_lead_item(DEFAULT_LEAD_ROLE),
-        "parts": [_normalize_part_item(p, i + 1) for i, p in enumerate(DEFAULT_PART_ROLES)],
+        "parts": [_normalize_part_item(p, i + 1) for i, p in enumerate(default_src)],
         "staff_execution_mode": "parallel",
         "require_user_approval": True,
         "updated_at": _utc_now(),
     }
-    return save_part_roles_config(default_doc)
+    return save_part_roles_config(default_doc, team_id=team_id)
 
 
-def set_staff_execution_mode(mode: str) -> Dict[str, Any]:
-    cfg = load_part_roles_config()
+def set_staff_execution_mode(mode: str, team_id: Optional[str] = None) -> Dict[str, Any]:
+    cfg = load_part_roles_config(team_id=team_id)
+    eff_tid = cfg["team_id"]
     cfg["staff_execution_mode"] = "sequential" if str(mode or "").strip().lower() == "sequential" else "parallel"
-    return save_part_roles_config(cfg)
+    return save_part_roles_config(cfg, team_id=eff_tid)
+
+
+def copy_team_part_roles(source_team_id: str, target_team_id: str) -> Dict[str, Any]:
+    src_tid = str(source_team_id or "").strip()
+    dst_tid = str(target_team_id or "").strip()
+    if not src_tid or not dst_tid or src_tid == dst_tid:
+        raise ValueError("복사할 원본 팀과 대상 팀을 서로 다르게 지정해 주세요.")
+    src_cfg = load_part_roles_config(team_id=src_tid)
+    cloned = {
+        "lead": json.loads(json.dumps(src_cfg["lead"])),
+        "parts": json.loads(json.dumps(src_cfg["parts"])),
+        "staff_execution_mode": src_cfg.get("staff_execution_mode", "parallel"),
+        "require_user_approval": bool(src_cfg.get("require_user_approval", True)),
+        "updated_at": _utc_now(),
+    }
+    return save_part_roles_config(cloned, team_id=dst_tid)
 
 
 # ---------------------------------------------------------------------------

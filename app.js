@@ -146,6 +146,8 @@
   }
 
   var currentPartRoles = null;
+  var partRolesByTeam = {};
+  var selectedPartRolesTeamId = '';
   var LEGACY_ROLE_MAP = {
     HEAD: 'LEAD',
     LEAD: 'LEAD',
@@ -184,21 +186,65 @@
     { id: 'gemini-pro-orchestrator-neon', label: 'Orchestrator Neon (Ultra 플래너)' }
   ];
 
-  function normalizeAgentPartRoleId(rawRole) {
+  function getAgentBelongingTeamId(agentId) {
+    const aid = String(agentId || '').padStart(2, '0');
+    const teamsArr = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams : [];
+    const foundTeam = teamsArr.find(t => Array.isArray(t.member_ids) && t.member_ids.includes(aid));
+    if (foundTeam && foundTeam.id) return foundTeam.id;
+    return selectedPartRolesTeamId || window.NEXUS_TEAMS_SUMMARY?.active_team_id || 'team-core';
+  }
+
+  function getPartRolesForTeam(teamId = null) {
+    const tid = String(teamId || selectedPartRolesTeamId || window.NEXUS_TEAMS_SUMMARY?.active_team_id || '').trim();
+    if (tid && partRolesByTeam && partRolesByTeam[tid]) {
+      return partRolesByTeam[tid];
+    }
+    if (currentPartRoles?.by_team && tid && currentPartRoles.by_team[tid]) {
+      return currentPartRoles.by_team[tid];
+    }
+    return currentPartRoles;
+  }
+
+  function getAllAssignablePartRolesUnion() {
+    if (Array.isArray(currentPartRoles?.all_assignable_roles) && currentPartRoles.all_assignable_roles.length) {
+      return currentPartRoles.all_assignable_roles;
+    }
+    const seen = new Map();
+    Object.values(partRolesByTeam || {}).forEach(cfg => {
+      (cfg?.assignable_roles || []).forEach(r => {
+        if (r && r.id && !seen.has(r.id)) seen.set(r.id, r);
+      });
+    });
+    if (!seen.size && Array.isArray(currentPartRoles?.assignable_roles)) {
+      currentPartRoles.assignable_roles.forEach(r => {
+        if (r && r.id && !seen.has(r.id)) seen.set(r.id, r);
+      });
+    }
+    return Array.from(seen.values());
+  }
+
+  function normalizeAgentPartRoleId(rawRole, teamId = null) {
     const up = String(rawRole || '').trim().toUpperCase();
     if (!up) return 'PART_BUILD';
-    if (currentPartRoles && Array.isArray(currentPartRoles.assignable_roles)) {
-      if (currentPartRoles.assignable_roles.some(r => r.id === up)) return up;
+    const teamCfg = teamId ? getPartRolesForTeam(teamId) : null;
+    if (teamCfg && Array.isArray(teamCfg.assignable_roles) && teamCfg.assignable_roles.some(r => r.id === up)) {
+      return up;
     }
+    const allUnion = getAllAssignablePartRolesUnion();
+    if (allUnion.some(r => r.id === up)) return up;
     return (LEGACY_ROLE_MAP && LEGACY_ROLE_MAP[up]) || up;
   }
 
-  function getPartRoleDisplayLabel(rawRole) {
-    const canon = normalizeAgentPartRoleId(rawRole);
-    if (currentPartRoles && Array.isArray(currentPartRoles.assignable_roles)) {
-      const found = currentPartRoles.assignable_roles.find(r => r.id === canon);
-      if (found) return `${found.icon || '🧩'} ${found.name}`;
+  function getPartRoleDisplayLabel(rawRole, teamId = null) {
+    const canon = normalizeAgentPartRoleId(rawRole, teamId);
+    const teamCfg = teamId ? getPartRolesForTeam(teamId) : currentPartRoles;
+    if (teamCfg && Array.isArray(teamCfg.assignable_roles)) {
+      const foundInTeam = teamCfg.assignable_roles.find(r => r.id === canon);
+      if (foundInTeam) return `${foundInTeam.icon || '🧩'} ${foundInTeam.name}`;
     }
+    const allUnion = getAllAssignablePartRolesUnion();
+    const foundAny = allUnion.find(r => r.id === canon);
+    if (foundAny) return `${foundAny.icon || '🧩'} ${foundAny.name}`;
     const defaults = {
       LEAD: '👑 프로젝트 총괄팀장',
       PART_RESEARCH: '🔎 자료수집 파트 담당',
@@ -206,6 +252,24 @@
       PART_BUILD: '🛠️ 제작·구현 파트 담당'
     };
     return defaults[canon] || rawRole;
+  }
+
+  function formatEventTime24h(isoStr) {
+    const d = isoStr ? new Date(isoStr) : new Date();
+    if (Number.isNaN(d.getTime())) return String(isoStr || '00-00 00:00:00');
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${mo}-${da} ${hh}:${mm}:${ss}`;
+  }
+
+  function formatEventFullDateTime24h(isoStr) {
+    if (!isoStr) return '';
+    const d = new Date(isoStr);
+    if (Number.isNaN(d.getTime())) return String(isoStr);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
   }
 
   function getActiveCliProvidersMap() {
@@ -1041,7 +1105,15 @@
       if (deptEl) deptEl.textContent = `${curPlc.floorStr} · #${curPlc.seatIndex + 1}석 · ${agent.triadRole} (${cliLabel})`;
 
       if (studioQuickRole) {
-        const mappedRole = normalizeAgentPartRoleId(agent.triadRole || 'LEAD');
+        const agTeamId = getAgentBelongingTeamId(agent.id);
+        const agTeamRoles = getPartRolesForTeam(agTeamId)?.assignable_roles || [];
+        const mappedRole = normalizeAgentPartRoleId(agent.triadRole || 'LEAD', agTeamId);
+        if (agTeamRoles.length > 0 && document.activeElement !== studioQuickRole) {
+          studioQuickRole.innerHTML = agTeamRoles.map(r => {
+            const offTag = r.enabled === false ? ' [비활성]' : '';
+            return `<option value="${escHtml(r.id)}" ${r.id === mappedRole ? 'selected' : ''}>${escHtml(r.icon || '🧩')} ${escHtml(r.name)} (${escHtml(r.id)})${offTag}</option>`;
+          }).join('') + `<option value="__add_new_part__">➕ 새 실무 파트 직접 추가...</option>`;
+        }
         if (Array.from(studioQuickRole.options).some(o => o.value === mappedRole)) {
           studioQuickRole.value = mappedRole;
         } else {
@@ -1200,7 +1272,8 @@
     studioQuickRole?.addEventListener('change', async (e) => {
       if (e.target.value === '__add_new_part__') {
         const agent = modularAgents.find(a => a.id === selectedId);
-        e.target.value = normalizeAgentPartRoleId(agent?.triadRole || 'LEAD');
+        const ownerTid = getAgentBelongingTeamId(selectedId);
+        e.target.value = normalizeAgentPartRoleId(agent?.triadRole || 'LEAD', ownerTid);
         const newName = prompt('새로 추가할 실무 파트 담당 이름을 입력하세요 (예: 디자인·시각화 파트 담당):', '');
         if (!newName || !newName.trim()) return;
         const newInst = prompt('이 파트 담당의 핵심 업무·검증 지침을 입력하세요 (비워두면 자동 생성):', '') || '';
@@ -1208,10 +1281,11 @@
           const res = await apiFetch('/ops/part-roles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'add', name: newName.trim(), instruction: newInst.trim() })
+            body: JSON.stringify({ action: 'add', team_id: ownerTid, name: newName.trim(), instruction: newInst.trim() })
           });
           const d = await res.json().catch(() => ({}));
           if (res.ok && d.part_roles) {
+            selectedPartRolesTeamId = ownerTid;
             syncPartRolesToDOM(d.part_roles, true);
             const addedId = d.part_roles.added_part?.id || e.target.value;
             updateSelectedAgentAiField(a => { a.triadRole = addedId; });
@@ -2140,7 +2214,7 @@
             </div>
             <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap">
               <span class="status ${isWorkingNow ? 'running' : 'review'}" style="${isWorkingNow ? '' : 'background:#ecfdf5;color:#0f6848'}">${isWorkingNow ? '⚡ 수행 중' : '✓ 준비됨'}</span>
-              <button type="button" class="btn small btn-roster-edit-agent" data-aid="${escHtml(ag.id)}" style="height:26px;padding:0 9px;font-size:10px">⚙ 편집 ↓</button>
+              <button type="button" class="btn small btn-roster-edit-agent" data-aid="${escHtml(ag.id)}" style="height:26px;padding:0 9px;font-size:10px">⚙ 편집 ↑</button>
             </div>
           </div>
         `;
@@ -2294,42 +2368,43 @@
         ? `☁️ Google Drive: <a href="${escHtml(gd.folder_url)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline">${escHtml(gd.folder_name || gd.folder_url)} ↗</a>`
         : `📂 작업 폴더: <code style="font-size:10px;color:#1e293b">${escHtml(ws.display_path || ws.effective_dir || 'deliverables/')}</code>`;
 
-      const rowsHtml = memberObjs.map(m => {
-        const cr = normalizeAgentPartRoleId(m.triadRole);
+      const thumbCardsHtml = memberObjs.map(m => {
+        const cr = normalizeAgentPartRoleId(m.triadRole, t.id);
         const effRank = cr === 'LEAD' ? 'LEAD' : (m.orgRank === 'STAFF' ? 'STAFF' : 'PART_LEAD');
         const rkBadge = formatOrgRankBadge(effRank, cr);
-        const partLbl = getPartRoleDisplayLabel(cr);
+        const partLbl = getPartRoleDisplayLabel(cr, t.id);
         const cliKey = m.cliProvider || 'antigravity_sdk';
         const cliLbl = CLI_BADGE_LABELS[cliKey] || cliKey;
         const modLbl = m.cliModel || '계정 기본 모델';
         const toLbl = formatAgentTimeoutBadge(m.timeoutSec);
         const plc = getAgentOfficePlacement(m.id, m.floor || t.floor || '1F');
+        const topAccent = effRank === 'LEAD' ? '#f59e0b' : (effRank === 'PART_LEAD' ? '#0284c7' : c);
+        const rkBg = effRank === 'LEAD' ? '#fef3c7' : (effRank === 'PART_LEAD' ? '#e0f2fe' : '#f1f5f9');
+        const rkFg = effRank === 'LEAD' ? '#92400e' : (effRank === 'PART_LEAD' ? '#0369a1' : '#334155');
+        const skillTip = Array.isArray(m.skills) && m.skills.length ? `스킬: ${m.skills.join(' · ')}` : m.name;
         return `
-          <tr style="border-top:1px solid #eef2f6">
-            <td style="padding:7px 10px">
-              <div style="display:flex;align-items:center;gap:8px">
-                <div style="width:28px;height:32px;flex-shrink:0">${CharacterEngine.render(m, { stance: m.mapleAnim || 'stand1', animated: false })}</div>
-                <div>
-                  <strong style="font-size:11.5px;color:#0f172a">#${escHtml(m.id)} ${escHtml(m.name)}</strong>
-                  ${(Array.isArray(m.skills) && m.skills.length) ? `<div style="font-size:9.5px;color:#64748b">⚡ ${escHtml(m.skills.slice(0, 3).join(' · '))}</div>` : ''}
-                </div>
+          <div class="conf-member-thumb-card" data-focus-aid="${escHtml(m.id)}" style="border-top:3px solid ${escHtml(topAccent)}" title="${escHtml(skillTip)}">
+            <div class="conf-member-thumb-top">
+              <span style="padding:1.5px 6px;border-radius:5px;background:${rkBg};color:${rkFg};white-space:nowrap">#${escHtml(m.id)} · ${escHtml(rkBadge)}</span>
+              <span style="color:#64748b;font-size:8.5px;white-space:nowrap">${escHtml(plc.floorStr)}·#${plc.seatIndex + 1}석</span>
+            </div>
+            <div class="conf-member-thumb-stage">
+              ${CharacterEngine.render(m, { stance: m.mapleAnim || 'stand1', animated: false })}
+            </div>
+            <div class="conf-member-thumb-name" title="#${escHtml(m.id)} ${escHtml(m.name)}">${escHtml(m.name)}</div>
+            <div class="conf-member-thumb-part" title="${escHtml(partLbl)}">${escHtml(partLbl)}</div>
+            <div class="conf-member-thumb-meta">
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;max-width:100%">
+                <span class="char-cli-badge ${escHtml(cliKey)}" style="margin:0;font-size:8px;padding:1px 5px">${escHtml(cliLbl)}</span>
+                <span style="font-size:8px;font-weight:800;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;padding:1px 5px;border-radius:4px;white-space:nowrap">${escHtml(toLbl)}</span>
               </div>
-            </td>
-            <td style="padding:7px 8px;white-space:nowrap">
-              <span style="padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;background:${effRank === 'LEAD' ? '#fef3c7' : (effRank === 'PART_LEAD' ? '#e0f2fe' : '#f1f5f9')};color:${effRank === 'LEAD' ? '#92400e' : (effRank === 'PART_LEAD' ? '#0369a1' : '#334155')}">${escHtml(rkBadge)}</span>
-            </td>
-            <td style="padding:7px 8px;font-size:11px;font-weight:700;color:#0f6848;white-space:nowrap">${escHtml(partLbl)}</td>
-            <td style="padding:7px 8px;font-size:11px">
-              <span class="char-cli-badge ${escHtml(cliKey)}" style="margin:0 4px 0 0">${escHtml(cliLbl)}</span>
-              <code style="font-size:10.5px;color:#0f172a;font-weight:800">${escHtml(modLbl)}</code>
-            </td>
-            <td style="padding:7px 8px;white-space:nowrap"><span style="font-size:10px;font-weight:800;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;padding:2px 6px;border-radius:5px">${escHtml(toLbl)}</span></td>
-            <td style="padding:7px 8px;font-size:10.5px;color:#475569;white-space:nowrap">${escHtml(plc.floorStr)} · #${plc.seatIndex + 1}석</td>
-            <td style="padding:7px 10px;text-align:right;white-space:nowrap">
-              <button type="button" class="btn small btn-conf-team-edit-member" data-aid="${escHtml(m.id)}" style="height:24px;padding:0 8px;font-size:9.5px">⚙ 직원 편집 ↓</button>
-              ${memIds.length > 1 ? `<button type="button" class="btn small btn-conf-team-rem-member" data-tid="${escHtml(t.id)}" data-aid="${escHtml(m.id)}" style="height:24px;padding:0 7px;font-size:9.5px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">제외</button>` : ''}
-            </td>
-          </tr>
+              <code style="font-size:8.5px;color:#0f172a;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="세부 실행 모델: ${escHtml(modLbl)}">✨ ${escHtml(modLbl)}</code>
+            </div>
+            <div class="conf-member-thumb-actions">
+              <button type="button" class="btn small btn-conf-team-edit-member" data-aid="${escHtml(m.id)}" style="height:22px;padding:0 8px;font-size:9px;flex:1;justify-content:center">⚙ 편집 ↓</button>
+              ${memIds.length > 1 ? `<button type="button" class="btn small btn-conf-team-rem-member" data-tid="${escHtml(t.id)}" data-aid="${escHtml(m.id)}" style="height:22px;padding:0 6px;font-size:9px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">제외</button>` : ''}
+            </div>
+          </div>
         `;
       }).join('');
 
@@ -2353,41 +2428,42 @@
               <button type="button" class="btn small btn-conf-team-edit" data-tid="${escHtml(t.id)}" style="height:26px;padding:0 9px;font-size:10px;background:#f0fdf4;color:#0f6848;border-color:#86efac">✏️ 팀 설정·팀원 편집</button>
             </div>
           </div>
-          <div style="overflow-x:auto">
-            <table style="width:100%;border-collapse:collapse;text-align:left">
-              <thead>
-                <tr style="background:#ffffff;font-size:10px;color:#64748b;text-transform:uppercase">
-                  <th style="padding:7px 10px">소속 팀원 (사번 · 이름 · 스킬)</th>
-                  <th style="padding:7px 8px">직급</th>
-                  <th style="padding:7px 8px">담당 파트</th>
-                  <th style="padding:7px 8px">AI 엔진 · 세부 실행 모델</th>
-                  <th style="padding:7px 8px">타임아웃</th>
-                  <th style="padding:7px 8px">오피스 좌석</th>
-                  <th style="padding:7px 10px;text-align:right">빠른 관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rowsHtml || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8;font-size:11px">배정된 팀원이 없습니다.</td></tr>'}
-              </tbody>
-            </table>
-          </div>
+          ${thumbCardsHtml
+            ? `<div class="conf-team-thumb-grid">${thumbCardsHtml}</div>`
+            : `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px">배정된 팀원이 없습니다.</div>`}
         </div>
       `;
     }).join('');
 
     const unassignedHtml = unassignedAgents.length
       ? `
-        <div style="padding:11px 14px;border-radius:11px;background:#fffbeb;border:1px dashed #f59e0b;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <div style="font-size:11px;color:#92400e">
-            <strong>📌 아직 팀에 배정되지 않은 등록 AI 직원 (${unassignedAgents.length}명):</strong>
-            ${unassignedAgents.map(ua => `<span style="margin-left:6px;font-weight:800">#${escHtml(ua.id)} ${escHtml(ua.name)} (${escHtml(ua.cliModel || ua.cliProvider)})</span>`).join(',')}
+        <div style="padding:11px 14px;border-radius:11px;background:#fffbeb;border:1px dashed #f59e0b;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <strong style="font-size:11px;color:#92400e">📌 아직 팀에 배정되지 않은 등록 AI 직원 (${unassignedAgents.length}명)</strong>
+            <a href="#agentsTeamPlacementSection" class="btn small" style="height:25px;padding:0 9px;font-size:10px;background:#fef3c7;color:#92400e;border-color:#f59e0b">팀 배치 보드에서 배정 ↓</a>
           </div>
-          <a href="#agentsTeamPlacementSection" class="btn small" style="height:25px;padding:0 9px;font-size:10px;background:#fef3c7;color:#92400e;border-color:#f59e0b">팀 배치 보드에서 배정 ↓</a>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${unassignedAgents.map(ua => `
+              <div class="conf-member-thumb-card" data-focus-aid="${escHtml(ua.id)}" style="width:142px;padding:7px 8px;background:#ffffff">
+                <div class="conf-member-thumb-stage" style="height:54px">${CharacterEngine.render(ua, { stance: ua.mapleAnim || 'stand1', animated: false })}</div>
+                <div class="conf-member-thumb-name" style="font-size:10.5px">#${escHtml(ua.id)} ${escHtml(ua.name)}</div>
+                <code style="font-size:8px;color:#64748b;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(ua.cliModel || ua.cliProvider)}</code>
+              </div>
+            `).join('')}
+          </div>
         </div>
       `
       : '';
 
     detailBox.innerHTML = cardsHtml + unassignedHtml;
+
+    detailBox.querySelectorAll('.conf-member-thumb-card').forEach(card => {
+      card.addEventListener('click', (ev) => {
+        if (ev.target.closest('button')) return;
+        const aid = card.dataset.focusAid;
+        if (aid && studioSelectAgentFn) studioSelectAgentFn(aid, true);
+      });
+    });
 
     detailBox.querySelectorAll('.btn-conf-team-edit').forEach(b => {
       b.addEventListener('click', () => {
@@ -2840,380 +2916,689 @@
     }
   }
 
+  var lastPartBoardsRenderSig = '';
+  var lastPartJumpChipsSig = '';
+  var collapsedPartBoardTeamIds = (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('nexus-collapsed-part-boards-v1') || '[]');
+      return new Set(Array.isArray(raw) ? raw.filter(Boolean) : []);
+    } catch (_) {
+      return new Set();
+    }
+  })();
+
+  function persistCollapsedPartBoards() {
+    try {
+      localStorage.setItem('nexus-collapsed-part-boards-v1', JSON.stringify(Array.from(collapsedPartBoardTeamIds)));
+    } catch (_) { }
+  }
+
+  function setTeamPartBoardCollapsed(tid, shouldCollapse) {
+    if (!tid) return;
+    if (shouldCollapse) collapsedPartBoardTeamIds.add(tid);
+    else collapsedPartBoardTeamIds.delete(tid);
+    persistCollapsedPartBoards();
+
+    const card = document.getElementById(`teamPartBoard_${tid}`);
+    if (card) {
+      card.classList.toggle('is-collapsed', !!shouldCollapse);
+      const btn = card.querySelector('.btn-toggle-team-part-board');
+      if (btn) {
+        btn.setAttribute('aria-expanded', shouldCollapse ? 'false' : 'true');
+        btn.textContent = shouldCollapse ? '▸ 펼치기' : '▾ 접기';
+        btn.title = shouldCollapse ? '클릭하여 이 팀의 총괄팀장·파트 구성 편집 보드 펼치기' : '클릭하여 이 팀의 파트 구성 편집 보드 접기';
+      }
+      const chevron = card.querySelector('.team-part-board-chevron');
+      if (chevron) {
+        chevron.textContent = shouldCollapse ? '▸' : '▾';
+      }
+    }
+    document.querySelectorAll('.part-team-jump-chip').forEach(chip => {
+      if (chip.dataset.jumpTid === tid) {
+        const ind = chip.querySelector('.jump-chip-fold-ind');
+        if (ind) ind.textContent = shouldCollapse ? '▸접힘' : '▾펼침';
+      }
+    });
+  }
+
   function syncPartRolesToDOM(partRolesCfg, forceGridRender = false) {
     if (!partRolesCfg || typeof partRolesCfg !== 'object') return;
-    currentPartRoles = partRolesCfg;
+    if (partRolesCfg.by_team && typeof partRolesCfg.by_team === 'object') {
+      Object.entries(partRolesCfg.by_team).forEach(([tid, tcfg]) => {
+        if (tid && tcfg && typeof tcfg === 'object') {
+          partRolesByTeam[tid] = tcfg;
+        }
+      });
+    } else if (partRolesCfg.team_id) {
+      partRolesByTeam[partRolesCfg.team_id] = partRolesCfg;
+    }
+
+    const teamsLookup = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams : [];
+    const fallbackTid = window.NEXUS_TEAMS_SUMMARY?.active_team_id
+      || partRolesCfg.team_id
+      || (teamsLookup[0] && teamsLookup[0].id)
+      || Object.keys(partRolesByTeam)[0]
+      || 'team-core';
+    if (!selectedPartRolesTeamId || (teamsLookup.length > 0 && !teamsLookup.some(t => t.id === selectedPartRolesTeamId))) {
+      selectedPartRolesTeamId = fallbackTid;
+    }
+
+    const activeTeamPartCfg = partRolesByTeam[selectedPartRolesTeamId] || partRolesCfg;
+    currentPartRoles = {
+      ...activeTeamPartCfg,
+      by_team: { ...partRolesByTeam },
+      all_assignable_roles: partRolesCfg.all_assignable_roles || currentPartRoles?.all_assignable_roles || undefined
+    };
+
     if (renderConfiguredAgentsRosterFn) renderConfiguredAgentsRosterFn(forceGridRender);
     if (renderConfiguredTeamsSectionFn && window.NEXUS_TEAMS_SUMMARY) {
       renderConfiguredTeamsSectionFn(window.NEXUS_TEAMS_SUMMARY, forceGridRender);
     }
     try {
-      localStorage.setItem('nexus-part-roles-v1', JSON.stringify(partRolesCfg));
+      localStorage.setItem('nexus-part-roles-v1', JSON.stringify(currentPartRoles));
     } catch (_) { }
 
-    const assignable = Array.isArray(partRolesCfg.assignable_roles) ? partRolesCfg.assignable_roles : [];
-    const stages = Array.isArray(partRolesCfg.pipeline_stages) ? partRolesCfg.pipeline_stages : [];
-    const parts = Array.isArray(partRolesCfg.parts) ? partRolesCfg.parts : [];
-    const lead = partRolesCfg.lead || { id: 'LEAD', name: '프로젝트 총괄팀장', icon: '👑', instruction: '' };
+    const assignable = Array.isArray(activeTeamPartCfg.assignable_roles) ? activeTeamPartCfg.assignable_roles : [];
 
-    const staffExecMode = partRolesCfg.staff_execution_mode === 'sequential' ? 'sequential' : 'parallel';
-    const staffModeSel = document.getElementById('staffExecModeSelect');
-    if (staffModeSel && document.activeElement !== staffModeSel) {
-      staffModeSel.value = staffExecMode;
-      if (!staffModeSel.dataset.bound) {
-        staffModeSel.dataset.bound = '1';
-        staffModeSel.addEventListener('change', async (ev) => {
-          const nextMode = ev.currentTarget.value;
-          const fbBar = document.getElementById('partRolesFeedbackBar');
-          const res = await apiFetch('/ops/part-roles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'set_staff_mode', mode: nextMode })
-          });
-          const d = await res.json().catch(() => ({}));
-          if (res.ok && d.part_roles) {
-            syncPartRolesToDOM(d.part_roles, true);
-            if (fbBar) {
-              fbBar.style.display = 'block';
-              fbBar.textContent = `✓ ${d.message || '사원 실행 모드가 변경되었습니다.'}`;
+    // Build ordered list of teams to render simultaneously (fallback to partRolesByTeam keys if teamsLookup hasn't loaded yet)
+    const effectiveTeamsList = teamsLookup.length > 0
+      ? teamsLookup
+      : Object.keys(partRolesByTeam).map((tid, idx) => ({
+          id: tid,
+          name: tid === 'team-rnd' ? '신규 서비스 R&D팀' : (tid === 'team-core' ? '코어 플랫폼 개발팀' : tid),
+          floor: tid === 'team-rnd' ? '3F' : `${idx + 1}F`,
+          color: tid === 'team-rnd' ? '#0284c7' : '#0f6848',
+          member_ids: []
+        }));
+
+    // 1. Update section summary badge & quick jump chips on agents.html
+    const cntBadge = document.getElementById('partRolesCountBadge');
+    if (cntBadge) {
+      let totalActiveParts = 0;
+      effectiveTeamsList.forEach(t => {
+        const tc = partRolesByTeam[t.id] || activeTeamPartCfg;
+        totalActiveParts += (tc?.parts || []).filter(p => p.enabled !== false).length;
+      });
+      cntBadge.textContent = `구성된 팀 ${effectiveTeamsList.length}개 · 활성 파트 총 ${totalActiveParts}개`;
+    }
+
+    const jumpChipsEl = document.getElementById('partRolesTeamJumpChips');
+    if (jumpChipsEl && effectiveTeamsList.length > 0) {
+      const jumpSig = JSON.stringify([
+        effectiveTeamsList.map(t => {
+          const tc = partRolesByTeam[t.id] || activeTeamPartCfg;
+          const tParts = Array.isArray(tc?.parts) ? tc.parts : [];
+          return [t.id, t.name, t.floor, t.color, tParts.length, tParts.filter(p => p.enabled !== false).length, tc?.staff_execution_mode, collapsedPartBoardTeamIds.has(t.id)];
+        })
+      ]);
+      if (forceGridRender || jumpSig !== lastPartJumpChipsSig) {
+        lastPartJumpChipsSig = jumpSig;
+        const chipsHtml = effectiveTeamsList.map(t => {
+          const tCol = t.color || '#0f6848';
+          const tc = partRolesByTeam[t.id] || activeTeamPartCfg;
+          const tParts = Array.isArray(tc?.parts) ? tc.parts : [];
+          const enCnt = tParts.filter(p => p.enabled !== false).length;
+          const modeTxt = tc?.staff_execution_mode === 'sequential' ? '순차' : '병렬';
+          const isFolded = collapsedPartBoardTeamIds.has(t.id);
+          return `
+            <a href="#teamPartBoard_${escHtml(t.id)}" class="part-team-jump-chip" data-jump-tid="${escHtml(t.id)}" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:#ffffff;border:1.5px solid ${escHtml(tCol)}55;color:#0f172a;font-size:11px;font-weight:800;box-shadow:0 2px 5px rgba(15,23,42,0.04)" title="클릭 시 해당 팀 보드를 펼치고 이동합니다">
+              <span style="width:8px;height:8px;border-radius:50%;background:${escHtml(tCol)}"></span>
+              <span>[${escHtml(t.floor || '1F')}] ${escHtml(t.name)}</span>
+              <span style="background:${escHtml(tCol)}16;color:${escHtml(tCol)};padding:1px 7px;border-radius:999px;font-size:10px">총괄 1 · 파트 ${enCnt}/${tParts.length}개 · ${modeTxt}</span>
+              <span class="jump-chip-fold-ind" style="font-size:9.5px;color:#64748b;font-weight:700">${isFolded ? '▸접힘' : '▾펼침'}</span>
+            </a>
+          `;
+        }).join('');
+        const bulkBtnsHtml = effectiveTeamsList.length >= 2
+          ? `
+            <div style="margin-left:auto;display:inline-flex;gap:5px;align-items:center">
+              <button type="button" class="btn small btn-expand-all-part-boards" style="height:26px;padding:0 9px;font-size:10px;font-weight:800;background:#ffffff;color:#0f6848;border-color:#86efac">▾ 모두 펼치기</button>
+              <button type="button" class="btn small btn-collapse-all-part-boards" style="height:26px;padding:0 9px;font-size:10px;font-weight:800;background:#ffffff;color:#475569;border-color:#cbd5e1">▸ 모두 접기</button>
+            </div>
+          `
+          : '';
+        jumpChipsEl.innerHTML = chipsHtml + bulkBtnsHtml;
+
+        jumpChipsEl.querySelectorAll('.part-team-jump-chip').forEach(chip => {
+          chip.addEventListener('click', (ev) => {
+            const jTid = chip.dataset.jumpTid;
+            if (!jTid) return;
+            if (collapsedPartBoardTeamIds.has(jTid)) {
+              setTeamPartBoardCollapsed(jTid, false);
             }
-          }
+            const targetBoard = document.getElementById(`teamPartBoard_${jTid}`);
+            if (targetBoard) {
+              ev.preventDefault();
+              targetBoard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          });
+        });
+
+        const btnExpAll = jumpChipsEl.querySelector('.btn-expand-all-part-boards');
+        if (btnExpAll) {
+          btnExpAll.addEventListener('click', () => {
+            effectiveTeamsList.forEach(t => setTeamPartBoardCollapsed(t.id, false));
+          });
+        }
+        const btnColAll = jumpChipsEl.querySelector('.btn-collapse-all-part-boards');
+        if (btnColAll) {
+          btnColAll.addEventListener('click', () => {
+            effectiveTeamsList.forEach(t => setTeamPartBoardCollapsed(t.id, true));
+          });
+        }
+      }
+    }
+
+    // 2. Render EVERY team's dedicated Project Lead + Part Roles board side-by-side / stacked on agents.html!
+    const boardsListEl = document.getElementById('partRolesByTeamBoardsList');
+    if (boardsListEl) {
+      const renderSig = JSON.stringify([
+        effectiveTeamsList.map(t => [t.id, t.name, t.floor, t.color, t.member_ids]),
+        effectiveTeamsList.map(t => partRolesByTeam[t.id] || null),
+        modularAgents.map(a => [a.id, a.name, a.triadRole, a.orgRank, a.cliProvider, a.cliModel]),
+        lastDiagnostics?.checked_at || ''
+      ]);
+      const hasActiveFormInput = boardsListEl.contains(document.activeElement)
+        || Array.from(boardsListEl.querySelectorAll('.team-part-name-inp,.team-part-stage-inp,.team-part-inst-inp')).some(inp => (inp.value || '').trim().length > 0);
+
+      if (forceGridRender || (!hasActiveFormInput && renderSig !== lastPartBoardsRenderSig)) {
+        lastPartBoardsRenderSig = renderSig;
+
+        boardsListEl.innerHTML = effectiveTeamsList.map(teamObj => {
+          const tid = teamObj.id;
+          const tName = teamObj.name || tid;
+          const tFloor = teamObj.floor || '1F';
+          const tColor = teamObj.color || '#0f6848';
+          const tCfg = partRolesByTeam[tid] || activeTeamPartCfg;
+          const tParts = Array.isArray(tCfg?.parts) ? tCfg.parts : [];
+          const tLead = tCfg?.lead || { id: 'LEAD', name: '프로젝트 총괄팀장', icon: '👑', instruction: '' };
+          const tStaffMode = tCfg?.staff_execution_mode === 'sequential' ? 'sequential' : 'parallel';
+          const tEnabledCnt = tParts.filter(p => p.enabled !== false).length;
+
+          const teamMemberSet = new Set(Array.isArray(teamObj.member_ids) ? teamObj.member_ids.map(m => String(m).padStart(2, '0')) : []);
+          const teamScopedAgents = teamMemberSet.size > 0
+            ? modularAgents.filter(a => teamMemberSet.has(String(a.id).padStart(2, '0')))
+            : [];
+
+          const otherTeamsOpts = effectiveTeamsList
+            .filter(ot => ot.id !== tid)
+            .map(ot => {
+              const otPartsCnt = Array.isArray(partRolesByTeam[ot.id]?.parts) ? partRolesByTeam[ot.id].parts.length : 3;
+              return `<option value="${escHtml(ot.id)}">${escHtml(ot.name)} (${otPartsCnt}개 파트)</option>`;
+            }).join('');
+
+          const leadAgents = teamScopedAgents.filter(a => normalizeAgentPartRoleId(a.triadRole, tid) === 'LEAD');
+          const leadRosterHtml = leadAgents.length
+            ? leadAgents.map(la => `
+              <div style="font-size:10px;padding:5px 7px;border-radius:7px;background:#fff7ed;border:1px solid #fed7aa;display:flex;flex-direction:column;gap:4px">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="part-member-chip" data-focus-aid="${escHtml(la.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 캐릭터 스튜디오에서 상세 편집">👑 <b>#${escHtml(la.id)} ${escHtml(la.name)}</b></span>
+                  <small style="color:#0f6848;font-weight:800">SDK</small>
+                </div>
+                <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(la.id)}" style="height:25px;font-size:9.5px;font-weight:700;background:#fff;width:100%" aria-label="${escHtml(la.name)} 세부 모델 선택">
+                  ${buildSdkModelOptionsHtml(la.cliModel, la.cliProvider)}
+                </select>
+              </div>
+            `).join('')
+            : `<div style="font-size:9.5px;color:#94a3b8">[${escHtml(tName)}] 내 총괄팀장 미지정 (실행 시 자동 위임)</div>`;
+
+          const leadCardHtml = `
+            <div style="padding:12px 14px;border-radius:11px;border:1.5px solid #f59e0b;background:linear-gradient(180deg,#fffbeb,#ffffff);display:flex;flex-direction:column;gap:7px">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+                <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;background:#fef3c7;color:#92400e">총괄 지휘 · 통합보고</span>
+                <button type="button" class="btn small btn-edit-part-role" data-tid="${escHtml(tid)}" data-tname="${escHtml(tName)}" data-role-id="LEAD" style="height:24px;padding:0 8px;font-size:9.5px">✏️ 이름·지침 수정</button>
+              </div>
+              <strong style="font-size:13px;color:#0f172a">${escHtml(tLead.icon || '👑')} ${escHtml(tLead.name)} <code style="font-size:9.5px;color:#64748b">(LEAD)</code></strong>
+              <div style="font-size:10.5px;color:#475569;line-height:1.45">${escHtml(tLead.instruction || '')}</div>
+              <div style="margin-top:auto;padding-top:6px;border-top:1px dashed #fde68a;display:flex;flex-direction:column;gap:4px">
+                <span style="font-size:9.5px;font-weight:800;color:#92400e">소속 총괄팀장 (${leadAgents.length}명)</span>
+                ${leadRosterHtml}
+              </div>
+            </div>
+          `;
+
+          const partsCardsHtml = tParts.map((p, idx) => {
+            const isOn = p.enabled !== false;
+            const pMembers = teamScopedAgents.filter(a => normalizeAgentPartRoleId(a.triadRole, tid) === p.id);
+            const pLeads = pMembers.filter(a => String(a.orgRank || '').toUpperCase() !== 'STAFF');
+            const pStaff = pMembers.filter(a => String(a.orgRank || '').toUpperCase() === 'STAFF');
+            const effLeadsList = pLeads.length ? pLeads : (pStaff[0] ? [pStaff[0]] : []);
+            const effStaffList = pLeads.length ? pStaff : pStaff.slice(1);
+            const otherTeamAgents = teamScopedAgents.filter(a => normalizeAgentPartRoleId(a.triadRole, tid) !== p.id);
+
+            const leadRowHtml = effLeadsList.length
+              ? effLeadsList.map(plObj => `
+                <div style="font-size:10px;padding:5px 7px;border-radius:7px;background:#ecfdf5;border:1px solid #86efac;display:flex;flex-direction:column;gap:3.5px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
+                    <span class="part-member-chip" data-focus-aid="${escHtml(plObj.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 파트장 상세 페르소나 편집">⭐ 파트장 · <b>#${escHtml(plObj.id)} ${escHtml(plObj.name)}</b></span>
+                    <span style="font-size:8.5px;color:#0f6848;font-weight:800">SDK</span>
+                  </div>
+                  <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(plObj.id)}" style="height:24px;font-size:9.5px;font-weight:700;background:#fff;width:100%" aria-label="${escHtml(plObj.name)} 파트장 세부 모델 선택">
+                    ${buildSdkModelOptionsHtml(plObj.cliModel, plObj.cliProvider)}
+                  </select>
+                </div>
+              `).join('')
+              : `<div style="font-size:9.5px;color:#94a3b8;padding:3px 0">소속 파트장 미지정 (아래에서 팀원 배정 또는 실행 시 자동 배정)</div>`;
+
+            const isPartParallel = effStaffList.length >= 2 && tStaffMode !== 'sequential';
+            const staffRowsHtml = effStaffList.length
+              ? effStaffList.map((st, sIdx) => `
+                <div style="font-size:9.5px;padding:5px 7px 5px 12px;border-radius:7px;background:#f8fafc;border:1px solid #cbd5e1;display:flex;flex-direction:column;gap:3.5px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
+                    <span class="part-member-chip" data-focus-aid="${escHtml(st.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 일반 사원 상세 페르소나·스킬 편집">↳ 👤 사원 · <b>#${escHtml(st.id)} ${escHtml(st.name)}</b></span>
+                    <span style="font-size:8px;color:${isPartParallel ? '#0f6848' : '#0369a1'};font-weight:800;background:${isPartParallel ? '#dcfce7' : '#e0f2fe'};padding:1px 5px;border-radius:4px">${isPartParallel ? `⚡ 병렬 #${(st.staffOrder || (sIdx % 2) + 1)}` : `순차 #${sIdx + 1}`}</span>
+                  </div>
+                  <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(st.id)}" style="height:24px;font-size:9.5px;font-weight:700;background:#fff;color:#0f172a;width:100%" aria-label="${escHtml(st.name)} 사원 세부 모델 선택">
+                    ${buildSdkModelOptionsHtml(st.cliModel, st.cliProvider)}
+                  </select>
+                </div>
+              `).join('')
+              : `<div style="font-size:9.5px;color:#94a3b8;padding-left:8px">↳ 소속 부하직원 없음 (아래에서 팀원 전환 또는 [＋ 사원 충원] 클릭)</div>`;
+
+            const reassignHtml = otherTeamAgents.length
+              ? `
+                <div style="display:flex;gap:4px;align-items:center;margin-top:2px">
+                  <select class="triad-cli-select sel-assign-existing-member" data-tid="${escHtml(tid)}" data-role-id="${escHtml(p.id)}" style="height:23px;font-size:9px;background:#fff;flex:1;min-width:0" aria-label="기존 팀원을 이 파트로 전환">
+                    <option value="">👤 기존 팀원 이 파트로 배정...</option>
+                    ${otherTeamAgents.map(oa => `<option value="${escHtml(oa.id)}">#${escHtml(oa.id)} ${escHtml(oa.name)} (${escHtml(oa.orgRank || 'STAFF')})</option>`).join('')}
+                  </select>
+                  <button type="button" class="btn small btn-assign-existing-part" data-tid="${escHtml(tid)}" data-role-id="${escHtml(p.id)}" data-has-lead="${effLeadsList.length > 0 ? '1' : '0'}" style="height:23px;padding:0 7px;font-size:8.5px;white-space:nowrap">배정</button>
+                </div>
+              `
+              : '';
+
+            return `
+              <div style="padding:12px 14px;border-radius:11px;border:1.5px solid ${isOn ? '#86efac' : '#cbd5e1'};border-top:3px solid ${isOn ? escHtml(tColor) : '#cbd5e1'};background:${isOn ? '#f8fefb' : '#f8fafc'};opacity:${isOn ? '1' : '0.68'};display:flex;flex-direction:column;gap:7px">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
+                  <label style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;color:${isOn ? '#0f6848' : '#64748b'};cursor:pointer">
+                    <input type="checkbox" class="chk-toggle-part-role" data-tid="${escHtml(tid)}" data-role-id="${escHtml(p.id)}" ${isOn ? 'checked' : ''} style="accent-color:#0f6848">
+                    <span>실무 파트 #${idx + 1} (${isOn ? '활성' : '비활성'})</span>
+                  </label>
+                  <div style="display:flex;gap:4px;align-items:center">
+                    <button type="button" class="btn small btn-move-part-role" data-tid="${escHtml(tid)}" data-role-id="${escHtml(p.id)}" data-dir="up" ${idx === 0 ? 'disabled' : ''} style="height:22px;padding:0 6px;font-size:9px" title="순서 앞으로">▲</button>
+                    <button type="button" class="btn small btn-move-part-role" data-tid="${escHtml(tid)}" data-role-id="${escHtml(p.id)}" data-dir="down" ${idx === tParts.length - 1 ? 'disabled' : ''} style="height:22px;padding:0 6px;font-size:9px" title="순서 뒤로">▼</button>
+                    <button type="button" class="btn small btn-edit-part-role" data-tid="${escHtml(tid)}" data-tname="${escHtml(tName)}" data-role-id="${escHtml(p.id)}" style="height:22px;padding:0 7px;font-size:9px">✏️ 수정</button>
+                    ${tParts.length > 1 ? `<button type="button" class="btn-remove-cli-slot btn-delete-part-role" data-tid="${escHtml(tid)}" data-tname="${escHtml(tName)}" data-role-id="${escHtml(p.id)}" style="height:22px;padding:0 6px;font-size:9px">🗑️</button>` : ''}
+                  </div>
+                </div>
+                <strong style="font-size:12.5px;color:#0f172a">${escHtml(p.icon || '🧩')} ${escHtml(p.name)} <small style="color:#0369a1;font-weight:700">[${escHtml(p.stage_label || p.name)}]</small></strong>
+                <div style="font-size:10.5px;color:#475569;line-height:1.45">${escHtml(p.instruction || '')}</div>
+                <div style="margin-top:auto;padding-top:7px;border-top:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:5px">
+                  <div style="font-size:9.5px;font-weight:800;color:#0f6848">${isPartParallel ? `⚡ 사원 ${effStaffList.length}명 동시 병렬수행` : `일반사원(${effStaffList.length}명) → 파트장 취합`}</div>
+                  ${leadRowHtml}
+                  ${staffRowsHtml}
+                  ${reassignHtml}
+                  <div style="display:flex;gap:4px;align-items:center;margin-top:2px;padding-top:4px;border-top:1px dotted #e2e8f0">
+                    <select class="triad-cli-select sel-recruit-staff-model" data-tid="${escHtml(tid)}" data-role-id="${escHtml(p.id)}" style="height:24px;font-size:9px;background:#fff;flex:1;min-width:0" aria-label="신규 충원 사원 세부 모델 선택">
+                      ${buildSdkModelOptionsHtml('gemini-3.8-flash-high', 'antigravity_sdk')}
+                    </select>
+                    <button type="button" class="btn small btn-recruit-part-staff" data-tid="${escHtml(tid)}" data-role-id="${escHtml(p.id)}" style="height:24px;padding:0 8px;font-size:8.5px;background:#f0fdf4;color:#0f6848;border-color:#86efac;white-space:nowrap;flex-shrink:0" title="선택한 SDK 세부 모델로 새 일반 사원을 이 팀의 이 파트에 충원합니다">＋ 사원 충원</button>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          const stageFlowSummary = ['총괄 분장', ...tParts.filter(p => p.enabled !== false).map(p => p.stage_label || p.name.replace(' 담당', '')), '상호검토', '통합보고'].join(' → ');
+          const isCollapsed = collapsedPartBoardTeamIds.has(tid);
+
+          return `
+            <div class="team-part-board-card${isCollapsed ? ' is-collapsed' : ''}" id="teamPartBoard_${escHtml(tid)}" data-board-tid="${escHtml(tid)}" style="border-left-color:${escHtml(tColor)}">
+              <div class="team-part-board-head">
+                <div class="team-part-board-title-toggle" data-tid="${escHtml(tid)}" title="클릭하여 [${escHtml(tName)}] 파트 구성 보드 접기/펼치기" style="display:flex;flex-direction:column;gap:3px">
+                  <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                    <span class="team-part-board-chevron" style="font-size:12px;font-weight:900;color:${escHtml(tColor)};width:12px;display:inline-block;text-align:center">${isCollapsed ? '▸' : '▾'}</span>
+                    <span style="background:${escHtml(tColor)}18;color:${escHtml(tColor)};border:1px solid ${escHtml(tColor)}44;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:800">🏢 ${escHtml(tFloor)}</span>
+                    <strong style="font-size:14px;color:#0f172a">${escHtml(tName)} — 총괄팀장 &amp; 파트 구성</strong>
+                    <span style="background:${escHtml(tColor)}14;color:${escHtml(tColor)};padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800">총괄 1 · 활성 파트 ${tEnabledCnt}/${tParts.length}개 · 소속 ${teamScopedAgents.length}명</span>
+                  </div>
+                  <div style="font-size:10px;color:#475569;font-weight:600;padding-left:19px">파이프라인 진행 순서: <span style="color:#0f172a;font-weight:700">${escHtml(stageFlowSummary)}</span></div>
+                </div>
+
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <select class="triad-cli-select sel-team-staff-exec-mode" data-tid="${escHtml(tid)}" style="height:27px;font-size:10px;font-weight:800;background:#ecfdf5;color:#0f6848;border-color:#6ee7b7" title="[${escHtml(tName)}] 파트 사원 실행 방식">
+                    <option value="parallel" ${tStaffMode !== 'sequential' ? 'selected' : ''}>⚡ 사원 동시 병렬수행</option>
+                    <option value="sequential" ${tStaffMode === 'sequential' ? 'selected' : ''}>🔄 사원 순차 이어받기</option>
+                  </select>
+                  ${otherTeamsOpts ? `
+                    <select class="triad-cli-select sel-team-copy-parts-from" data-tid="${escHtml(tid)}" style="height:27px;font-size:10px;background:#fff;max-width:165px" aria-label="타 팀 파트 구성 가져오기">
+                      <option value="">📋 타 팀 구성 복제...</option>
+                      ${otherTeamsOpts}
+                    </select>
+                    <button type="button" class="btn small btn-team-copy-parts" data-tid="${escHtml(tid)}" style="height:27px;padding:0 8px;font-size:9.5px;color:#0369a1;border-color:#7dd3fc;background:#f0f9ff;font-weight:800">적용</button>
+                  ` : ''}
+                  <button type="button" class="btn small btn-team-apply-sdk-squad" data-tid="${escHtml(tid)}" style="height:27px;padding:0 9px;font-size:9.5px;background:#ecfdf5;color:#0f6848;border-color:#6ee7b7;font-weight:800" title="[${escHtml(tName)}]의 활성 파트 수에 맞춰 소속 팀원을 총괄 1 + 파트별 [파트장 1 + 사원 2]로 자동 배정합니다">🤖 SDK 표준 편제</button>
+                  <button type="button" class="btn small btn-team-reset-parts" data-tid="${escHtml(tid)}" data-tname="${escHtml(tName)}" style="height:27px;padding:0 8px;font-size:9.5px" title="[${escHtml(tName)}]의 기본 파트 구성으로 초기화">↺ 기본 복원</button>
+                  <button type="button" class="btn small btn-toggle-team-part-board" data-tid="${escHtml(tid)}" aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-controls="teamPartBoardBody_${escHtml(tid)}" style="height:27px;padding:0 10px;font-size:10px;font-weight:800;background:#ffffff;color:#0f172a;border-color:#94a3b8" title="${isCollapsed ? '클릭하여 이 팀의 총괄팀장·파트 구성 편집 보드 펼치기' : '클릭하여 이 팀의 파트 구성 편집 보드 접기'}">${isCollapsed ? '▸ 펼치기' : '▾ 접기'}</button>
+                </div>
+              </div>
+
+              <div class="team-part-board-body" id="teamPartBoardBody_${escHtml(tid)}">
+                <form class="team-part-add-form" data-tid="${escHtml(tid)}" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:9px 11px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0">
+                  <span style="background:${escHtml(tColor)}18;color:${escHtml(tColor)};padding:3px 8px;border-radius:6px;font-size:10px;font-weight:800;white-space:nowrap">➕ [${escHtml(tName.replace(' 개발팀', '팀').replace('신규 서비스 ', ''))}] 새 파트 추가</span>
+                  <select class="triad-cli-select team-part-icon-sel" style="height:31px;width:62px;background:#fff" aria-label="파트 아이콘">
+                    <option value="🧩" selected>🧩</option>
+                    <option value="🧪">🧪</option>
+                    <option value="🔎">🔎</option>
+                    <option value="📊">📊</option>
+                    <option value="🎨">🎨</option>
+                    <option value="✍️">✍️</option>
+                    <option value="🛡️">🛡️</option>
+                    <option value="🌐">🌐</option>
+                  </select>
+                  <input type="text" class="triad-goal-input team-part-name-inp" style="height:31px;font-size:11px;min-width:155px;flex:0.8;background:#fff" placeholder="파트 담당명 (예: 보안·품질 검증 파트)" required>
+                  <input type="text" class="triad-goal-input team-part-stage-inp" style="height:31px;font-size:11px;min-width:125px;flex:0.55;background:#fff" placeholder="단계 표시명 (예: 보안 검증)">
+                  <input type="text" class="triad-goal-input team-part-inst-inp" style="height:31px;font-size:11px;min-width:210px;flex:1.5;background:#fff" placeholder="이 팀에서 수행할 구체적 업무 지침 (비워두면 자동 생성)">
+                  <button type="submit" class="btn small primary" style="height:31px;padding:0 12px;background:${escHtml(tColor)};border-color:${escHtml(tColor)};white-space:nowrap">➕ 파트 추가</button>
+                </form>
+
+                <div class="team-part-cards-grid">
+                  ${leadCardHtml}
+                  ${partsCardsHtml}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        // Bind all per-team controls inside boardsListEl
+        const fbBar = document.getElementById('partRolesFeedbackBar');
+        const showPartFb = (txt) => {
+          if (!fbBar) return;
+          fbBar.style.display = 'block';
+          fbBar.textContent = txt;
+        };
+
+        boardsListEl.querySelectorAll('.btn-toggle-team-part-board, .team-part-board-title-toggle').forEach(el => {
+          el.addEventListener('click', (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            if (!tid) return;
+            const nextCollapse = !collapsedPartBoardTeamIds.has(tid);
+            setTeamPartBoardCollapsed(tid, nextCollapse);
+          });
+        });
+
+        boardsListEl.querySelectorAll('.sel-inline-agent-model').forEach(sel => {
+          sel.addEventListener('change', async (ev) => {
+            await applyQuickAgentModelOrRank(ev.currentTarget.dataset.aid, { cliModel: ev.currentTarget.value }, 'part');
+          });
+        });
+
+        boardsListEl.querySelectorAll('.part-member-chip').forEach(chip => {
+          chip.addEventListener('click', () => {
+            const aid = chip.dataset.focusAid;
+            if (aid && studioSelectAgentFn) studioSelectAgentFn(aid, true);
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-assign-existing-part').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const pid = ev.currentTarget.dataset.roleId;
+            const hasLead = ev.currentTarget.dataset.hasLead === '1';
+            const sel = boardsListEl.querySelector(`.sel-assign-existing-member[data-tid="${tid}"][data-role-id="${pid}"]`);
+            const aid = (sel?.value || '').trim();
+            if (!aid) return;
+            await applyQuickAgentModelOrRank(aid, { triadRole: pid, orgRank: hasLead ? 'STAFF' : 'PART_LEAD' }, 'part');
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-recruit-part-staff').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const pid = ev.currentTarget.dataset.roleId;
+            const modSel = boardsListEl.querySelector(`.sel-recruit-staff-model[data-tid="${tid}"][data-role-id="${pid}"]`);
+            const chosenMod = (modSel?.value || '').trim();
+            ev.currentTarget.disabled = true;
+            try {
+              const res = await apiFetch('/ops/part-roles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'recruit_staff', team_id: tid, part_id: pid, model: chosenMod })
+              });
+              const d = await res.json().catch(() => ({}));
+              if (res.ok && d.ok) {
+                if (d.character_configs) syncServerCharConfigsIntoRuntime(d.character_configs, true);
+                if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
+                if (d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+                showPartFb(`✓ ${d.message || '새 SDK 부하직원이 해당 팀 파트에 배치되었습니다.'}`);
+              } else {
+                alert(d.error || '사원 충원에 실패했습니다.');
+              }
+            } finally {
+              ev.currentTarget.disabled = false;
+            }
+          });
+        });
+
+        boardsListEl.querySelectorAll('.chk-toggle-part-role').forEach(chk => {
+          chk.addEventListener('change', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const rid = ev.currentTarget.dataset.roleId;
+            const enabled = ev.currentTarget.checked;
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'update', team_id: tid, id: rid, enabled })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+            else {
+              alert(d.error || '최소 1개 이상의 파트는 활성 상태여야 합니다.');
+              ev.currentTarget.checked = !enabled;
+            }
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-move-part-role').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const rid = ev.currentTarget.dataset.roleId;
+            const direction = ev.currentTarget.dataset.dir;
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'reorder', team_id: tid, id: rid, direction })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-edit-part-role').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const tName = ev.currentTarget.dataset.tname || tid;
+            const rid = ev.currentTarget.dataset.roleId;
+            const tCfg = partRolesByTeam[tid] || activeTeamPartCfg;
+            const targetObj = rid === 'LEAD' ? tCfg?.lead : (tCfg?.parts || []).find(x => x.id === rid);
+            if (!targetObj) return;
+            const nextName = prompt(`[${tName} · ${targetObj.name}] 표시 이름을 수정하세요:`, targetObj.name);
+            if (nextName === null) return;
+            const nextStage = rid === 'LEAD'
+              ? targetObj.stage_label
+              : prompt(`[${nextName || targetObj.name}] 파이프라인 단계 라벨을 수정하세요:`, targetObj.stage_label || targetObj.name);
+            if (nextStage === null) return;
+            const nextInst = prompt(`[${nextName || targetObj.name}] 전담 업무 및 검증 지침을 수정하세요:`, targetObj.instruction || '');
+            if (nextInst === null) return;
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'update',
+                team_id: tid,
+                id: rid,
+                name: nextName.trim() || targetObj.name,
+                stage_label: (nextStage || '').trim() || targetObj.stage_label,
+                instruction: nextInst.trim() || targetObj.instruction
+              })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-delete-part-role').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const tName = ev.currentTarget.dataset.tname || tid;
+            const rid = ev.currentTarget.dataset.roleId;
+            const tCfg = partRolesByTeam[tid] || activeTeamPartCfg;
+            const targetObj = (tCfg?.parts || []).find(x => x.id === rid);
+            if (!confirm(`[${tName}]의 [${targetObj?.name || rid}] 파트를 제거하시겠습니까? (다른 팀의 파트 구성에는 영향을 주지 않습니다)`)) return;
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'delete', team_id: tid, id: rid })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+            else if (d.error) alert(d.error);
+          });
+        });
+
+        boardsListEl.querySelectorAll('.sel-team-staff-exec-mode').forEach(sel => {
+          sel.addEventListener('change', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const nextMode = ev.currentTarget.value;
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'set_staff_mode', mode: nextMode, team_id: tid })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) {
+              syncPartRolesToDOM(d.part_roles, true);
+              showPartFb(`✓ ${d.message || '사원 실행 모드가 저장되었습니다.'}`);
+            }
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-team-copy-parts').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const sel = boardsListEl.querySelector(`.sel-team-copy-parts-from[data-tid="${tid}"]`);
+            const srcTid = (sel?.value || '').trim();
+            if (!srcTid) {
+              showPartFb('⚠️ 복제해 올 원본 팀을 먼저 드롭다운에서 선택해 주세요.');
+              return;
+            }
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'copy_from_team', source_team_id: srcTid, team_id: tid })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) {
+              collapsedPartBoardTeamIds.delete(tid);
+              persistCollapsedPartBoards();
+              syncPartRolesToDOM(d.part_roles, true);
+              showPartFb(`✓ ${d.message || '선택한 팀의 파트 구성을 복제 적용했습니다.'}`);
+            }
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-team-apply-sdk-squad').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            ev.currentTarget.disabled = true;
+            try {
+              const res = await apiFetch('/ops/part-roles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'apply_sdk_squad', team_id: tid })
+              });
+              const d = await res.json().catch(() => ({}));
+              if (res.ok && d.ok) {
+                collapsedPartBoardTeamIds.delete(tid);
+                persistCollapsedPartBoards();
+                if (d.character_configs) syncServerCharConfigsIntoRuntime(d.character_configs, true);
+                if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
+                if (d.part_roles) syncPartRolesToDOM(d.part_roles, true);
+                showPartFb(`✓ ${d.message || '해당 팀의 SDK 표준 편제가 적용되었습니다.'}`);
+              } else if (d.error) {
+                alert(d.error);
+              }
+            } finally {
+              ev.currentTarget.disabled = false;
+            }
+          });
+        });
+
+        boardsListEl.querySelectorAll('.btn-team-reset-parts').forEach(btn => {
+          btn.addEventListener('click', async (ev) => {
+            const tid = ev.currentTarget.dataset.tid;
+            const tName = ev.currentTarget.dataset.tname || tid;
+            if (!confirm(`[${tName}]의 파트 구성을 기본 파트 구성으로 복원하시겠습니까?`)) return;
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'reset', team_id: tid })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) {
+              collapsedPartBoardTeamIds.delete(tid);
+              persistCollapsedPartBoards();
+              syncPartRolesToDOM(d.part_roles, true);
+              showPartFb(`✓ ${d.message || '기본 파트 구성으로 복원되었습니다.'}`);
+            }
+          });
+        });
+
+        boardsListEl.querySelectorAll('.team-part-add-form').forEach(form => {
+          form.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const tid = form.dataset.tid;
+            const iconVal = form.querySelector('.team-part-icon-sel')?.value || '🧩';
+            const nameInp = form.querySelector('.team-part-name-inp');
+            const stageInp = form.querySelector('.team-part-stage-inp');
+            const instInp = form.querySelector('.team-part-inst-inp');
+            const nameVal = (nameInp?.value || '').trim();
+            if (!nameVal) return;
+            const res = await apiFetch('/ops/part-roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'add',
+                team_id: tid,
+                icon: iconVal,
+                name: nameVal,
+                stage_label: (stageInp?.value || '').trim(),
+                instruction: (instInp?.value || '').trim()
+              })
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok && d.part_roles) {
+              if (nameInp) nameInp.value = '';
+              if (stageInp) stageInp.value = '';
+              if (instInp) instInp.value = '';
+              syncPartRolesToDOM(d.part_roles, true);
+              showPartFb(`✓ ${d.message || '새 파트가 해당 팀 파이프라인에 추가되었습니다.'}`);
+            }
+          });
         });
       }
     }
 
-    // 1. Update #partRolesCountBadge & #partRolesCardsGrid on agents.html
-    const cntBadge = document.getElementById('partRolesCountBadge');
-    if (cntBadge) {
-      const activeCnt = parts.filter(p => p.enabled !== false).length;
-      cntBadge.textContent = `총괄팀장 1 · 활성 파트 ${activeCnt}/${parts.length}개`;
-    }
-
-    const cardsGrid = document.getElementById('partRolesCardsGrid');
-    if (cardsGrid && (forceGridRender || !cardsGrid.contains(document.activeElement))) {
-      const teamsLookup = Array.isArray(window.NEXUS_TEAMS_SUMMARY?.teams) ? window.NEXUS_TEAMS_SUMMARY.teams : [];
-      const renderMemberTeamTag = (aid) => {
-        const bt = teamsLookup.filter(t => Array.isArray(t.member_ids) && t.member_ids.includes(aid));
-        if (!bt.length) return '';
-        return bt.map(t => `<span style="font-size:8px;padding:1px 5px;border-radius:4px;background:${escHtml(t.color || '#0f6848')}18;color:${escHtml(t.color || '#0f6848')};font-weight:800;white-space:nowrap">${escHtml(t.name.replace(' 개발팀', '팀').replace('신규 서비스 ', ''))}</span>`).join(' ');
-      };
-      const leadAgents = modularAgents.filter(a => normalizeAgentPartRoleId(a.triadRole) === 'LEAD');
-      const leadRosterHtml = leadAgents.length
-        ? leadAgents.map(la => `
-          <div style="font-size:10px;padding:5px 7px;border-radius:7px;background:#fff7ed;border:1px solid #fed7aa;display:flex;flex-direction:column;gap:4px">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
-              <span class="part-member-chip" data-focus-aid="${escHtml(la.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 하단 스튜디오에서 상세 페르소나 편집">👑 <b>#${escHtml(la.id)} ${escHtml(la.name)}</b> ${renderMemberTeamTag(la.id)}</span>
-              <small style="color:#0f6848;font-weight:800">SDK</small>
-            </div>
-            <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(la.id)}" style="height:25px;font-size:9.5px;font-weight:700;background:#fff;width:100%" aria-label="${escHtml(la.name)} 세부 모델 선택">
-              ${buildSdkModelOptionsHtml(la.cliModel, la.cliProvider)}
-            </select>
-          </div>
-        `).join('')
-        : `<div style="font-size:9.5px;color:#94a3b8">배정된 총괄팀장 캐릭터 없음 (자동 위임)</div>`;
-
-      const leadCardHtml = `
-        <div style="padding:12px 14px;border-radius:11px;border:1.5px solid #f59e0b;background:linear-gradient(180deg,#fffbeb,#ffffff);display:flex;flex-direction:column;gap:7px">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
-            <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;background:#fef3c7;color:#92400e">총괄 지휘 · 통합보고 (고정 코어)</span>
-            <button type="button" class="btn small btn-edit-part-role" data-role-id="LEAD" style="height:24px;padding:0 8px;font-size:9.5px">✏️ 이름·지침 수정</button>
-          </div>
-          <strong style="font-size:13px;color:#0f172a">${escHtml(lead.icon || '👑')} ${escHtml(lead.name)} <code style="font-size:9.5px;color:#64748b">(LEAD)</code></strong>
-          <div style="font-size:10.5px;color:#475569;line-height:1.45">${escHtml(lead.instruction || '')}</div>
-          <div style="margin-top:auto;padding-top:6px;border-top:1px dashed #fde68a;display:flex;flex-direction:column;gap:4px">
-            <span style="font-size:9.5px;font-weight:800;color:#92400e">팀별 총괄팀장 세부 실행 모델 설정 (${leadAgents.length}명)</span>
-            ${leadRosterHtml}
-          </div>
-        </div>
-      `;
-      const partsCardsHtml = parts.map((p, idx) => {
-        const isOn = p.enabled !== false;
-        const pMembers = modularAgents.filter(a => normalizeAgentPartRoleId(a.triadRole) === p.id);
-        const pLeads = pMembers.filter(a => String(a.orgRank || '').toUpperCase() !== 'STAFF');
-        const pStaff = pMembers.filter(a => String(a.orgRank || '').toUpperCase() === 'STAFF');
-        const effLeadsList = pLeads.length ? pLeads : (pStaff[0] ? [pStaff[0]] : []);
-        const effStaffList = pLeads.length ? pStaff : pStaff.slice(1);
-
-        const leadRowHtml = effLeadsList.length
-          ? effLeadsList.map(plObj => `
-            <div style="font-size:10px;padding:5px 7px;border-radius:7px;background:#ecfdf5;border:1px solid #86efac;display:flex;flex-direction:column;gap:3.5px">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
-                <span class="part-member-chip" data-focus-aid="${escHtml(plObj.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 파트장 상세 페르소나 편집">⭐ 파트장 · <b>#${escHtml(plObj.id)} ${escHtml(plObj.name)}</b> ${renderMemberTeamTag(plObj.id)}</span>
-                <span style="font-size:8.5px;color:#0f6848;font-weight:800">SDK 고정</span>
-              </div>
-              <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(plObj.id)}" style="height:24px;font-size:9.5px;font-weight:700;background:#fff;width:100%" aria-label="${escHtml(plObj.name)} 파트장 세부 모델 선택">
-                ${buildSdkModelOptionsHtml(plObj.cliModel, plObj.cliProvider)}
-              </select>
-            </div>
-          `).join('')
-          : `<div style="font-size:9.5px;color:#94a3b8;padding:3px 0">파트장 미지정 (자동 배정)</div>`;
-
-        const isPartParallel = effStaffList.length >= 2 && staffExecMode !== 'sequential';
-        const staffRowsHtml = effStaffList.length
-          ? effStaffList.map((st, sIdx) => `
-            <div style="font-size:9.5px;padding:5px 7px 5px 12px;border-radius:7px;background:#f8fafc;border:1px solid #cbd5e1;display:flex;flex-direction:column;gap:3.5px">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
-                <span class="part-member-chip" data-focus-aid="${escHtml(st.id)}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap" title="클릭하여 일반 사원 상세 페르소나·스킬 편집">↳ 👤 사원 · <b>#${escHtml(st.id)} ${escHtml(st.name)}</b> ${renderMemberTeamTag(st.id)}</span>
-                <span style="font-size:8px;color:${isPartParallel ? '#0f6848' : '#0369a1'};font-weight:800;background:${isPartParallel ? '#dcfce7' : '#e0f2fe'};padding:1px 5px;border-radius:4px">${isPartParallel ? `⚡ 병렬 #${(st.staffOrder || (sIdx % 2) + 1)}` : `순차 #${sIdx + 1}`}</span>
-              </div>
-              <select class="triad-cli-select sel-inline-agent-model" data-aid="${escHtml(st.id)}" style="height:24px;font-size:9.5px;font-weight:700;background:#fff;color:#0f172a;width:100%" aria-label="${escHtml(st.name)} 사원 세부 모델 선택">
-                ${buildSdkModelOptionsHtml(st.cliModel, st.cliProvider)}
-              </select>
-            </div>
-          `).join('')
-          : `<div style="font-size:9.5px;color:#94a3b8;padding-left:8px">↳ 소속 부하직원 없음 (아래에서 모델 선택 후 [＋ 사원 충원] 클릭)</div>`;
-
-        return `
-          <div style="padding:12px 14px;border-radius:11px;border:1.5px solid ${isOn ? '#86efac' : '#cbd5e1'};background:${isOn ? '#f8fefb' : '#f8fafc'};opacity:${isOn ? '1' : '0.68'};display:flex;flex-direction:column;gap:7px">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:5px;flex-wrap:wrap">
-              <label style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;color:${isOn ? '#0f6848' : '#64748b'};cursor:pointer">
-                <input type="checkbox" class="chk-toggle-part-role" data-role-id="${escHtml(p.id)}" ${isOn ? 'checked' : ''} style="accent-color:#0f6848">
-                <span>실무 파트 #${idx + 1} (${isOn ? '활성' : '비활성'})</span>
-              </label>
-              <div style="display:flex;gap:4px;align-items:center">
-                <button type="button" class="btn small btn-move-part-role" data-role-id="${escHtml(p.id)}" data-dir="up" ${idx === 0 ? 'disabled' : ''} style="height:22px;padding:0 6px;font-size:9px" title="순서 앞으로">▲</button>
-                <button type="button" class="btn small btn-move-part-role" data-role-id="${escHtml(p.id)}" data-dir="down" ${idx === parts.length - 1 ? 'disabled' : ''} style="height:22px;padding:0 6px;font-size:9px" title="순서 뒤로">▼</button>
-                <button type="button" class="btn small btn-edit-part-role" data-role-id="${escHtml(p.id)}" style="height:22px;padding:0 7px;font-size:9px">✏️ 수정</button>
-                ${parts.length > 1 ? `<button type="button" class="btn-remove-cli-slot btn-delete-part-role" data-role-id="${escHtml(p.id)}" style="height:22px;padding:0 6px;font-size:9px">🗑️</button>` : ''}
-              </div>
-            </div>
-            <strong style="font-size:12.5px;color:#0f172a">${escHtml(p.icon || '🧩')} ${escHtml(p.name)} <small style="color:#0369a1;font-weight:700">[${escHtml(p.stage_label || p.name)}]</small></strong>
-            <div style="font-size:10.5px;color:#475569;line-height:1.45">${escHtml(p.instruction || '')}</div>
-            <div style="margin-top:auto;padding-top:7px;border-top:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:5px">
-              <div style="font-size:9.5px;font-weight:800;color:#0f6848">${isPartParallel ? `⚡ 사원 ${effStaffList.length}명 동시 병렬수행 (사원1 ∥ 사원2 → 파트장 취합)` : `파이프라인 진행: 일반사원(${effStaffList.length}명) → 파트장 취합`}</div>
-              ${leadRowHtml}
-              ${staffRowsHtml}
-              <div style="display:flex;gap:4px;align-items:center;margin-top:2px;padding-top:4px;border-top:1px dotted #e2e8f0">
-                <select class="triad-cli-select sel-recruit-staff-model" data-role-id="${escHtml(p.id)}" style="height:24px;font-size:9px;background:#fff;flex:1;min-width:0" aria-label="신규 충원 사원 세부 모델 선택">
-                  ${buildSdkModelOptionsHtml('gemini-3.8-flash-high', 'antigravity_sdk')}
-                </select>
-                <button type="button" class="btn small btn-recruit-part-staff" data-role-id="${escHtml(p.id)}" style="height:24px;padding:0 8px;font-size:8.5px;background:#f0fdf4;color:#0f6848;border-color:#86efac;white-space:nowrap;flex-shrink:0" title="선택한 SDK 세부 모델로 일반 사원을 이 파트에 즉시 추가합니다">＋ 사원 충원</button>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-      cardsGrid.innerHTML = leadCardHtml + partsCardsHtml;
-
-      cardsGrid.querySelectorAll('.sel-inline-agent-model').forEach(sel => {
-        sel.addEventListener('change', async (ev) => {
-          const aid = ev.currentTarget.dataset.aid;
-          const nextModel = ev.currentTarget.value;
-          await applyQuickAgentModelOrRank(aid, { cliModel: nextModel }, 'part');
-        });
-      });
-
-      cardsGrid.querySelectorAll('.part-member-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-          const aid = chip.dataset.focusAid;
-          if (aid && studioSelectAgentFn) studioSelectAgentFn(aid, true);
-        });
-      });
-
-      cardsGrid.querySelectorAll('.btn-recruit-part-staff').forEach(btn => {
-        btn.addEventListener('click', async (ev) => {
-          const pid = ev.currentTarget.dataset.roleId;
-          const modSel = cardsGrid.querySelector(`.sel-recruit-staff-model[data-role-id="${pid}"]`);
-          const chosenMod = (modSel?.value || '').trim();
-          const fbBar = document.getElementById('partRolesFeedbackBar');
-          ev.currentTarget.disabled = true;
-          try {
-            const res = await apiFetch('/ops/part-roles', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'recruit_staff', part_id: pid, model: chosenMod })
-            });
-            const d = await res.json().catch(() => ({}));
-            if (res.ok && d.ok) {
-              if (d.character_configs) syncServerCharConfigsIntoRuntime(d.character_configs, true);
-              if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
-              if (d.part_roles) syncPartRolesToDOM(d.part_roles, true);
-              if (fbBar) {
-                fbBar.style.display = 'block';
-                fbBar.textContent = `✓ ${d.message || '새 SDK 부하직원이 파트에 배치되었습니다.'}`;
-              }
-            } else {
-              alert(d.error || '사원 충원에 실패했습니다.');
-            }
-          } finally {
-            ev.currentTarget.disabled = false;
-          }
-        });
-      });
-
-      cardsGrid.querySelectorAll('.chk-toggle-part-role').forEach(chk => {
-        chk.addEventListener('change', async (ev) => {
-          const rid = ev.currentTarget.dataset.roleId;
-          const enabled = ev.currentTarget.checked;
-          const res = await apiFetch('/ops/part-roles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'update', id: rid, enabled })
-          });
-          const d = await res.json().catch(() => ({}));
-          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
-          else {
-            alert(d.error || '최소 1개 이상의 파트는 활성 상태여야 합니다.');
-            ev.currentTarget.checked = !enabled;
-          }
-        });
-      });
-
-      cardsGrid.querySelectorAll('.btn-move-part-role').forEach(btn => {
-        btn.addEventListener('click', async (ev) => {
-          const rid = ev.currentTarget.dataset.roleId;
-          const direction = ev.currentTarget.dataset.dir;
-          const res = await apiFetch('/ops/part-roles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'reorder', id: rid, direction })
-          });
-          const d = await res.json().catch(() => ({}));
-          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
-        });
-      });
-
-      cardsGrid.querySelectorAll('.btn-edit-part-role').forEach(btn => {
-        btn.addEventListener('click', async (ev) => {
-          const rid = ev.currentTarget.dataset.roleId;
-          const targetObj = rid === 'LEAD' ? lead : parts.find(x => x.id === rid);
-          if (!targetObj) return;
-          const nextName = prompt(`[${targetObj.name}] 표시 이름을 수정하세요:`, targetObj.name);
-          if (nextName === null) return;
-          const nextStage = rid === 'LEAD'
-            ? targetObj.stage_label
-            : prompt(`[${nextName || targetObj.name}] 파이프라인 단계 라벨을 수정하세요:`, targetObj.stage_label || targetObj.name);
-          if (nextStage === null) return;
-          const nextInst = prompt(`[${nextName || targetObj.name}] 전담 업무 및 검증 지침을 수정하세요:`, targetObj.instruction || '');
-          if (nextInst === null) return;
-          const res = await apiFetch('/ops/part-roles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'update',
-              id: rid,
-              name: nextName.trim() || targetObj.name,
-              stage_label: (nextStage || '').trim() || targetObj.stage_label,
-              instruction: nextInst.trim() || targetObj.instruction
-            })
-          });
-          const d = await res.json().catch(() => ({}));
-          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
-        });
-      });
-
-      cardsGrid.querySelectorAll('.btn-delete-part-role').forEach(btn => {
-        btn.addEventListener('click', async (ev) => {
-          const rid = ev.currentTarget.dataset.roleId;
-          const targetObj = parts.find(x => x.id === rid);
-          if (!confirm(`[${targetObj?.name || rid}] 파트를 파이프라인에서 제거하시겠습니까?`)) return;
-          const res = await apiFetch('/ops/part-roles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'delete', id: rid })
-          });
-          const d = await res.json().catch(() => ({}));
-          if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
-          else if (d.error) alert(d.error);
-        });
-      });
-    }
-
-    // 2. Bind #partRoleAddForm & #btnResetPartRoles once
-    const addForm = document.getElementById('partRoleAddForm');
-    if (addForm && !addForm.dataset.bound) {
-      addForm.dataset.bound = '1';
-      addForm.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const iconVal = document.getElementById('newPartIconSelect')?.value || '🧩';
-        const nameInp = document.getElementById('newPartNameInput');
-        const stageInp = document.getElementById('newPartStageInput');
-        const instInp = document.getElementById('newPartInstInput');
-        const fbBar = document.getElementById('partRolesFeedbackBar');
-        const nameVal = (nameInp?.value || '').trim();
-        if (!nameVal) return;
-        const res = await apiFetch('/ops/part-roles', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'add',
-            icon: iconVal,
-            name: nameVal,
-            stage_label: (stageInp?.value || '').trim(),
-            instruction: (instInp?.value || '').trim()
-          })
-        });
-        const d = await res.json().catch(() => ({}));
-        if (res.ok && d.part_roles) {
-          if (nameInp) nameInp.value = '';
-          if (stageInp) stageInp.value = '';
-          if (instInp) instInp.value = '';
-          syncPartRolesToDOM(d.part_roles, true);
-          if (fbBar) {
-            fbBar.style.display = 'block';
-            fbBar.textContent = `✓ ${d.message || '새 파트가 파이프라인에 추가되었습니다.'}`;
-          }
-        }
-      });
-    }
-    const sdkSquadBtn = document.getElementById('btnApplySdkSquadPreset');
-    if (sdkSquadBtn && !sdkSquadBtn.dataset.bound) {
-      sdkSquadBtn.dataset.bound = '1';
-      sdkSquadBtn.addEventListener('click', async () => {
-        const fbBar = document.getElementById('partRolesFeedbackBar');
-        sdkSquadBtn.disabled = true;
-        try {
-          const res = await apiFetch('/ops/part-roles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'apply_sdk_squad' })
-          });
-          const d = await res.json().catch(() => ({}));
-          if (res.ok && d.ok) {
-            if (d.character_configs) syncServerCharConfigsIntoRuntime(d.character_configs, true);
-            if (d.teams_summary) renderTeamsAndWorkspacesDashboard(d.teams_summary, true);
-            if (d.part_roles) syncPartRolesToDOM(d.part_roles, true);
-            if (fbBar) {
-              fbBar.style.display = 'block';
-              fbBar.textContent = `✓ ${d.message || '10인 Antigravity SDK 표준 편제가 적용되었습니다.'}`;
-            }
-          } else if (d.error) {
-            alert(d.error);
-          }
-        } finally {
-          sdkSquadBtn.disabled = false;
-        }
-      });
-    }
-    const resetBtn = document.getElementById('btnResetPartRoles');
-    if (resetBtn && !resetBtn.dataset.bound) {
-      resetBtn.dataset.bound = '1';
-      resetBtn.addEventListener('click', async () => {
-        if (!confirm('총괄팀장 + 기본 3대 파트(자료수집 · 기획구조 · 제작구현) 구성으로 복원하시겠습니까?')) return;
-        const res = await apiFetch('/ops/part-roles', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'reset' })
-        });
-        const d = await res.json().catch(() => ({}));
-        if (res.ok && d.part_roles) syncPartRolesToDOM(d.part_roles, true);
-      });
-    }
-
-    // 3. Sync #studioQuickRole dropdown dynamically
+    // 3. Sync #studioQuickRole dropdown dynamically (using selected studio character's team!)
     const quickRoleSel = document.getElementById('studioQuickRole');
-    if (quickRoleSel && document.activeElement !== quickRoleSel && assignable.length) {
-      const curVal = normalizeAgentPartRoleId(quickRoleSel.value || 'LEAD');
-      quickRoleSel.innerHTML = assignable.map(r => {
+    const curStudioBadge = document.getElementById('selectedCharBadge')?.textContent?.replace('#', '')?.trim() || '';
+    const studioOwnerTid = curStudioBadge ? getAgentBelongingTeamId(curStudioBadge) : selectedPartRolesTeamId;
+    const studioAssignables = getPartRolesForTeam(studioOwnerTid)?.assignable_roles || assignable;
+    if (quickRoleSel && document.activeElement !== quickRoleSel && studioAssignables.length) {
+      const curVal = normalizeAgentPartRoleId(quickRoleSel.value || 'LEAD', studioOwnerTid);
+      quickRoleSel.innerHTML = studioAssignables.map(r => {
         const offTag = r.enabled === false ? ' [비활성]' : '';
         return `<option value="${escHtml(r.id)}" ${r.id === curVal ? 'selected' : ''}>${escHtml(r.icon || '🧩')} ${escHtml(r.name)} (${escHtml(r.id)})${offTag}</option>`;
       }).join('') + `<option value="__add_new_part__">➕ 새 실무 파트 직접 추가...</option>`;
     }
 
-    // 4. Sync #triadPipelineSteps dynamically on settings.html
+    // 4. Sync #triadPipelineSteps dynamically on settings.html (matching #triadTeamSelect!)
     const stepsWrap = document.getElementById('triadPipelineSteps');
-    if (stepsWrap && stages.length) {
-      stepsWrap.innerHTML = stages.map(st => {
+    const settingsTid = document.getElementById('triadTeamSelect')?.value || selectedPartRolesTeamId;
+    const settingsStages = getPartRolesForTeam(settingsTid)?.pipeline_stages || activeTeamPartCfg.pipeline_stages || [];
+    if (stepsWrap && settingsStages.length) {
+      stepsWrap.innerHTML = settingsStages.map(st => {
         const idxStr = String(st.index).padStart(2, '0');
         return `<div class="triad-step" data-stage="${escHtml(st.stage)}"><b>${idxStr} · ${escHtml(st.title)}</b><span>${escHtml(st.icon || '')} ${escHtml(st.role_name || '')}</span></div>`;
       }).join('');
@@ -3569,20 +3954,22 @@
         : `LIVE · ${phase} 실행 중 (${activeEngineNames})`;
     }
 
-    // Update dashboard activity feed if events provided
+    // Update dashboard activity feed if events provided (24-hour numeric creation timestamps)
     if (Array.isArray(events) && events.length > 0) {
       const dashFeed = document.getElementById('dashboardActivity');
       if (dashFeed) {
-        dashFeed.innerHTML = events.slice(0, 5).map(ev => {
+        dashFeed.innerHTML = events.slice(0, 8).map(ev => {
           const icoClass = ev.role === 'REVIEWER' ? 'ico-amber' : ev.role === 'BUILDER' ? 'ico-blue' : ev.role === 'DIRECTOR' ? 'ico-purple' : 'ico-mint';
           const icoChar = ev.to_state === 'PASS' ? '✓' : ev.role === 'REVIEWER' ? '◷' : ev.role === 'BUILDER' ? '↗' : '⌁';
+          const time24 = formatEventTime24h(ev.at);
+          const timeFull = formatEventFullDateTime24h(ev.at);
           return `<div class="activity-item">
             <div class="event-icon ${icoClass}">${icoChar}</div>
             <div class="event-main">
-              <div class="event-title">${ev.state_ko || ev.to_state}</div>
-              <div class="event-desc">${ev.role || 'TRIAD'} · ${ev.run_id || 'mission'}</div>
+              <div class="event-title">${escHtml(ev.state_ko || ev.to_state || '')}</div>
+              <div class="event-desc">${escHtml(ev.role || 'TRIAD')} · ${escHtml(ev.run_id || 'mission')}</div>
             </div>
-            <div class="event-time">실시간</div>
+            <div class="event-time" title="${escHtml(timeFull)}">${escHtml(time24)}</div>
           </div>`;
         }).join('');
       }
@@ -3591,12 +3978,14 @@
         agentLog.innerHTML = events.slice(0, 8).map(ev => {
           const icoClass = ev.role === 'REVIEWER' ? 'ico-amber' : ev.role === 'BUILDER' ? 'ico-blue' : ev.role === 'DIRECTOR' ? 'ico-purple' : 'ico-mint';
           const icoChar = ev.to_state === 'PASS' ? '✓' : ev.role === 'REVIEWER' ? '◷' : ev.role === 'BUILDER' ? '↗' : '⌁';
+          const time24 = formatEventTime24h(ev.at);
+          const timeFull = formatEventFullDateTime24h(ev.at);
           return `<div class="log-row">
             <div class="log-marker ${icoClass}">${icoChar}</div>
             <div class="log-copy">
-              <strong>${ev.role || 'TRIAD'} · ${ev.to_state}</strong>
-              <p>${ev.state_ko || ''}</p>
-              <time>실시간 · ${ev.run_id || 'triad'}</time>
+              <strong>${escHtml(ev.role || 'TRIAD')} · ${escHtml(ev.to_state || '')}</strong>
+              <p>${escHtml(ev.state_ko || '')}</p>
+              <time title="${escHtml(timeFull)}">${escHtml(time24)} · ${escHtml(ev.run_id || 'triad')}</time>
             </div>
           </div>`;
         }).join('');
@@ -6721,6 +7110,10 @@
     if (!ts || !Array.isArray(ts.teams)) return;
     latestTeamsSummary = ts;
     window.NEXUS_TEAMS_SUMMARY = ts;
+    const pBoardsCheck = document.getElementById('partRolesByTeamBoardsList');
+    if (pBoardsCheck && currentPartRoles && pBoardsCheck.querySelectorAll('.team-part-board-card').length !== ts.teams.length) {
+      syncPartRolesToDOM(currentPartRoles, true);
+    }
 
     const teams = ts.teams;
     const connected = Array.isArray(ts.connected_workspaces) ? ts.connected_workspaces : [];
@@ -7732,9 +8125,8 @@
     renderConfiguredTeamsAndMembersSection(ts, forceRender);
     renderConfiguredAgentsRoster(forceRender);
     const boardEl = document.getElementById('agentsTeamCardsBoard');
-    const tbodyEl = document.getElementById('agentsPlacementTableBody');
     const countBadge = document.getElementById('agentsTeamsCountBadge');
-    if (!boardEl && !tbodyEl) return;
+    if (!boardEl) return;
 
     const teams = Array.isArray(ts?.teams) ? ts.teams : [];
     if (countBadge) {
@@ -7744,43 +8136,50 @@
     const agentsBoardSig = JSON.stringify([
       teams,
       modularAgents.map(a => [a.id, a.name, a.triadRole, a.orgRank, a.cliProvider, a.cliModel]),
+      Object.keys(partRolesByTeam || {}).map(k => [k, (partRolesByTeam[k]?.parts || []).map(p => [p.id, p.name])]),
       lastDiagnostics?.checked_at || ''
     ]);
     if (
       !forceRender &&
       agentsBoardSig === lastAgentsBoardHash &&
-      (!boardEl || boardEl.children.length === teams.length)
+      boardEl.children.length === teams.length
     ) {
       return;
     }
-    if (
-      !forceRender &&
-      ((boardEl && boardEl.contains(document.activeElement)) || (tbodyEl && tbodyEl.contains(document.activeElement)))
-    ) {
+    if (!forceRender && boardEl.contains(document.activeElement)) {
       return;
     }
     lastAgentsBoardHash = agentsBoardSig;
 
-    const placementsMap = loadOfficePlacementsMap();
-
-    // [A] Render Team Cards + Drag-and-Drop Dropzones on agents.html
+    // [A] Render Team Dropzone Cards with separated individual member sub-cards
     if (boardEl) {
       boardEl.innerHTML = teams.map(t => {
         const color = t.color || '#0f6848';
         const ws = t.workspace_status || {};
         const memIds = Array.isArray(t.member_ids) ? t.member_ids : [];
 
-        const memberPillsHtml = memIds.map(mid => {
-          const baseAg = modularAgents.find(a => a.id === mid) || ALL_AGENT_PRESETS.find(a => a.id === mid) || { id: mid, name: `Agent #${mid}`, triadRole: 'BUILDER', floor: t.floor };
-          const cfg = savedCharAiConfigs[mid] || {};
-          const merged = { ...baseAg, ...cfg };
-          const plc = getAgentOfficePlacement(mid, merged.floor || t.floor);
+        const memberSubCardsHtml = memIds.map(mid => {
+          const normId = String(mid).padStart(2, '0');
+          const baseAg = modularAgents.find(a => a.id === normId) || ALL_AGENT_PRESETS.find(a => a.id === normId) || { id: normId, name: `Agent #${normId}`, triadRole: 'PART_BUILD', floor: t.floor };
+          const cfg = savedCharAiConfigs[normId] || {};
+          const merged = { ...baseAg, ...cfg, id: normId };
+          const cr = normalizeAgentPartRoleId(merged.triadRole, t.id);
+          const effRank = cr === 'LEAD' ? 'LEAD' : (merged.orgRank === 'STAFF' ? 'STAFF' : 'PART_LEAD');
+          const rkShort = effRank === 'LEAD' ? '👑 총괄' : (effRank === 'PART_LEAD' ? '⭐ 파트장' : '👤 사원');
+          const partLbl = getPartRoleDisplayLabel(cr, t.id).replace(' 담당', '');
+          const plc = getAgentOfficePlacement(normId, merged.floor || t.floor);
           return `
-            <div class="agents-member-pill" draggable="true" data-drag-aid="${escHtml(mid)}" data-select-aid="${escHtml(mid)}" title="클릭하여 하단 스튜디오에서 편집 · 드래그하여 다른 팀으로 이동">
-              <span style="width:22px;height:26px;display:inline-flex;align-items:center;justify-content:center">${CharacterEngine.render(merged)}</span>
-              <span><b style="color:${escHtml(color)}">#${escHtml(mid)}</b> ${escHtml(merged.name)}</span>
-              <span style="background:#eef2f6;color:#475569;padding:1px 5px;border-radius:4px;font-size:8.5px;font-weight:800">${escHtml(plc.floorStr)}·#${plc.seatIndex + 1}석</span>
-              ${memIds.length > 1 ? `<button type="button" class="remove-mem-btn" data-rem-tid="${escHtml(t.id)}" data-rem-aid="${escHtml(mid)}" title="이 팀에서 제외">✕</button>` : ''}
+            <div class="team-dropzone-member-card" draggable="true" data-drag-aid="${escHtml(normId)}" data-select-aid="${escHtml(normId)}" style="border-left:3px solid ${escHtml(color)}" title="클릭하여 하단 스튜디오에서 편집 · 드래그하여 다른 팀으로 이동">
+              <div style="width:32px;height:36px;flex-shrink:0;border-radius:7px;background:#f8fafc;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;overflow:hidden">${CharacterEngine.render(merged, { stance: merged.mapleAnim || 'stand1', animated: false })}</div>
+              <div style="min-width:0;flex:1;display:flex;flex-direction:column;gap:2px">
+                <div style="font-size:10.5px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:${escHtml(color)}">#${escHtml(normId)}</span> ${escHtml(merged.name)}</div>
+                <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+                  <span style="font-size:8.5px;font-weight:800;padding:1px 5px;border-radius:4px;background:${effRank === 'LEAD' ? '#fef3c7' : (effRank === 'PART_LEAD' ? '#e0f2fe' : '#f1f5f9')};color:${effRank === 'LEAD' ? '#92400e' : (effRank === 'PART_LEAD' ? '#0369a1' : '#334155')}">${escHtml(rkShort)}</span>
+                  <span style="font-size:8.5px;color:#475569;font-weight:700;white-space:nowrap">${escHtml(plc.floorStr)}·#${plc.seatIndex + 1}석</span>
+                </div>
+                <div style="font-size:8.5px;color:#0f6848;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(partLbl)}</div>
+              </div>
+              ${memIds.length > 1 ? `<button type="button" class="remove-mem-btn" data-rem-tid="${escHtml(t.id)}" data-rem-aid="${escHtml(normId)}" style="border:0;background:#fef2f2;color:#b91c1c;border-radius:5px;width:20px;height:20px;font-size:10px;font-weight:800;cursor:pointer;flex-shrink:0" title="이 팀에서 제외">✕</button>` : ''}
             </div>
           `;
         }).join('');
@@ -7799,6 +8198,7 @@
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                   <span class="team-floor-pill" style="border-color:${escHtml(color)}44;color:${escHtml(color)}">🏢 ${escHtml(t.floor)}</span>
                   <strong style="font-size:13px;color:#0f172a">${escHtml(t.name)}</strong>
+                  <span style="font-size:10px;font-weight:800;color:${escHtml(color)};background:${escHtml(color)}14;padding:2px 7px;border-radius:999px">팀원 카드 ${memIds.length}개</span>
                   ${t.is_active
             ? '<span class="team-active-pill">★ 기본 팀</span>'
             : `<button type="button" class="btn small btn-ag-set-active" data-tid="${escHtml(t.id)}" style="height:21px;padding:0 7px;font-size:9.5px">기본 팀 지정</button>`}
@@ -7817,8 +8217,8 @@
               </div>
             </div>
 
-            <div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;border-radius:9px;background:#f8fafc;border:1px dashed #cbd5e1;min-height:44px;align-items:center">
-              ${memberPillsHtml || '<span style="font-size:10px;color:#94a3b8">직원을 이 카드로 드래그하거나 아래에서 선택해 배치하세요.</span>'}
+            <div class="team-dropzone-cards-grid">
+              ${memberSubCardsHtml || '<span style="font-size:10px;color:#94a3b8;grid-column:1/-1">직원을 이 카드로 드래그하거나 아래에서 선택해 배치하세요.</span>'}
             </div>
 
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -7929,97 +8329,6 @@
             aid = nextAg.id;
           }
           await assignAgentToTeamAndPlace(aid, tid, 'add');
-        });
-      });
-    }
-
-    // [B] Render Full AI Staff Team Assignment Matrix (#agentsPlacementTableBody) — without Floor / Seat columns
-    if (tbodyEl) {
-      tbodyEl.innerHTML = modularAgents.map(ag => {
-        const belongTeams = teams.filter(t => Array.isArray(t.member_ids) && t.member_ids.includes(ag.id));
-        const primaryTid = belongTeams[0]?.id || '';
-        const cliKey = ag.cliProvider || 'claude';
-        const cliLbl = CLI_BADGE_LABELS[cliKey] || cliKey;
-        const provDiag = lastDiagnostics?.providers?.[cliKey] || null;
-        const agModelDisp = ag.cliModel
-          ? ((provDiag?.available_models || []).find(m => m.id === ag.cliModel)?.name || ag.cliModel)
-          : (provDiag?.selected_model_display || '계정 기본 모델');
-
-        const teamOpts = [
-          `<option value="" ${!primaryTid ? 'selected' : ''}>— 미배정 —</option>`,
-          ...teams.map(t => `<option value="${escHtml(t.id)}" ${t.id === primaryTid ? 'selected' : ''}>🏢 [${escHtml(t.floor)}] ${escHtml(t.name)}</option>`),
-          `<option value="__new_team__">➕ 새 팀 만들어 배정...</option>`
-        ].join('');
-
-        return `
-          <tr draggable="true" data-row-drag-aid="${escHtml(ag.id)}">
-            <td>
-              <div style="display:flex;align-items:center;gap:8px;cursor:grab">
-                <span style="color:#94a3b8;font-size:12px" title="드래그하여 위 팀 카드에 놓기">⋮⋮</span>
-                <div style="width:30px;height:34px;flex-shrink:0">${CharacterEngine.render(ag)}</div>
-                <div>
-                  <div style="font-weight:800;color:#0f172a">#${escHtml(ag.id)} ${escHtml(ag.name)}</div>
-                  ${belongTeams.length > 1 ? `<div style="font-size:9px;color:#0284c7;font-weight:700">겸임: ${belongTeams.map(x => escHtml(x.name)).join(', ')}</div>` : ''}
-                </div>
-              </div>
-            </td>
-            <td>
-              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                <select class="triad-cli-select sel-row-rank" data-aid="${escHtml(ag.id)}" style="height:27px;font-size:10px;font-weight:800;background:#fff" aria-label="직급 선택">
-                  <option value="LEAD" ${(ag.orgRank === 'LEAD' || ag.triadRole === 'LEAD') ? 'selected' : ''}>👑 총괄팀장</option>
-                  <option value="PART_LEAD" ${(ag.orgRank !== 'LEAD' && ag.orgRank !== 'STAFF' && ag.triadRole !== 'LEAD') ? 'selected' : ''}>⭐ 파트장</option>
-                  <option value="STAFF" ${ag.orgRank === 'STAFF' ? 'selected' : ''}>👤 일반사원</option>
-                </select>
-                <span class="char-cli-badge ${escHtml(cliKey)}" style="margin:0">${escHtml(ag.triadRole || 'PART_BUILD')} · ${escHtml(cliLbl)}</span>
-                <select class="triad-cli-select sel-row-model" data-aid="${escHtml(ag.id)}" style="height:27px;font-size:10px;font-weight:700;background:#f0fdf4;border-color:#86efac;color:#0f172a;min-width:195px" aria-label="세부 실행 모델 선택">
-                  ${buildSdkModelOptionsHtml(ag.cliModel, cliKey)}
-                </select>
-              </div>
-            </td>
-            <td>
-              <select class="triad-cli-select sel-row-team" data-aid="${escHtml(ag.id)}" style="height:29px;font-size:10.5px;background:#fff;min-width:190px">${teamOpts}</select>
-            </td>
-            <td>
-              <div style="display:flex;gap:5px;align-items:center">
-                <button type="button" class="btn small btn-row-focus-studio" data-aid="${escHtml(ag.id)}" style="height:26px;padding:0 8px;font-size:9.5px">⚙ 실행모델·페르소나 편집 ↓</button>
-                <a href="office.html" class="btn small" style="height:26px;padding:0 8px;font-size:9.5px;background:#f0f9ff;color:#0369a1;border-color:#7dd3fc">⬡ 오피스 ↗</a>
-              </div>
-            </td>
-          </tr>
-        `;
-      }).join('');
-
-      tbodyEl.querySelectorAll('[data-row-drag-aid]').forEach(row => {
-        row.addEventListener('dragstart', (ev) => {
-          ev.dataTransfer.setData('text/plain', row.dataset.rowDragAid);
-          ev.dataTransfer.effectAllowed = 'move';
-        });
-      });
-      tbodyEl.querySelectorAll('.sel-row-team').forEach(sel => {
-        sel.addEventListener('change', async () => {
-          const aid = sel.dataset.aid;
-          const val = sel.value;
-          if (val === '__new_team__') {
-            renderAgentsTeamPlacementBoard(ts);
-            openTeamBuilderModal(null);
-            return;
-          }
-          await assignAgentToTeamAndPlace(aid, val, 'move');
-        });
-      });
-      tbodyEl.querySelectorAll('.sel-row-rank').forEach(sel => {
-        sel.addEventListener('change', async () => {
-          await applyQuickAgentModelOrRank(sel.dataset.aid, { orgRank: sel.value }, 'table');
-        });
-      });
-      tbodyEl.querySelectorAll('.sel-row-model').forEach(sel => {
-        sel.addEventListener('change', async () => {
-          await applyQuickAgentModelOrRank(sel.dataset.aid, { cliModel: sel.value }, 'table');
-        });
-      });
-      tbodyEl.querySelectorAll('.btn-row-focus-studio').forEach(btn => {
-        btn.addEventListener('click', () => {
-          if (studioSelectAgentFn) studioSelectAgentFn(btn.dataset.aid, true);
         });
       });
     }
